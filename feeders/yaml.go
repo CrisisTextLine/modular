@@ -194,6 +194,28 @@ func (y *YamlFeeder) processStructFields(rv reflect.Value, data map[string]inter
 func (y *YamlFeeder) processField(field reflect.Value, fieldType *reflect.StructField, data map[string]interface{}, fieldPath string) error {
 	// Handle nested structs
 	switch field.Kind() {
+	case reflect.Slice:
+		if y.verboseDebug && y.logger != nil {
+			y.logger.Debug("YamlFeeder: Processing slice field", "fieldName", fieldType.Name, "fieldPath", fieldPath)
+		}
+
+		// Check if there's a yaml tag for this slice
+		if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
+			// Look for slice data using the yaml tag
+			if sliceData, found := data[yamlTag]; found {
+				if sliceArray, ok := sliceData.([]interface{}); ok {
+					return y.setSliceFromYaml(field, sliceArray, fieldType.Name, fieldPath)
+				} else {
+					if y.verboseDebug && y.logger != nil {
+						y.logger.Debug("YamlFeeder: Slice YAML data is not a []interface{}", "fieldName", fieldType.Name, "yamlTag", yamlTag, "dataType", reflect.TypeOf(sliceData))
+					}
+				}
+			} else {
+				if y.verboseDebug && y.logger != nil {
+					y.logger.Debug("YamlFeeder: Slice YAML data not found", "fieldName", fieldType.Name, "yamlTag", yamlTag)
+				}
+			}
+		}
 	case reflect.Map:
 		if y.verboseDebug && y.logger != nil {
 			y.logger.Debug("YamlFeeder: Processing map field", "fieldName", fieldType.Name, "fieldPath", fieldPath)
@@ -271,7 +293,7 @@ func (y *YamlFeeder) processField(field reflect.Value, fieldType *reflect.Struct
 	case reflect.Invalid, reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
 		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128, reflect.Array,
-		reflect.Chan, reflect.Func, reflect.Interface, reflect.Slice, reflect.String, reflect.UnsafePointer:
+		reflect.Chan, reflect.Func, reflect.Interface, reflect.String, reflect.UnsafePointer:
 		// Check for yaml tag for primitive types and other non-struct types
 		if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
 			if y.verboseDebug && y.logger != nil {
@@ -362,6 +384,71 @@ func (y *YamlFeeder) setFieldFromYaml(field reflect.Value, yamlTag string, data 
 		if y.verboseDebug && y.logger != nil {
 			y.logger.Debug("YamlFeeder: YAML value not found", "fieldName", fieldName, "yamlKey", yamlTag, "fieldPath", fieldPath)
 		}
+	}
+
+	return nil
+}
+
+// setSliceFromYaml converts a []interface{} from YAML to a properly typed slice
+func (y *YamlFeeder) setSliceFromYaml(field reflect.Value, sliceData []interface{}, fieldName, fieldPath string) error {
+	if !field.CanSet() {
+		return fmt.Errorf("cannot set slice field %s", fieldName)
+	}
+
+	// Get the element type of the slice
+	elementType := field.Type().Elem()
+
+	// Create a new slice with the correct capacity
+	newSlice := reflect.MakeSlice(field.Type(), len(sliceData), len(sliceData))
+
+	// Convert each element
+	for i, item := range sliceData {
+		elementValue := newSlice.Index(i)
+
+		if elementType.Kind() == reflect.Struct {
+			// Handle struct elements by marshaling and unmarshaling
+			if itemMap, ok := item.(map[string]interface{}); ok {
+				// Convert map to YAML and back to struct
+				yamlBytes, err := yaml.Marshal(itemMap)
+				if err != nil {
+					return fmt.Errorf("failed to marshal slice element %d: %w", i, err)
+				}
+
+				// Create new struct instance
+				newStruct := reflect.New(elementType).Interface()
+				if err := yaml.Unmarshal(yamlBytes, newStruct); err != nil {
+					return fmt.Errorf("failed to unmarshal slice element %d: %w", i, err)
+				}
+
+				// Set the struct value
+				elementValue.Set(reflect.ValueOf(newStruct).Elem())
+			} else {
+				return fmt.Errorf("slice element %d is not a map for struct conversion", i)
+			}
+		} else {
+			// Handle primitive types directly
+			elementValue.Set(reflect.ValueOf(item))
+		}
+	}
+
+	// Set the field to the new slice
+	field.Set(newSlice)
+
+	// Track field population if tracker is available
+	if y.fieldTracker != nil {
+		fp := FieldPopulation{
+			FieldPath:   fieldPath,
+			FieldName:   fieldName,
+			FieldType:   field.Type().String(),
+			FeederType:  "*feeders.YamlFeeder",
+			SourceType:  "yaml",
+			SourceKey:   fieldName, // For slices, use the field name as the source key
+			Value:       field.Interface(),
+			InstanceKey: "",
+			SearchKeys:  []string{fieldName},
+			FoundKey:    fieldName,
+		}
+		y.fieldTracker.RecordFieldPopulation(fp)
 	}
 
 	return nil

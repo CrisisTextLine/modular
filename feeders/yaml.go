@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strconv"
 
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 // YamlFeeder is a feeder that reads YAML files with optional verbose debug logging
@@ -134,8 +134,8 @@ func (y *YamlFeeder) feedWithTracking(structure interface{}) error {
 
 	// Check if we're dealing with a struct pointer and if field tracking is enabled
 	structValue := reflect.ValueOf(structure)
-	if structValue.Kind() != reflect.Ptr || structValue.Elem().Kind() != reflect.Struct || y.fieldTracker == nil {
-		// Not a struct pointer or no field tracker, fall back to standard YAML unmarshaling
+	if structValue.Kind() != reflect.Ptr || structValue.Elem().Kind() != reflect.Struct {
+		// Not a struct pointer, fall back to standard YAML unmarshaling
 		if y.verboseDebug && y.logger != nil {
 			y.logger.Debug("YamlFeeder: Using standard YAML unmarshaling", "structureType", reflect.TypeOf(structure), "hasFieldTracker", y.fieldTracker != nil)
 		}
@@ -143,6 +143,11 @@ func (y *YamlFeeder) feedWithTracking(structure interface{}) error {
 			return fmt.Errorf("failed to unmarshal YAML data: %w", err)
 		}
 		return nil
+	}
+
+	// Always use custom processing for struct pointers to handle mixed-type slices properly
+	if y.verboseDebug && y.logger != nil {
+		y.logger.Debug("YamlFeeder: Using custom YAML processing", "structureType", reflect.TypeOf(structure), "hasFieldTracker", y.fieldTracker != nil)
 	}
 
 	// Parse YAML content

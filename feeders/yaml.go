@@ -404,6 +404,57 @@ func (y *YamlFeeder) setFieldFromYaml(field reflect.Value, yamlTag string, data 
 	return nil
 }
 
+// convertValueToString converts a reflect.Value to its string representation
+// using appropriate formatting for different Go types
+func convertValueToString(value reflect.Value) string {
+	if !value.CanInterface() {
+		return "<invalid>"
+	}
+
+	switch value.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(value.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(value.Uint(), 10)
+	case reflect.Float32, reflect.Float64:
+		return strconv.FormatFloat(value.Float(), 'g', -1, 64)
+	case reflect.Bool:
+		return strconv.FormatBool(value.Bool())
+	case reflect.String:
+		return value.String()
+	case reflect.Complex64, reflect.Complex128:
+		return fmt.Sprintf("%v", value.Complex())
+	case reflect.Uintptr:
+		return fmt.Sprintf("0x%x", value.Uint())
+	case reflect.Interface:
+		if value.IsNil() {
+			return "<nil>"
+		}
+		return fmt.Sprintf("%v", value.Elem().Interface())
+	case reflect.Ptr:
+		if value.IsNil() {
+			return "<nil>"
+		}
+		return fmt.Sprintf("%v", value.Elem().Interface())
+	case reflect.Slice, reflect.Array:
+		return fmt.Sprintf("%v", value.Interface())
+	case reflect.Map:
+		return fmt.Sprintf("%v", value.Interface())
+	case reflect.Struct:
+		return fmt.Sprintf("%v", value.Interface())
+	case reflect.Chan:
+		return fmt.Sprintf("%v", value.Interface())
+	case reflect.Func:
+		return fmt.Sprintf("%v", value.Interface())
+	case reflect.UnsafePointer:
+		return fmt.Sprintf("%v", value.Interface())
+	case reflect.Invalid:
+		return "<invalid>"
+	default:
+		return fmt.Sprintf("%v", value.Interface())
+	}
+}
+
 // setSliceFromYaml converts a []interface{} from YAML to a properly typed slice
 func (y *YamlFeeder) setSliceFromYaml(field reflect.Value, sliceData []interface{}, fieldName, fieldPath string) error {
 	if !field.CanSet() {
@@ -447,52 +498,8 @@ func (y *YamlFeeder) setSliceFromYaml(field reflect.Value, sliceData []interface
 			// For string target types, always use explicit string conversion
 			// to avoid issues with Go's reflect.Value.Convert() method
 			if elementType.Kind() == reflect.String && itemValue.CanInterface() {
-				// Convert any value to string using a more robust approach
-				var strValue string
-				switch itemValue.Kind() {
-				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-					strValue = strconv.FormatInt(itemValue.Int(), 10)
-				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-					strValue = strconv.FormatUint(itemValue.Uint(), 10)
-				case reflect.Float32, reflect.Float64:
-					strValue = strconv.FormatFloat(itemValue.Float(), 'g', -1, 64)
-				case reflect.Bool:
-					strValue = strconv.FormatBool(itemValue.Bool())
-				case reflect.String:
-					strValue = itemValue.String()
-				case reflect.Complex64, reflect.Complex128:
-					strValue = fmt.Sprintf("%v", itemValue.Complex())
-				case reflect.Uintptr:
-					strValue = fmt.Sprintf("0x%x", itemValue.Uint())
-				case reflect.Interface:
-					if itemValue.IsNil() {
-						strValue = "<nil>"
-					} else {
-						strValue = fmt.Sprintf("%v", itemValue.Elem().Interface())
-					}
-				case reflect.Ptr:
-					if itemValue.IsNil() {
-						strValue = "<nil>"
-					} else {
-						strValue = fmt.Sprintf("%v", itemValue.Elem().Interface())
-					}
-				case reflect.Slice, reflect.Array:
-					strValue = fmt.Sprintf("%v", itemValue.Interface())
-				case reflect.Map:
-					strValue = fmt.Sprintf("%v", itemValue.Interface())
-				case reflect.Struct:
-					strValue = fmt.Sprintf("%v", itemValue.Interface())
-				case reflect.Chan:
-					strValue = fmt.Sprintf("%v", itemValue.Interface())
-				case reflect.Func:
-					strValue = fmt.Sprintf("%v", itemValue.Interface())
-				case reflect.UnsafePointer:
-					strValue = fmt.Sprintf("%v", itemValue.Interface())
-				case reflect.Invalid:
-					strValue = "<invalid>"
-				default:
-					strValue = fmt.Sprintf("%v", itemValue.Interface())
-				}
+				// Convert any value to string using the shared helper function
+				strValue := convertValueToString(itemValue)
 				elementValue.SetString(strValue)
 			} else if itemValue.Type().ConvertibleTo(elementType) {
 				// Try direct conversion for non-string types
@@ -526,7 +533,7 @@ func (y *YamlFeeder) setSliceFromYaml(field reflect.Value, sliceData []interface
 	return nil
 }
 
-// setMapFromYaml sets a map field value from YAML data with field tracking
+// setMapFromYaml sets a map field value from YAML with field tracking
 func (y *YamlFeeder) setMapFromYaml(field reflect.Value, yamlData map[string]interface{}, fieldName, fieldPath string) error {
 	if !field.CanSet() {
 		return wrapYamlFieldCannotBeSetError()
@@ -768,52 +775,8 @@ func (y *YamlFeeder) setSliceValue(field reflect.Value, valueReflect reflect.Val
 		if sourceElem.Type().ConvertibleTo(elemType) {
 			targetElem.Set(sourceElem.Convert(elemType))
 		} else if elemType.Kind() == reflect.String && sourceElem.CanInterface() {
-			// Convert any value to string using a more robust approach
-			var strValue string
-			switch sourceElem.Kind() {
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				strValue = strconv.FormatInt(sourceElem.Int(), 10)
-			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-				strValue = strconv.FormatUint(sourceElem.Uint(), 10)
-			case reflect.Float32, reflect.Float64:
-				strValue = strconv.FormatFloat(sourceElem.Float(), 'g', -1, 64)
-			case reflect.Bool:
-				strValue = strconv.FormatBool(sourceElem.Bool())
-			case reflect.String:
-				strValue = sourceElem.String()
-			case reflect.Complex64, reflect.Complex128:
-				strValue = fmt.Sprintf("%v", sourceElem.Complex())
-			case reflect.Uintptr:
-				strValue = fmt.Sprintf("0x%x", sourceElem.Uint())
-			case reflect.Interface:
-				if sourceElem.IsNil() {
-					strValue = "<nil>"
-				} else {
-					strValue = fmt.Sprintf("%v", sourceElem.Elem().Interface())
-				}
-			case reflect.Ptr:
-				if sourceElem.IsNil() {
-					strValue = "<nil>"
-				} else {
-					strValue = fmt.Sprintf("%v", sourceElem.Elem().Interface())
-				}
-			case reflect.Slice, reflect.Array:
-				strValue = fmt.Sprintf("%v", sourceElem.Interface())
-			case reflect.Map:
-				strValue = fmt.Sprintf("%v", sourceElem.Interface())
-			case reflect.Struct:
-				strValue = fmt.Sprintf("%v", sourceElem.Interface())
-			case reflect.Chan:
-				strValue = fmt.Sprintf("%v", sourceElem.Interface())
-			case reflect.Func:
-				strValue = fmt.Sprintf("%v", sourceElem.Interface())
-			case reflect.UnsafePointer:
-				strValue = fmt.Sprintf("%v", sourceElem.Interface())
-			case reflect.Invalid:
-				strValue = "<invalid>"
-			default:
-				strValue = fmt.Sprintf("%v", sourceElem.Interface())
-			}
+			// Convert any value to string using the shared helper function
+			strValue := convertValueToString(sourceElem)
 			targetElem.SetString(strValue)
 		} else {
 			return wrapYamlTypeConversionError(sourceElem.Type().String(), elemType.String())

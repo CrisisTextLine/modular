@@ -1,12 +1,22 @@
 package feeders
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
 	"strconv"
 
 	yaml "gopkg.in/yaml.v3"
+)
+
+// Static error definitions for YAML feeder
+var (
+	ErrCannotSetSliceField       = errors.New("cannot set slice field")
+	ErrSliceElementNotMap        = errors.New("slice element is not a map for struct conversion")
+	ErrCannotConvertSliceElement = errors.New("cannot convert slice element")
+	ErrMarshalSliceElement       = errors.New("failed to marshal slice element")
+	ErrUnmarshalSliceElement     = errors.New("failed to unmarshal slice element")
 )
 
 // YamlFeeder is a feeder that reads YAML files with optional verbose debug logging
@@ -397,7 +407,7 @@ func (y *YamlFeeder) setFieldFromYaml(field reflect.Value, yamlTag string, data 
 // setSliceFromYaml converts a []interface{} from YAML to a properly typed slice
 func (y *YamlFeeder) setSliceFromYaml(field reflect.Value, sliceData []interface{}, fieldName, fieldPath string) error {
 	if !field.CanSet() {
-		return fmt.Errorf("cannot set slice field %s", fieldName)
+		return fmt.Errorf("%w: %s", ErrCannotSetSliceField, fieldName)
 	}
 
 	// Get the element type of the slice
@@ -416,19 +426,19 @@ func (y *YamlFeeder) setSliceFromYaml(field reflect.Value, sliceData []interface
 				// Convert map to YAML and back to struct
 				yamlBytes, err := yaml.Marshal(itemMap)
 				if err != nil {
-					return fmt.Errorf("failed to marshal slice element %d: %w", i, err)
+					return fmt.Errorf("%w %d: %w", ErrMarshalSliceElement, i, err)
 				}
 
 				// Create new struct instance
 				newStruct := reflect.New(elementType).Interface()
 				if err := yaml.Unmarshal(yamlBytes, newStruct); err != nil {
-					return fmt.Errorf("failed to unmarshal slice element %d: %w", i, err)
+					return fmt.Errorf("%w %d: %w", ErrUnmarshalSliceElement, i, err)
 				}
 
 				// Set the struct value
 				elementValue.Set(reflect.ValueOf(newStruct).Elem())
 			} else {
-				return fmt.Errorf("slice element %d is not a map for struct conversion", i)
+				return fmt.Errorf("%w: element %d", ErrSliceElementNotMap, i)
 			}
 		} else {
 			// Handle primitive types with proper type conversion
@@ -450,6 +460,36 @@ func (y *YamlFeeder) setSliceFromYaml(field reflect.Value, sliceData []interface
 					strValue = strconv.FormatBool(itemValue.Bool())
 				case reflect.String:
 					strValue = itemValue.String()
+				case reflect.Complex64, reflect.Complex128:
+					strValue = fmt.Sprintf("%v", itemValue.Complex())
+				case reflect.Uintptr:
+					strValue = fmt.Sprintf("0x%x", itemValue.Uint())
+				case reflect.Interface:
+					if itemValue.IsNil() {
+						strValue = "<nil>"
+					} else {
+						strValue = fmt.Sprintf("%v", itemValue.Elem().Interface())
+					}
+				case reflect.Ptr:
+					if itemValue.IsNil() {
+						strValue = "<nil>"
+					} else {
+						strValue = fmt.Sprintf("%v", itemValue.Elem().Interface())
+					}
+				case reflect.Slice, reflect.Array:
+					strValue = fmt.Sprintf("%v", itemValue.Interface())
+				case reflect.Map:
+					strValue = fmt.Sprintf("%v", itemValue.Interface())
+				case reflect.Struct:
+					strValue = fmt.Sprintf("%v", itemValue.Interface())
+				case reflect.Chan:
+					strValue = fmt.Sprintf("%v", itemValue.Interface())
+				case reflect.Func:
+					strValue = fmt.Sprintf("%v", itemValue.Interface())
+				case reflect.UnsafePointer:
+					strValue = fmt.Sprintf("%v", itemValue.Interface())
+				case reflect.Invalid:
+					strValue = "<invalid>"
 				default:
 					strValue = fmt.Sprintf("%v", itemValue.Interface())
 				}
@@ -458,7 +498,7 @@ func (y *YamlFeeder) setSliceFromYaml(field reflect.Value, sliceData []interface
 				// Try direct conversion for non-string types
 				elementValue.Set(itemValue.Convert(elementType))
 			} else {
-				return fmt.Errorf("cannot convert slice element %d from %s to %s", i, itemValue.Type(), elementType)
+				return fmt.Errorf("%w %d from %s to %s", ErrCannotConvertSliceElement, i, itemValue.Type(), elementType)
 			}
 		}
 	}
@@ -741,6 +781,36 @@ func (y *YamlFeeder) setSliceValue(field reflect.Value, valueReflect reflect.Val
 				strValue = strconv.FormatBool(sourceElem.Bool())
 			case reflect.String:
 				strValue = sourceElem.String()
+			case reflect.Complex64, reflect.Complex128:
+				strValue = fmt.Sprintf("%v", sourceElem.Complex())
+			case reflect.Uintptr:
+				strValue = fmt.Sprintf("0x%x", sourceElem.Uint())
+			case reflect.Interface:
+				if sourceElem.IsNil() {
+					strValue = "<nil>"
+				} else {
+					strValue = fmt.Sprintf("%v", sourceElem.Elem().Interface())
+				}
+			case reflect.Ptr:
+				if sourceElem.IsNil() {
+					strValue = "<nil>"
+				} else {
+					strValue = fmt.Sprintf("%v", sourceElem.Elem().Interface())
+				}
+			case reflect.Slice, reflect.Array:
+				strValue = fmt.Sprintf("%v", sourceElem.Interface())
+			case reflect.Map:
+				strValue = fmt.Sprintf("%v", sourceElem.Interface())
+			case reflect.Struct:
+				strValue = fmt.Sprintf("%v", sourceElem.Interface())
+			case reflect.Chan:
+				strValue = fmt.Sprintf("%v", sourceElem.Interface())
+			case reflect.Func:
+				strValue = fmt.Sprintf("%v", sourceElem.Interface())
+			case reflect.UnsafePointer:
+				strValue = fmt.Sprintf("%v", sourceElem.Interface())
+			case reflect.Invalid:
+				strValue = "<invalid>"
 			default:
 				strValue = fmt.Sprintf("%v", sourceElem.Interface())
 			}

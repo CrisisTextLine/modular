@@ -132,12 +132,12 @@ func (y *YamlFeeder) feedWithTracking(structure interface{}) error {
 		return fmt.Errorf("failed to read YAML file: %w", err)
 	}
 
-	// Check if we're dealing with a struct pointer
+	// Check if we're dealing with a struct pointer and if field tracking is enabled
 	structValue := reflect.ValueOf(structure)
-	if structValue.Kind() != reflect.Ptr || structValue.Elem().Kind() != reflect.Struct {
-		// Not a struct pointer, fall back to standard YAML unmarshaling
+	if structValue.Kind() != reflect.Ptr || structValue.Elem().Kind() != reflect.Struct || y.fieldTracker == nil {
+		// Not a struct pointer or no field tracker, fall back to standard YAML unmarshaling
 		if y.verboseDebug && y.logger != nil {
-			y.logger.Debug("YamlFeeder: Not a struct pointer, using standard YAML unmarshaling", "structureType", reflect.TypeOf(structure))
+			y.logger.Debug("YamlFeeder: Using standard YAML unmarshaling", "structureType", reflect.TypeOf(structure), "hasFieldTracker", y.fieldTracker != nil)
 		}
 		if err := yaml.Unmarshal(content, structure); err != nil {
 			return fmt.Errorf("failed to unmarshal YAML data: %w", err)
@@ -204,15 +204,15 @@ func (y *YamlFeeder) processField(field reflect.Value, fieldType *reflect.Struct
 			// Look for slice data using the yaml tag
 			if sliceData, found := data[yamlTag]; found {
 				if sliceArray, ok := sliceData.([]interface{}); ok {
-					return y.setSliceFromYaml(field, sliceArray, fieldType.Name, fieldPath)
+					// Use the existing setSliceFromYaml function which handles the conversion properly
+					if err := y.setSliceFromYaml(field, sliceArray, fieldType.Name, fieldPath); err != nil {
+						return err
+					}
+					return nil
 				} else {
 					if y.verboseDebug && y.logger != nil {
 						y.logger.Debug("YamlFeeder: Slice YAML data is not a []interface{}", "fieldName", fieldType.Name, "yamlTag", yamlTag, "dataType", reflect.TypeOf(sliceData))
 					}
-				}
-			} else {
-				if y.verboseDebug && y.logger != nil {
-					y.logger.Debug("YamlFeeder: Slice YAML data not found", "fieldName", fieldType.Name, "yamlTag", yamlTag)
 				}
 			}
 		}
@@ -426,8 +426,35 @@ func (y *YamlFeeder) setSliceFromYaml(field reflect.Value, sliceData []interface
 				return fmt.Errorf("slice element %d is not a map for struct conversion", i)
 			}
 		} else {
-			// Handle primitive types directly
-			elementValue.Set(reflect.ValueOf(item))
+			// Handle primitive types with proper type conversion
+			itemValue := reflect.ValueOf(item)
+
+			// For string target types, always use explicit string conversion
+			// to avoid issues with Go's reflect.Value.Convert() method
+			if elementType.Kind() == reflect.String && itemValue.CanInterface() {
+				// Convert any value to string using a more robust approach
+				var strValue string
+				switch itemValue.Kind() {
+				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+					strValue = strconv.FormatInt(itemValue.Int(), 10)
+				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					strValue = strconv.FormatUint(itemValue.Uint(), 10)
+				case reflect.Float32, reflect.Float64:
+					strValue = strconv.FormatFloat(itemValue.Float(), 'g', -1, 64)
+				case reflect.Bool:
+					strValue = strconv.FormatBool(itemValue.Bool())
+				case reflect.String:
+					strValue = itemValue.String()
+				default:
+					strValue = fmt.Sprintf("%v", itemValue.Interface())
+				}
+				elementValue.SetString(strValue)
+			} else if itemValue.Type().ConvertibleTo(elementType) {
+				// Try direct conversion for non-string types
+				elementValue.Set(itemValue.Convert(elementType))
+			} else {
+				return fmt.Errorf("cannot convert slice element %d from %s to %s", i, itemValue.Type(), elementType)
+			}
 		}
 	}
 
@@ -548,21 +575,6 @@ func (y *YamlFeeder) setMapFromYaml(field reflect.Value, yamlData map[string]int
 		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128, reflect.Array,
 		reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Slice, reflect.String,
 		reflect.UnsafePointer:
-		// Map of primitive types - use direct conversion
-		for key, value := range yamlData {
-			keyValue := reflect.ValueOf(key)
-			valueReflect := reflect.ValueOf(value)
-
-			if valueReflect.Type().ConvertibleTo(valueType) {
-				convertedValue := valueReflect.Convert(valueType)
-				newMap.SetMapIndex(keyValue, convertedValue)
-			} else {
-				if y.verboseDebug && y.logger != nil {
-					y.logger.Debug("YamlFeeder: Cannot convert map value", "key", key, "valueType", valueReflect.Type(), "targetType", valueType)
-				}
-			}
-		}
-	default:
 		// Map of primitive types - use direct conversion
 		for key, value := range yamlData {
 			keyValue := reflect.ValueOf(key)
@@ -711,8 +723,23 @@ func (y *YamlFeeder) setSliceValue(field reflect.Value, valueReflect reflect.Val
 		if sourceElem.Type().ConvertibleTo(elemType) {
 			targetElem.Set(sourceElem.Convert(elemType))
 		} else if elemType.Kind() == reflect.String && sourceElem.CanInterface() {
-			// Convert any value to string
-			targetElem.SetString(fmt.Sprintf("%v", sourceElem.Interface()))
+			// Convert any value to string using a more robust approach
+			var strValue string
+			switch sourceElem.Kind() {
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				strValue = strconv.FormatInt(sourceElem.Int(), 10)
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+				strValue = strconv.FormatUint(sourceElem.Uint(), 10)
+			case reflect.Float32, reflect.Float64:
+				strValue = strconv.FormatFloat(sourceElem.Float(), 'g', -1, 64)
+			case reflect.Bool:
+				strValue = strconv.FormatBool(sourceElem.Bool())
+			case reflect.String:
+				strValue = sourceElem.String()
+			default:
+				strValue = fmt.Sprintf("%v", sourceElem.Interface())
+			}
+			targetElem.SetString(strValue)
 		} else {
 			return wrapYamlTypeConversionError(sourceElem.Type().String(), elemType.String())
 		}

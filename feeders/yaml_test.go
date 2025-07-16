@@ -646,3 +646,378 @@ func TestYamlFeeder_SetFieldTracker(t *testing.T) {
 		t.Error("Expected fieldTracker to be set")
 	}
 }
+
+func TestYamlFeeder_Feed_SliceFields(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	yamlContent := `
+stringSlice:
+  - "first"
+  - "second"
+  - "third"
+intSlice:
+  - 1
+  - 2
+  - 3
+boolSlice:
+  - true
+  - false
+  - true
+floatSlice:
+  - 1.1
+  - 2.2
+  - 3.3
+mixedTypeSlice:
+  - "string"
+  - 42
+  - true
+  - 3.14
+`
+	if _, err := tempFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tempFile.Close()
+
+	type Config struct {
+		StringSlice    []string  `yaml:"stringSlice"`
+		IntSlice       []int     `yaml:"intSlice"`
+		BoolSlice      []bool    `yaml:"boolSlice"`
+		FloatSlice     []float64 `yaml:"floatSlice"`
+		MixedTypeSlice []string  `yaml:"mixedTypeSlice"`
+	}
+
+	tracker := NewDefaultFieldTracker()
+	var config Config
+	feeder := NewYamlFeeder(tempFile.Name())
+	feeder.SetFieldTracker(tracker)
+	err = feeder.Feed(&config)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Test string slice
+	if len(config.StringSlice) != 3 {
+		t.Errorf("Expected 3 string items, got %d", len(config.StringSlice))
+	}
+	if config.StringSlice[0] != "first" {
+		t.Errorf("Expected first string to be 'first', got '%s'", config.StringSlice[0])
+	}
+	if config.StringSlice[2] != "third" {
+		t.Errorf("Expected third string to be 'third', got '%s'", config.StringSlice[2])
+	}
+
+	// Test int slice
+	if len(config.IntSlice) != 3 {
+		t.Errorf("Expected 3 int items, got %d", len(config.IntSlice))
+	}
+	if config.IntSlice[0] != 1 {
+		t.Errorf("Expected first int to be 1, got %d", config.IntSlice[0])
+	}
+	if config.IntSlice[2] != 3 {
+		t.Errorf("Expected third int to be 3, got %d", config.IntSlice[2])
+	}
+
+	// Test bool slice
+	if len(config.BoolSlice) != 3 {
+		t.Errorf("Expected 3 bool items, got %d", len(config.BoolSlice))
+	}
+	if !config.BoolSlice[0] {
+		t.Errorf("Expected first bool to be true, got false")
+	}
+	if config.BoolSlice[1] {
+		t.Errorf("Expected second bool to be false, got true")
+	}
+
+	// Test float slice
+	if len(config.FloatSlice) != 3 {
+		t.Errorf("Expected 3 float items, got %d", len(config.FloatSlice))
+	}
+	if config.FloatSlice[0] != 1.1 {
+		t.Errorf("Expected first float to be 1.1, got %f", config.FloatSlice[0])
+	}
+
+	// Test mixed type slice converted to strings
+	if len(config.MixedTypeSlice) != 4 {
+		t.Errorf("Expected 4 mixed type items, got %d", len(config.MixedTypeSlice))
+	}
+	if config.MixedTypeSlice[0] != "string" {
+		t.Errorf("Expected first mixed item to be 'string', got '%s'", config.MixedTypeSlice[0])
+	}
+	if config.MixedTypeSlice[1] != "42" {
+		t.Errorf("Expected second mixed item to be '42', got '%s'", config.MixedTypeSlice[1])
+	}
+	if config.MixedTypeSlice[2] != "true" {
+		t.Errorf("Expected third mixed item to be 'true', got '%s'", config.MixedTypeSlice[2])
+	}
+	if config.MixedTypeSlice[3] != "3.14" {
+		t.Errorf("Expected fourth mixed item to be '3.14', got '%s'", config.MixedTypeSlice[3])
+	}
+}
+
+func TestYamlFeeder_Feed_StructSlice(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	yamlContent := `
+servers:
+  - name: "web1"
+    host: "192.168.1.1"
+    port: 8080
+    enabled: true
+  - name: "web2"
+    host: "192.168.1.2"
+    port: 8081
+    enabled: false
+`
+	if _, err := tempFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tempFile.Close()
+
+	type Server struct {
+		Name    string `yaml:"name"`
+		Host    string `yaml:"host"`
+		Port    int    `yaml:"port"`
+		Enabled bool   `yaml:"enabled"`
+	}
+
+	type Config struct {
+		Servers []Server `yaml:"servers"`
+	}
+
+	tracker := NewDefaultFieldTracker()
+	var config Config
+	feeder := NewYamlFeeder(tempFile.Name())
+	feeder.SetFieldTracker(tracker)
+	err = feeder.Feed(&config)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if len(config.Servers) != 2 {
+		t.Errorf("Expected 2 servers, got %d", len(config.Servers))
+	}
+
+	// Check first server
+	if config.Servers[0].Name != "web1" {
+		t.Errorf("Expected first server name to be 'web1', got '%s'", config.Servers[0].Name)
+	}
+	if config.Servers[0].Host != "192.168.1.1" {
+		t.Errorf("Expected first server host to be '192.168.1.1', got '%s'", config.Servers[0].Host)
+	}
+	if config.Servers[0].Port != 8080 {
+		t.Errorf("Expected first server port to be 8080, got %d", config.Servers[0].Port)
+	}
+	if !config.Servers[0].Enabled {
+		t.Errorf("Expected first server to be enabled, got false")
+	}
+
+	// Check second server
+	if config.Servers[1].Name != "web2" {
+		t.Errorf("Expected second server name to be 'web2', got '%s'", config.Servers[1].Name)
+	}
+	if config.Servers[1].Enabled {
+		t.Errorf("Expected second server to be disabled, got true")
+	}
+}
+
+func TestYamlFeeder_Feed_EmptySlice(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	yamlContent := `
+emptySlice: []
+nullSlice: null
+`
+	if _, err := tempFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tempFile.Close()
+
+	type Config struct {
+		EmptySlice []string `yaml:"emptySlice"`
+		NullSlice  []string `yaml:"nullSlice"`
+	}
+
+	tracker := NewDefaultFieldTracker()
+	var config Config
+	feeder := NewYamlFeeder(tempFile.Name())
+	feeder.SetFieldTracker(tracker)
+	err = feeder.Feed(&config)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if config.EmptySlice == nil {
+		t.Error("Expected empty slice to be non-nil")
+	}
+	if len(config.EmptySlice) != 0 {
+		t.Errorf("Expected empty slice length to be 0, got %d", len(config.EmptySlice))
+	}
+}
+
+func TestYamlFeeder_Feed_SliceTypeConversionError(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	yamlContent := `
+intSlice:
+  - 1
+  - "not_a_number"
+  - 3
+`
+	if _, err := tempFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tempFile.Close()
+
+	type Config struct {
+		IntSlice []int `yaml:"intSlice"`
+	}
+
+	tracker := NewDefaultFieldTracker()
+	var config Config
+	feeder := NewYamlFeeder(tempFile.Name())
+	feeder.SetFieldTracker(tracker)
+	err = feeder.Feed(&config)
+	if err == nil {
+		t.Error("Expected error for invalid int conversion in slice")
+	}
+}
+
+func TestYamlFeeder_Feed_NestedSlices(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	yamlContent := `
+app:
+  environments:
+    - name: "development"
+      hosts:
+        - "dev1.example.com"
+        - "dev2.example.com"
+    - name: "production"
+      hosts:
+        - "prod1.example.com"
+        - "prod2.example.com"
+        - "prod3.example.com"
+`
+	if _, err := tempFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tempFile.Close()
+
+	type Environment struct {
+		Name  string   `yaml:"name"`
+		Hosts []string `yaml:"hosts"`
+	}
+
+	type Config struct {
+		App struct {
+			Environments []Environment `yaml:"environments"`
+		} `yaml:"app"`
+	}
+
+	tracker := NewDefaultFieldTracker()
+	var config Config
+	feeder := NewYamlFeeder(tempFile.Name())
+	feeder.SetFieldTracker(tracker)
+	err = feeder.Feed(&config)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if len(config.App.Environments) != 2 {
+		t.Errorf("Expected 2 environments, got %d", len(config.App.Environments))
+	}
+
+	// Check development environment
+	dev := config.App.Environments[0]
+	if dev.Name != "development" {
+		t.Errorf("Expected first environment name to be 'development', got '%s'", dev.Name)
+	}
+	if len(dev.Hosts) != 2 {
+		t.Errorf("Expected 2 dev hosts, got %d", len(dev.Hosts))
+	}
+	if dev.Hosts[0] != "dev1.example.com" {
+		t.Errorf("Expected first dev host to be 'dev1.example.com', got '%s'", dev.Hosts[0])
+	}
+
+	// Check production environment
+	prod := config.App.Environments[1]
+	if prod.Name != "production" {
+		t.Errorf("Expected second environment name to be 'production', got '%s'", prod.Name)
+	}
+	if len(prod.Hosts) != 3 {
+		t.Errorf("Expected 3 prod hosts, got %d", len(prod.Hosts))
+	}
+	if prod.Hosts[2] != "prod3.example.com" {
+		t.Errorf("Expected third prod host to be 'prod3.example.com', got '%s'", prod.Hosts[2])
+	}
+}
+
+func TestYamlFeeder_Feed_SliceFields_NoTracker(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	yamlContent := `
+mixedTypeSlice:
+  - "string"
+  - 42
+  - true
+  - 3.14
+`
+	if _, err := tempFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tempFile.Close()
+
+	type Config struct {
+		MixedTypeSlice []string `yaml:"mixedTypeSlice"`
+	}
+
+	// Test WITHOUT field tracking
+	var config Config
+	feeder := NewYamlFeeder(tempFile.Name())
+	// Don't set field tracker
+	err = feeder.Feed(&config)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Test mixed type slice converted to strings
+	if len(config.MixedTypeSlice) != 4 {
+		t.Errorf("Expected 4 mixed type items, got %d", len(config.MixedTypeSlice))
+	}
+	if config.MixedTypeSlice[0] != "string" {
+		t.Errorf("Expected first mixed item to be 'string', got '%s'", config.MixedTypeSlice[0])
+	}
+	if config.MixedTypeSlice[1] != "42" {
+		t.Errorf("Expected second mixed item to be '42', got '%s'", config.MixedTypeSlice[1])
+	}
+	if config.MixedTypeSlice[2] != "true" {
+		t.Errorf("Expected third mixed item to be 'true', got '%s'", config.MixedTypeSlice[2])
+	}
+	if config.MixedTypeSlice[3] != "3.14" {
+		t.Errorf("Expected fourth mixed item to be '3.14', got '%s'", config.MixedTypeSlice[3])
+	}
+}

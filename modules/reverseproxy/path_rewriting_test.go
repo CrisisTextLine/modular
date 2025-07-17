@@ -54,7 +54,7 @@ func TestBasePathRewriting(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request with the base path that should be stripped
 		req := httptest.NewRequest("GET", "http://client.example.com/api/v1/users/123", nil)
@@ -93,7 +93,7 @@ func TestBasePathRewriting(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request
 		req := httptest.NewRequest("GET", "http://client.example.com/users/123", nil)
@@ -133,7 +133,7 @@ func TestBasePathRewriting(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request with the base path that should be stripped and rewritten
 		req := httptest.NewRequest("GET", "http://client.example.com/api/v1/users/123", nil)
@@ -200,7 +200,7 @@ func TestEndpointPathRewriting(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request that exactly matches the pattern
 		req := httptest.NewRequest("GET", "http://client.example.com/api/users", nil)
@@ -244,7 +244,7 @@ func TestEndpointPathRewriting(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request that matches the wildcard pattern
 		req := httptest.NewRequest("GET", "http://client.example.com/api/users/123/profile", nil)
@@ -292,7 +292,7 @@ func TestEndpointPathRewriting(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request that matches both patterns
 		req := httptest.NewRequest("GET", "http://client.example.com/api/users/123", nil)
@@ -337,7 +337,7 @@ func TestEndpointPathRewriting(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request that doesn't match any pattern
 		req := httptest.NewRequest("GET", "http://client.example.com/api/orders/456", nil)
@@ -405,7 +405,7 @@ func TestCombinedPathRewriting(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request
 		req := httptest.NewRequest("GET", "http://client.example.com/api/v1/users/123", nil)
@@ -450,7 +450,7 @@ func TestCombinedPathRewriting(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request
 		req := httptest.NewRequest("GET", "http://client.example.com/users/123", nil)
@@ -555,7 +555,7 @@ func TestTenantPathRewriting(t *testing.T) {
 		// Create the reverse proxy for global backend
 		globalURL, err := url.Parse(globalBackendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(globalURL)
+		proxy := module.createReverseProxyForBackend(globalURL, "", "")
 
 		// Create a request without tenant header
 		req := httptest.NewRequest("GET", "http://client.example.com/api/v1/users/123", nil)
@@ -585,7 +585,7 @@ func TestTenantPathRewriting(t *testing.T) {
 		// Create the reverse proxy for tenant backend
 		tenantURL, err := url.Parse(tenantBackendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(tenantURL)
+		proxy := module.createReverseProxyForBackend(tenantURL, "", "")
 
 		// Create a request with tenant header
 		req := httptest.NewRequest("GET", "http://client.example.com/api/v2/users/456", nil)
@@ -616,7 +616,7 @@ func TestTenantPathRewriting(t *testing.T) {
 		// Create the reverse proxy for tenant backend
 		tenantURL, err := url.Parse(tenantBackendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(tenantURL)
+		proxy := module.createReverseProxyForBackend(tenantURL, "", "")
 
 		// Create a request with tenant header but using global base path
 		req := httptest.NewRequest("GET", "http://client.example.com/api/v1/users/789", nil)

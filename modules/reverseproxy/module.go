@@ -209,7 +209,7 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 				continue
 			}
 
-			proxy := m.createReverseProxy(backendURL)
+			proxy := m.createReverseProxyForBackend(backendURL, backendID, "")
 
 			// Ensure tenant map exists for this backend
 			if _, exists := m.tenantBackendProxies[tenantID]; !exists {
@@ -802,9 +802,8 @@ func (m *ReverseProxyModule) SetHttpClient(client *http.Client) {
 	}
 }
 
-// createReverseProxy is a helper method that creates a new reverse proxy with the module's configured transport.
-// This ensures that all proxies use the same transport settings, even if created after SetHttpClient is called.
-func (m *ReverseProxyModule) createReverseProxy(target *url.URL) *httputil.ReverseProxy {
+// createReverseProxyForBackend creates a reverse proxy for a specific backend with per-backend configuration.
+func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backendID string, endpoint string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
 	// Use the module's custom transport if available
@@ -838,7 +837,7 @@ func (m *ReverseProxyModule) createReverseProxy(target *url.URL) *httputil.Rever
 		}
 
 		// Apply path rewriting if configured
-		rewrittenPath := m.applyPathRewriting(req.URL.Path, config)
+		rewrittenPath := m.applyPathRewritingForBackend(req.URL.Path, config, backendID, endpoint)
 
 		// Set up the request URL
 		req.URL.Scheme = originalTarget.Scheme
@@ -852,10 +851,8 @@ func (m *ReverseProxyModule) createReverseProxy(target *url.URL) *httputil.Rever
 			req.URL.RawQuery = originalTarget.RawQuery
 		}
 
-		// DO NOT set the Host header to the backend host - this fixes the hostname forwarding issue
-		// The original request's Host header will be preserved, which is what we want
-		// If the original request doesn't have a Host header, it will be set by the HTTP client
-		// based on the request URL during request execution.
+		// Apply header rewriting
+		m.applyHeaderRewritingForBackend(req, config, backendID, endpoint, &originalTarget)
 	}
 
 	// If a custom director factory is available, use it (this is for advanced use cases)
@@ -900,14 +897,29 @@ func (m *ReverseProxyModule) createReverseProxy(target *url.URL) *httputil.Rever
 // createBackendProxy creates a reverse proxy for the specified backend ID and service URL.
 // It parses the URL, creates the proxy, and stores it in the backendProxies map.
 func (m *ReverseProxyModule) createBackendProxy(backendID, serviceURL string) error {
-	// Create reverse proxy for this backend
-	backendURL, err := url.Parse(serviceURL)
+	// Check if we have backend-specific configuration
+	var backendURL *url.URL
+	var err error
+
+	if m.config.BackendConfigs != nil {
+		if backendConfig, exists := m.config.BackendConfigs[backendID]; exists && backendConfig.URL != "" {
+			// Use URL from backend configuration
+			backendURL, err = url.Parse(backendConfig.URL)
+		} else {
+			// Fall back to service URL from BackendServices
+			backendURL, err = url.Parse(serviceURL)
+		}
+	} else {
+		// Use service URL from BackendServices
+		backendURL, err = url.Parse(serviceURL)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to parse %s URL %s: %w", backendID, serviceURL, err)
 	}
 
 	// Set up proxy for this backend
-	proxy := m.createReverseProxy(backendURL)
+	proxy := m.createReverseProxyForBackend(backendURL, backendID, "")
 
 	// Store the proxy for this backend
 	m.backendProxies[backendID] = proxy
@@ -968,6 +980,146 @@ func (m *ReverseProxyModule) applyPathRewriting(originalPath string, config *Rev
 	}
 
 	return rewrittenPath
+}
+
+// applyPathRewritingForBackend applies path rewriting rules for a specific backend and endpoint
+func (m *ReverseProxyModule) applyPathRewritingForBackend(originalPath string, config *ReverseProxyConfig, backendID string, endpoint string) string {
+	if config == nil {
+		return originalPath
+	}
+
+	rewrittenPath := originalPath
+
+	// Check if we have backend-specific configuration
+	if config.BackendConfigs != nil && backendID != "" {
+		if backendConfig, exists := config.BackendConfigs[backendID]; exists {
+			// Apply backend-specific path rewriting first
+			rewrittenPath = m.applySpecificPathRewriting(rewrittenPath, &backendConfig.PathRewriting)
+
+			// Then check for endpoint-specific configuration
+			if endpoint != "" && backendConfig.Endpoints != nil {
+				if endpointConfig, exists := backendConfig.Endpoints[endpoint]; exists {
+					// Apply endpoint-specific path rewriting
+					rewrittenPath = m.applySpecificPathRewriting(rewrittenPath, &endpointConfig.PathRewriting)
+				}
+			}
+
+			return rewrittenPath
+		}
+	}
+
+	// Fall back to global path rewriting (for backward compatibility)
+	return m.applyPathRewriting(rewrittenPath, config)
+}
+
+// applySpecificPathRewriting applies path rewriting rules from a specific PathRewritingConfig
+func (m *ReverseProxyModule) applySpecificPathRewriting(originalPath string, config *PathRewritingConfig) string {
+	if config == nil {
+		return originalPath
+	}
+
+	rewrittenPath := originalPath
+
+	// Apply base path stripping first
+	if config.StripBasePath != "" {
+		if strings.HasPrefix(rewrittenPath, config.StripBasePath) {
+			rewrittenPath = rewrittenPath[len(config.StripBasePath):]
+			// Ensure the path starts with /
+			if !strings.HasPrefix(rewrittenPath, "/") {
+				rewrittenPath = "/" + rewrittenPath
+			}
+		}
+	}
+
+	// Apply base path rewriting
+	if config.BasePathRewrite != "" {
+		// If there's a base path rewrite, prepend it to the path
+		rewrittenPath = singleJoiningSlash(config.BasePathRewrite, rewrittenPath)
+	}
+
+	// Apply endpoint-specific rewriting rules
+	if config.EndpointRewrites != nil {
+		for _, rule := range config.EndpointRewrites {
+			if rule.Pattern != "" && rule.Replacement != "" {
+				// Check if the path matches the pattern
+				if m.matchesPattern(rewrittenPath, rule.Pattern) {
+					// Apply the replacement
+					rewrittenPath = m.applyPatternReplacement(rewrittenPath, rule.Pattern, rule.Replacement)
+					break // Apply only the first matching rule
+				}
+			}
+		}
+	}
+
+	return rewrittenPath
+}
+
+// applyHeaderRewritingForBackend applies header rewriting rules for a specific backend and endpoint
+func (m *ReverseProxyModule) applyHeaderRewritingForBackend(req *http.Request, config *ReverseProxyConfig, backendID string, endpoint string, target *url.URL) {
+	if config == nil {
+		return
+	}
+
+	// Check if we have backend-specific configuration
+	if config.BackendConfigs != nil && backendID != "" {
+		if backendConfig, exists := config.BackendConfigs[backendID]; exists {
+			// Apply backend-specific header rewriting first
+			m.applySpecificHeaderRewriting(req, &backendConfig.HeaderRewriting, target)
+
+			// Then check for endpoint-specific configuration
+			if endpoint != "" && backendConfig.Endpoints != nil {
+				if endpointConfig, exists := backendConfig.Endpoints[endpoint]; exists {
+					// Apply endpoint-specific header rewriting (this overrides backend-specific)
+					m.applySpecificHeaderRewriting(req, &endpointConfig.HeaderRewriting, target)
+				}
+			}
+
+			return
+		}
+	}
+
+	// Fall back to default hostname handling (preserve original)
+	// This preserves the original request's Host header, which is what we want by default
+	// If the original request doesn't have a Host header, it will be set by the HTTP client
+	// based on the request URL during request execution.
+}
+
+// applySpecificHeaderRewriting applies header rewriting rules from a specific HeaderRewritingConfig
+func (m *ReverseProxyModule) applySpecificHeaderRewriting(req *http.Request, config *HeaderRewritingConfig, target *url.URL) {
+	if config == nil {
+		return
+	}
+
+	// Handle hostname configuration
+	switch config.HostnameHandling {
+	case HostnameUseBackend:
+		// Set the Host header to the backend's hostname
+		req.Host = target.Host
+	case HostnameUseCustom:
+		// Set the Host header to the custom hostname
+		if config.CustomHostname != "" {
+			req.Host = config.CustomHostname
+		}
+	case HostnamePreserveOriginal:
+		fallthrough
+	default:
+		// Do nothing - preserve the original Host header
+		// This is the default behavior
+	}
+
+	// Apply custom header setting
+	if config.SetHeaders != nil {
+		for headerName, headerValue := range config.SetHeaders {
+			req.Header.Set(headerName, headerValue)
+		}
+	}
+
+	// Apply header removal
+	if config.RemoveHeaders != nil {
+		for _, headerName := range config.RemoveHeaders {
+			req.Header.Del(headerName)
+		}
+	}
 }
 
 // matchesPattern checks if a path matches a pattern (supports basic wildcards)

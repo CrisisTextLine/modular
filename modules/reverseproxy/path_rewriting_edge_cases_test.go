@@ -53,7 +53,7 @@ func TestPathRewritingEdgeCases(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request
 		req := httptest.NewRequest("GET", "http://client.example.com/api/users/123", nil)
@@ -92,7 +92,7 @@ func TestPathRewritingEdgeCases(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request with a path that doesn't match the strip pattern
 		req := httptest.NewRequest("GET", "http://client.example.com/v1/users/123", nil)
@@ -131,7 +131,7 @@ func TestPathRewritingEdgeCases(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request to the root path
 		req := httptest.NewRequest("GET", "http://client.example.com/", nil)
@@ -170,7 +170,7 @@ func TestPathRewritingEdgeCases(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request with multiple slashes
 		req := httptest.NewRequest("GET", "http://client.example.com//users///123", nil)
@@ -209,7 +209,7 @@ func TestPathRewritingEdgeCases(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request where the entire path matches the strip pattern
 		req := httptest.NewRequest("GET", "http://client.example.com/api/users", nil)
@@ -239,7 +239,7 @@ func TestPathRewritingEdgeCases(t *testing.T) {
 		// Create the reverse proxy
 		backendURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxy(backendURL)
+		proxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 		// Create a request
 		req := httptest.NewRequest("GET", "http://client.example.com/api/users/123", nil)

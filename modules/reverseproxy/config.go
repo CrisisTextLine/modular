@@ -21,8 +21,6 @@ type ReverseProxyConfig struct {
 	MetricsEndpoint        string                          `json:"metrics_endpoint" yaml:"metrics_endpoint" toml:"metrics_endpoint" env:"METRICS_ENDPOINT"`
 	// BackendConfigs defines per-backend configurations including path rewriting and header rewriting
 	BackendConfigs map[string]BackendServiceConfig `json:"backend_configs" yaml:"backend_configs" toml:"backend_configs"`
-	// PathRewriting provides global path rewriting configuration (deprecated - use BackendConfigs)
-	PathRewriting PathRewritingConfig `json:"path_rewriting" yaml:"path_rewriting" toml:"path_rewriting"`
 }
 
 // CompositeRoute defines a route that combines responses from multiple backends.

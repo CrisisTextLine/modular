@@ -446,3 +446,362 @@ func TestPerEndpointConfiguration(t *testing.T) {
 			"Backend should receive endpoint-specific hostname")
 	})
 }
+
+// TestHeaderRewritingEdgeCases tests edge cases for header rewriting functionality
+func TestHeaderRewritingEdgeCases(t *testing.T) {
+	// Track received headers
+	var receivedHeaders http.Header
+	var receivedHost string
+
+	// Mock backend server
+	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Capture all headers
+		receivedHeaders = r.Header.Clone()
+		// Capture the Host field separately
+		receivedHost = r.Host
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"backend response"}`))
+	}))
+	defer backendServer.Close()
+
+	// Create module
+	module := NewModule()
+
+	t.Run("NilHeaderConfiguration", func(t *testing.T) {
+		// Reset received headers
+		receivedHeaders = nil
+
+		// Create proxy with nil header configuration
+		config := &ReverseProxyConfig{
+			BackendServices: map[string]string{
+				"api": backendServer.URL,
+			},
+			BackendConfigs: map[string]BackendServiceConfig{
+				"api": {
+					URL:             backendServer.URL,
+					HeaderRewriting: HeaderRewritingConfig{
+						// All fields are nil/empty
+					},
+				},
+			},
+			TenantIDHeader: "X-Tenant-ID",
+		}
+		module.config = config
+
+		apiURL, err := url.Parse(backendServer.URL)
+		require.NoError(t, err)
+
+		// Create proxy
+		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+
+		// Create request with headers
+		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
+		req.Host = "client.example.com"
+		req.Header.Set("X-Original-Header", "original-value")
+
+		// Process request
+		w := httptest.NewRecorder()
+		proxy.ServeHTTP(w, req)
+
+		// Verify response
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Original headers should be preserved
+		assert.Equal(t, "original-value", receivedHeaders.Get("X-Original-Header"))
+		// Host should be preserved (original behavior)
+		assert.Equal(t, "client.example.com", receivedHost)
+	})
+
+	t.Run("EmptyHeaderMaps", func(t *testing.T) {
+		// Reset received headers
+		receivedHeaders = nil
+
+		// Create proxy with empty header maps
+		config := &ReverseProxyConfig{
+			BackendServices: map[string]string{
+				"api": backendServer.URL,
+			},
+			BackendConfigs: map[string]BackendServiceConfig{
+				"api": {
+					URL: backendServer.URL,
+					HeaderRewriting: HeaderRewritingConfig{
+						HostnameHandling: HostnamePreserveOriginal,
+						SetHeaders:       make(map[string]string), // Empty map
+						RemoveHeaders:    make([]string, 0),       // Empty slice
+					},
+				},
+			},
+			TenantIDHeader: "X-Tenant-ID",
+		}
+		module.config = config
+
+		apiURL, err := url.Parse(backendServer.URL)
+		require.NoError(t, err)
+
+		// Create proxy
+		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+
+		// Create request with headers
+		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
+		req.Host = "client.example.com"
+		req.Header.Set("X-Original-Header", "original-value")
+
+		// Process request
+		w := httptest.NewRecorder()
+		proxy.ServeHTTP(w, req)
+
+		// Verify response
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Original headers should be preserved
+		assert.Equal(t, "original-value", receivedHeaders.Get("X-Original-Header"))
+		assert.Equal(t, "client.example.com", receivedHost)
+	})
+
+	t.Run("CaseInsensitiveHeaderRemoval", func(t *testing.T) {
+		// Reset received headers
+		receivedHeaders = nil
+
+		// Create proxy with case-insensitive header removal
+		config := &ReverseProxyConfig{
+			BackendServices: map[string]string{
+				"api": backendServer.URL,
+			},
+			BackendConfigs: map[string]BackendServiceConfig{
+				"api": {
+					URL: backendServer.URL,
+					HeaderRewriting: HeaderRewritingConfig{
+						RemoveHeaders: []string{
+							"x-remove-me",       // lowercase
+							"X-REMOVE-ME-TOO",   // uppercase
+							"X-Remove-Me-Three", // mixed case
+						},
+					},
+				},
+			},
+			TenantIDHeader: "X-Tenant-ID",
+		}
+		module.config = config
+
+		apiURL, err := url.Parse(backendServer.URL)
+		require.NoError(t, err)
+
+		// Create proxy
+		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+
+		// Create request with headers in different cases
+		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
+		req.Host = "client.example.com"
+		req.Header.Set("X-Remove-Me", "should-be-removed")
+		req.Header.Set("x-remove-me-too", "should-be-removed-too")
+		req.Header.Set("X-remove-me-three", "should-be-removed-three")
+		req.Header.Set("X-Keep-Me", "should-be-kept")
+
+		// Process request
+		w := httptest.NewRecorder()
+		proxy.ServeHTTP(w, req)
+
+		// Verify response
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Headers should be removed (case-insensitive)
+		assert.Empty(t, receivedHeaders.Get("X-Remove-Me"))
+		assert.Empty(t, receivedHeaders.Get("X-Remove-Me-Too"))
+		assert.Empty(t, receivedHeaders.Get("X-Remove-Me-Three"))
+
+		// Other headers should be kept
+		assert.Equal(t, "should-be-kept", receivedHeaders.Get("X-Keep-Me"))
+	})
+
+	t.Run("HeaderOverrideAndRemoval", func(t *testing.T) {
+		// Reset received headers
+		receivedHeaders = nil
+		receivedHost = ""
+
+		// Create proxy that both sets and removes headers
+		config := &ReverseProxyConfig{
+			BackendServices: map[string]string{
+				"api": backendServer.URL,
+			},
+			BackendConfigs: map[string]BackendServiceConfig{
+				"api": {
+					URL: backendServer.URL,
+					HeaderRewriting: HeaderRewritingConfig{
+						SetHeaders: map[string]string{
+							"X-Override-Me": "new-value",
+							"X-New-Header":  "new-header-value",
+						},
+						RemoveHeaders: []string{
+							"X-Remove-Me",
+							"X-Override-Me", // Try to remove a header we're also setting
+						},
+					},
+				},
+			},
+			TenantIDHeader: "X-Tenant-ID",
+		}
+		module.config = config
+
+		apiURL, err := url.Parse(backendServer.URL)
+		require.NoError(t, err)
+
+		// Create proxy
+		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+
+		// Create request
+		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
+		req.Host = "client.example.com"
+		req.Header.Set("X-Override-Me", "original-value")
+		req.Header.Set("X-Remove-Me", "remove-this")
+
+		// Process request
+		w := httptest.NewRecorder()
+		proxy.ServeHTTP(w, req)
+
+		// Verify response
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Set headers should be applied first, then removal
+		// Since X-Override-Me is in the removal list, it should be removed even if set
+		assert.Empty(t, receivedHeaders.Get("X-Override-Me"),
+			"Header should be removed since it's in the removal list")
+		assert.Equal(t, "new-header-value", receivedHeaders.Get("X-New-Header"))
+		// Removed headers should be gone
+		assert.Empty(t, receivedHeaders.Get("X-Remove-Me"))
+	})
+
+	t.Run("HostnameHandlingModes", func(t *testing.T) {
+		testCases := []struct {
+			name             string
+			hostnameHandling HostnameHandlingMode
+			customHostname   string
+			expectedHost     string
+		}{
+			{
+				name:             "PreserveOriginal",
+				hostnameHandling: HostnamePreserveOriginal,
+				customHostname:   "",
+				expectedHost:     "client.example.com",
+			},
+			{
+				name:             "UseBackend",
+				hostnameHandling: HostnameUseBackend,
+				customHostname:   "",
+				expectedHost:     "backend.example.com", // This will be the backend server's host
+			},
+			{
+				name:             "UseCustom",
+				hostnameHandling: HostnameUseCustom,
+				customHostname:   "custom.example.com",
+				expectedHost:     "custom.example.com",
+			},
+			{
+				name:             "UseCustomWithEmptyCustom",
+				hostnameHandling: HostnameUseCustom,
+				customHostname:   "",
+				expectedHost:     "client.example.com", // Should fallback to original
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Reset received headers
+				receivedHeaders = nil
+
+				// Create proxy with specific hostname handling
+				config := &ReverseProxyConfig{
+					BackendServices: map[string]string{
+						"api": backendServer.URL,
+					},
+					BackendConfigs: map[string]BackendServiceConfig{
+						"api": {
+							URL: backendServer.URL,
+							HeaderRewriting: HeaderRewritingConfig{
+								HostnameHandling: tc.hostnameHandling,
+								CustomHostname:   tc.customHostname,
+							},
+						},
+					},
+					TenantIDHeader: "X-Tenant-ID",
+				}
+				module.config = config
+
+				apiURL, err := url.Parse(backendServer.URL)
+				require.NoError(t, err)
+
+				// Create proxy
+				proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+
+				// Create request
+				req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
+				req.Host = "client.example.com"
+
+				// Process request
+				w := httptest.NewRecorder()
+				proxy.ServeHTTP(w, req)
+
+				// Verify response
+				resp := w.Result()
+				assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+				// Check hostname handling
+				if tc.hostnameHandling == HostnameUseBackend {
+					// For backend hostname, we expect the host from the backend URL
+					backendURL, _ := url.Parse(backendServer.URL)
+					assert.Equal(t, backendURL.Host, receivedHost)
+				} else {
+					assert.Equal(t, tc.expectedHost, receivedHost)
+				}
+			})
+		}
+	})
+
+	t.Run("MultipleHeaderValues", func(t *testing.T) {
+		// Reset received headers
+		receivedHeaders = nil
+
+		// Create proxy
+		config := &ReverseProxyConfig{
+			BackendServices: map[string]string{
+				"api": backendServer.URL,
+			},
+			BackendConfigs: map[string]BackendServiceConfig{
+				"api": {
+					URL: backendServer.URL,
+					HeaderRewriting: HeaderRewritingConfig{
+						SetHeaders: map[string]string{
+							"X-Multiple": "value1,value2,value3",
+						},
+					},
+				},
+			},
+			TenantIDHeader: "X-Tenant-ID",
+		}
+		module.config = config
+
+		apiURL, err := url.Parse(backendServer.URL)
+		require.NoError(t, err)
+
+		// Create proxy
+		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+
+		// Create request
+		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
+		req.Host = "client.example.com"
+
+		// Process request
+		w := httptest.NewRecorder()
+		proxy.ServeHTTP(w, req)
+
+		// Verify response
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Check multiple values
+		assert.Equal(t, "value1,value2,value3", receivedHeaders.Get("X-Multiple"))
+	})
+}

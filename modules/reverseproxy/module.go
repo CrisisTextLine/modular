@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/gobwas/glob"
 )
 
 // ReverseProxyModule provides a modular reverse proxy implementation with support for
@@ -940,48 +941,6 @@ func singleJoiningSlash(a, b string) string {
 	return a + b
 }
 
-// applyPathRewriting applies path rewriting rules to the given path based on configuration
-func (m *ReverseProxyModule) applyPathRewriting(originalPath string, config *ReverseProxyConfig) string {
-	if config == nil {
-		return originalPath
-	}
-
-	rewrittenPath := originalPath
-
-	// Apply base path stripping first
-	if config.PathRewriting.StripBasePath != "" {
-		if strings.HasPrefix(rewrittenPath, config.PathRewriting.StripBasePath) {
-			rewrittenPath = rewrittenPath[len(config.PathRewriting.StripBasePath):]
-			// Ensure the path starts with /
-			if !strings.HasPrefix(rewrittenPath, "/") {
-				rewrittenPath = "/" + rewrittenPath
-			}
-		}
-	}
-
-	// Apply base path rewriting
-	if config.PathRewriting.BasePathRewrite != "" {
-		// If there's a base path rewrite, prepend it to the path
-		rewrittenPath = singleJoiningSlash(config.PathRewriting.BasePathRewrite, rewrittenPath)
-	}
-
-	// Apply endpoint-specific rewriting rules
-	if config.PathRewriting.EndpointRewrites != nil {
-		for _, rule := range config.PathRewriting.EndpointRewrites {
-			if rule.Pattern != "" && rule.Replacement != "" {
-				// Check if the path matches the pattern
-				if m.matchesPattern(rewrittenPath, rule.Pattern) {
-					// Apply the replacement
-					rewrittenPath = m.applyPatternReplacement(rewrittenPath, rule.Pattern, rule.Replacement)
-					break // Apply only the first matching rule
-				}
-			}
-		}
-	}
-
-	return rewrittenPath
-}
-
 // applyPathRewritingForBackend applies path rewriting rules for a specific backend and endpoint
 func (m *ReverseProxyModule) applyPathRewritingForBackend(originalPath string, config *ReverseProxyConfig, backendID string, endpoint string) string {
 	if config == nil {
@@ -1008,8 +967,8 @@ func (m *ReverseProxyModule) applyPathRewritingForBackend(originalPath string, c
 		}
 	}
 
-	// Fall back to global path rewriting (for backward compatibility)
-	return m.applyPathRewriting(rewrittenPath, config)
+	// No specific configuration found, return original path
+	return originalPath
 }
 
 // applySpecificPathRewriting applies path rewriting rules from a specific PathRewritingConfig
@@ -1122,26 +1081,15 @@ func (m *ReverseProxyModule) applySpecificHeaderRewriting(req *http.Request, con
 	}
 }
 
-// matchesPattern checks if a path matches a pattern (supports basic wildcards)
+// matchesPattern checks if a path matches a pattern using glob pattern matching
 func (m *ReverseProxyModule) matchesPattern(path, pattern string) bool {
-	// Simple exact match
-	if path == pattern {
-		return true
+	// Use glob library for more efficient and feature-complete pattern matching
+	g, err := glob.Compile(pattern)
+	if err != nil {
+		// Fallback to simple string matching if glob compilation fails
+		return path == pattern
 	}
-
-	// If pattern ends with /* it's a prefix match
-	if strings.HasSuffix(pattern, "/*") {
-		prefix := pattern[:len(pattern)-2]
-		return strings.HasPrefix(path, prefix)
-	}
-
-	// If pattern ends with * it's a prefix match
-	if strings.HasSuffix(pattern, "*") {
-		prefix := pattern[:len(pattern)-1]
-		return strings.HasPrefix(path, prefix)
-	}
-
-	return false
+	return g.Match(path)
 }
 
 // applyPatternReplacement applies a pattern replacement to a path
@@ -1151,7 +1099,18 @@ func (m *ReverseProxyModule) applyPatternReplacement(path, pattern, replacement 
 		return replacement
 	}
 
-	// If pattern ends with /* or *, replace the prefix
+	// Use glob to match and extract parts for replacement
+	g, err := glob.Compile(pattern)
+	if err != nil {
+		// Fallback to simple replacement if glob compilation fails
+		return replacement
+	}
+
+	if !g.Match(path) {
+		return path
+	}
+
+	// Handle common patterns efficiently
 	if strings.HasSuffix(pattern, "/*") {
 		prefix := pattern[:len(pattern)-2]
 		if strings.HasPrefix(path, prefix) {
@@ -1166,7 +1125,8 @@ func (m *ReverseProxyModule) applyPatternReplacement(path, pattern, replacement 
 		}
 	}
 
-	return path
+	// For exact matches or simple patterns, use replacement
+	return replacement
 }
 
 // createBackendProxyHandler creates an http.HandlerFunc that handles proxying requests
@@ -1612,9 +1572,7 @@ func mergeConfigs(global, tenant *ReverseProxyConfig) *ReverseProxyConfig {
 		Routes:                 make(map[string]string),
 		CompositeRoutes:        make(map[string]CompositeRoute),
 		BackendCircuitBreakers: make(map[string]CircuitBreakerConfig),
-		PathRewriting: PathRewritingConfig{
-			EndpointRewrites: make(map[string]EndpointRewriteRule),
-		},
+		BackendConfigs:         make(map[string]BackendServiceConfig),
 	}
 
 	// Copy global backend services
@@ -1725,26 +1683,12 @@ func mergeConfigs(global, tenant *ReverseProxyConfig) *ReverseProxyConfig {
 		}
 	}
 
-	// Merge path rewriting configuration - tenant settings override global ones
-	merged.PathRewriting = global.PathRewriting
-	if tenant.PathRewriting.StripBasePath != "" {
-		merged.PathRewriting.StripBasePath = tenant.PathRewriting.StripBasePath
+	// Merge backend configurations - tenant settings override global ones
+	for backendID, globalConfig := range global.BackendConfigs {
+		merged.BackendConfigs[backendID] = globalConfig
 	}
-	if tenant.PathRewriting.BasePathRewrite != "" {
-		merged.PathRewriting.BasePathRewrite = tenant.PathRewriting.BasePathRewrite
-	}
-	if tenant.PathRewriting.EndpointRewrites != nil {
-		if merged.PathRewriting.EndpointRewrites == nil {
-			merged.PathRewriting.EndpointRewrites = make(map[string]EndpointRewriteRule)
-		}
-		// Copy global rules first
-		for pattern, rule := range global.PathRewriting.EndpointRewrites {
-			merged.PathRewriting.EndpointRewrites[pattern] = rule
-		}
-		// Override with tenant-specific rules
-		for pattern, rule := range tenant.PathRewriting.EndpointRewrites {
-			merged.PathRewriting.EndpointRewrites[pattern] = rule
-		}
+	for backendID, tenantConfig := range tenant.BackendConfigs {
+		merged.BackendConfigs[backendID] = tenantConfig
 	}
 
 	return merged

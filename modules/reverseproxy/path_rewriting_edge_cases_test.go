@@ -26,7 +26,7 @@ func TestPathRewritingEdgeCases(t *testing.T) {
 			"message": "backend response",
 			"path":    r.URL.Path,
 		}
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer backendServer.Close()
 

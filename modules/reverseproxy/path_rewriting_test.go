@@ -27,7 +27,7 @@ func TestBasePathRewriting(t *testing.T) {
 			"message": "backend response",
 			"path":    r.URL.Path,
 		}
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer backendServer.Close()
 
@@ -168,7 +168,7 @@ func TestEndpointPathRewriting(t *testing.T) {
 			"message": "backend response",
 			"path":    r.URL.Path,
 		}
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer backendServer.Close()
 
@@ -372,7 +372,7 @@ func TestCombinedPathRewriting(t *testing.T) {
 			"message": "backend response",
 			"path":    r.URL.Path,
 		}
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer backendServer.Close()
 
@@ -487,7 +487,7 @@ func TestTenantPathRewriting(t *testing.T) {
 			"message": "global backend response",
 			"path":    r.URL.Path,
 		}
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer globalBackendServer.Close()
 
@@ -501,7 +501,7 @@ func TestTenantPathRewriting(t *testing.T) {
 			"message": "tenant backend response",
 			"path":    r.URL.Path,
 		}
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer tenantBackendServer.Close()
 
@@ -572,7 +572,7 @@ func TestTenantPathRewriting(t *testing.T) {
 		// The backend should receive path processed by global configuration
 		assert.Equal(t, "/global/users/123", receivedPath,
 			"Global backend should receive path processed by global configuration")
-		assert.Equal(t, "", receivedTenantHeader,
+		assert.Empty(t, receivedTenantHeader,
 			"Global backend should not receive tenant header")
 	})
 

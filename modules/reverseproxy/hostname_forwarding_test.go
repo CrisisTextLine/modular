@@ -25,7 +25,7 @@ func TestHostnameNotForwarded(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message":"backend response","host":"` + r.Host + `"}`))
+		_, _ = w.Write([]byte(`{"message":"backend response","host":"` + r.Host + `"}`))
 	}))
 	defer backendServer.Close()
 
@@ -135,7 +135,7 @@ func TestHostnameForwardingWithTenants(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message":"global backend","host":"` + r.Host + `"}`))
+		_, _ = w.Write([]byte(`{"message":"global backend","host":"` + r.Host + `"}`))
 	}))
 	defer globalBackendServer.Close()
 
@@ -145,7 +145,7 @@ func TestHostnameForwardingWithTenants(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message":"tenant backend","host":"` + r.Host + `"}`))
+		_, _ = w.Write([]byte(`{"message":"tenant backend","host":"` + r.Host + `"}`))
 	}))
 	defer tenantBackendServer.Close()
 
@@ -198,7 +198,7 @@ func TestHostnameForwardingWithTenants(t *testing.T) {
 		// Verify the Host header received by global backend
 		assert.Equal(t, "client.example.com", receivedHost,
 			"Global backend should receive original Host header")
-		assert.Equal(t, "", receivedTenantHeader,
+		assert.Empty(t, receivedTenantHeader,
 			"Global backend should not receive tenant header")
 	})
 
@@ -252,7 +252,7 @@ func TestHostnameForwardingComparisonWithDefault(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message":"backend response","host":"` + r.Host + `"}`))
+		_, _ = w.Write([]byte(`{"message":"backend response","host":"` + r.Host + `"}`))
 	}))
 	defer backendServer.Close()
 

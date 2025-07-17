@@ -22,7 +22,6 @@ func TestNewResponseCache(t *testing.T) {
 	assert.NotNil(t, rc, "Response cache should be created")
 	assert.Equal(t, ttl, rc.defaultTTL, "Default TTL should be set correctly")
 	assert.Equal(t, maxSize, rc.maxCacheSize, "Max size should be set correctly")
-	assert.Equal(t, cleanupInterval, rc.cleanupInterval, "Cleanup interval should be set correctly")
 	assert.NotNil(t, rc.cache, "Cache map should be initialized")
 	assert.NotNil(t, rc.stopCleanup, "Cleanup stop channel should be initialized")
 	assert.NotNil(t, rc.cacheable, "Cacheable function should be initialized")

@@ -163,14 +163,17 @@ func (h *CompositeHandler) executeParallel(ctx context.Context, w http.ResponseW
 
 			// Execute the request.
 			resp, err := h.executeBackendRequest(ctx, b, r)
-
-			// Record success or failure in the circuit breaker.
 			if err != nil {
 				if circuitBreaker != nil {
 					circuitBreaker.RecordFailure()
 				}
 				return
 			}
+			defer func() {
+				if resp != nil && resp.Body != nil {
+					resp.Body.Close()
+				}
+			}()
 
 			// Record success in the circuit breaker.
 			if circuitBreaker != nil {
@@ -189,6 +192,13 @@ func (h *CompositeHandler) executeParallel(ctx context.Context, w http.ResponseW
 
 	// Merge the responses.
 	h.mergeResponses(responses, w)
+
+	// Close all response bodies to prevent resource leaks
+	for _, resp := range responses {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+	}
 }
 
 // executeSequential executes backend requests one at a time.
@@ -206,14 +216,17 @@ func (h *CompositeHandler) executeSequential(ctx context.Context, w http.Respons
 
 		// Execute the request.
 		resp, err := h.executeBackendRequest(ctx, backend, r)
-
-		// Record success or failure in the circuit breaker.
 		if err != nil {
 			if circuitBreaker != nil {
 				circuitBreaker.RecordFailure()
 			}
 			continue
 		}
+		defer func(r *http.Response) {
+			if r != nil && r.Body != nil {
+				r.Body.Close()
+			}
+		}(resp)
 
 		// Record success in the circuit breaker.
 		if circuitBreaker != nil {
@@ -226,6 +239,13 @@ func (h *CompositeHandler) executeSequential(ctx context.Context, w http.Respons
 
 	// Merge the responses.
 	h.mergeResponses(responses, w)
+
+	// Close all response bodies to prevent resource leaks
+	for _, resp := range responses {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+	}
 }
 
 // executeBackendRequest sends a request to a backend and returns the response.
@@ -239,7 +259,7 @@ func (h *CompositeHandler) executeBackendRequest(ctx context.Context, backend *B
 	// Create a new request with the same method, URL, and headers.
 	req, err := http.NewRequestWithContext(ctx, r.Method, backendURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create new request: %w", err)
 	}
 
 	// Copy all headers from the original request.
@@ -254,7 +274,7 @@ func (h *CompositeHandler) executeBackendRequest(ctx context.Context, backend *B
 		// Get the body content.
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read request body: %w", err)
 		}
 
 		// Reset the original request body so it can be read again.
@@ -268,7 +288,11 @@ func (h *CompositeHandler) executeBackendRequest(ctx context.Context, backend *B
 	}
 
 	// Execute the request.
-	return backend.Client.Do(req)
+	resp, err := backend.Client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute backend request: %w", err)
+	}
+	return resp, nil
 }
 
 // mergeResponses merges the responses from all backends.
@@ -276,7 +300,11 @@ func (h *CompositeHandler) mergeResponses(responses map[string]*http.Response, w
 	// If no responses, return 502 Bad Gateway.
 	if len(responses) == 0 {
 		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte("No successful responses from backends"))
+		_, err := w.Write([]byte("No successful responses from backends"))
+		if err != nil {
+			// Log error but continue processing
+			return
+		}
 		return
 	}
 
@@ -300,7 +328,11 @@ func (h *CompositeHandler) mergeResponses(responses map[string]*http.Response, w
 	// Make sure baseResp is not nil before processing
 	if baseResp == nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Failed to process backend responses"))
+		_, err := w.Write([]byte("Failed to process backend responses"))
+		if err != nil {
+			// Log error but continue processing
+			return
+		}
 		return
 	}
 
@@ -315,7 +347,11 @@ func (h *CompositeHandler) mergeResponses(responses map[string]*http.Response, w
 	w.WriteHeader(baseResp.StatusCode)
 
 	// Copy the body from the base response.
-	io.Copy(w, baseResp.Body)
+	_, err := io.Copy(w, baseResp.Body)
+	if err != nil {
+		// Log error but continue processing
+		return
+	}
 }
 
 // createCompositeHandler creates a handler for a composite route configuration.
@@ -341,7 +377,7 @@ func (m *ReverseProxyModule) createCompositeHandler(routeConfig CompositeRoute, 
 			if url, ok := m.config.BackendServices[backendName]; ok {
 				backendURL = url
 			} else {
-				return nil, fmt.Errorf("backend service not found: %s", backendName)
+				return nil, fmt.Errorf("%w: %s", ErrBackendServiceNotFound, backendName)
 			}
 		}
 

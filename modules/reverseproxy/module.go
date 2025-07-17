@@ -271,7 +271,7 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 func (m *ReverseProxyModule) validateConfig() error {
 	// If no config, return error
 	if m.config == nil {
-		return fmt.Errorf("configuration is nil")
+		return ErrConfigurationNil
 	}
 
 	// Set default request timeout if not specified
@@ -304,7 +304,7 @@ func (m *ReverseProxyModule) validateConfig() error {
 		_, exists := m.config.BackendServices[m.config.DefaultBackend]
 		if !exists {
 			// The default backend must be defined in the backend services map
-			return fmt.Errorf("default backend '%s' is not defined in backend_services", m.config.DefaultBackend)
+			return fmt.Errorf("%w: %s", ErrDefaultBackendNotDefined, m.config.DefaultBackend)
 		}
 
 		// Even if the URL is empty in global config, we'll allow it as it might be provided by a tenant
@@ -325,7 +325,7 @@ func (m *ReverseProxyModule) validateConfig() error {
 
 	// Validate tenant header is set if tenant ID is required
 	if m.config.RequireTenantID && m.config.TenantIDHeader == "" {
-		return fmt.Errorf("tenant ID is required but TenantIDHeader is not set")
+		return ErrTenantIDRequired
 	}
 
 	return nil
@@ -339,7 +339,7 @@ func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 		// Get the required router service
 		handleFuncSvc, ok := services["router"].(routerService)
 		if !ok {
-			return nil, fmt.Errorf("service %s does not implement HandleFunc interface", "router")
+			return nil, fmt.Errorf("%w: %s", ErrServiceNotHandleFunc, "router")
 		}
 		m.router = handleFuncSvc
 
@@ -376,7 +376,9 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 	}
 
 	// Register routes with router
-	m.registerRoutes()
+	if err := m.registerRoutes(); err != nil {
+		return fmt.Errorf("failed to register routes: %w", err)
+	}
 
 	// Start health checker if enabled
 	if m.healthChecker != nil {
@@ -499,9 +501,7 @@ func (m *ReverseProxyModule) loadTenantConfigs() {
 // It removes the tenant's configuration and any associated resources.
 func (m *ReverseProxyModule) OnTenantRemoved(tenantID modular.TenantID) {
 	// Clean up tenant-specific resources
-	if _, ok := m.tenants[tenantID]; ok {
-		delete(m.tenants, tenantID)
-	}
+	delete(m.tenants, tenantID)
 	m.app.Logger().Info("Tenant removed from reverseproxy module", "tenantID", tenantID)
 }
 
@@ -683,7 +683,7 @@ func (m *ReverseProxyModule) setupCompositeRoutes() error {
 func (m *ReverseProxyModule) registerRoutes() error {
 	// Ensure we have a router
 	if m.router == nil {
-		return fmt.Errorf("cannot register routes: router is nil")
+		return ErrCannotRegisterRoutes
 	}
 
 	// Case 1: No tenants - register basic and composite routes as usual
@@ -1034,7 +1034,11 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 			w.WriteHeader(resp.StatusCode)
 			if resp.Body != nil {
 				defer resp.Body.Close()
-				io.Copy(w, resp.Body)
+				_, err := io.Copy(w, resp.Body)
+				if err != nil {
+					// Log error but continue processing
+					m.app.Logger().Error("Failed to copy response body", "error", err)
+				}
 			}
 		} else {
 			// No circuit breaker, use the proxy directly
@@ -1137,7 +1141,11 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 			w.WriteHeader(resp.StatusCode)
 			if resp.Body != nil {
 				defer resp.Body.Close()
-				io.Copy(w, resp.Body)
+				_, err := io.Copy(w, resp.Body)
+				if err != nil {
+					// Log error but continue processing
+					m.app.Logger().Error("Failed to copy response body", "error", err)
+				}
 			}
 		} else {
 			// No circuit breaker, use the proxy directly
@@ -1176,13 +1184,13 @@ func (m *ReverseProxyModule) AddBackendRoute(backendID, routePattern string) err
 	proxy, ok := m.backendProxies[backendID]
 	if !ok {
 		m.app.Logger().Error("Backend not found", "backend", backendID)
-		return fmt.Errorf("backend %s not found", backendID)
+		return fmt.Errorf("%w: %s", ErrBackendNotFound, backendID)
 	}
 
 	// If proxy is nil, log the error and return
 	if proxy == nil {
 		m.app.Logger().Error("Backend proxy is nil", "backend", backendID)
-		return fmt.Errorf("backend proxy for %s is nil", backendID)
+		return fmt.Errorf("%w: %s", ErrBackendProxyNil, backendID)
 	}
 
 	// Create the handler function
@@ -1302,7 +1310,7 @@ func (m *ReverseProxyModule) RegisterCustomEndpoint(pattern string, mapping Endp
 			targetURL.Path = path.Join(targetURL.Path, endpoint.Path)
 
 			// Add query parameters if specified
-			if endpoint.QueryParams != nil && len(endpoint.QueryParams) > 0 {
+			if len(endpoint.QueryParams) > 0 {
 				q := targetURL.Query()
 				for key, value := range endpoint.QueryParams {
 					q.Set(key, value)
@@ -1340,8 +1348,13 @@ func (m *ReverseProxyModule) RegisterCustomEndpoint(pattern string, mapping Endp
 				m.app.Logger().Error("Failed to execute request", "backend", endpoint.Backend, "error", err)
 				continue
 			}
+			defer func(r *http.Response) {
+				if r != nil && r.Body != nil {
+					r.Body.Close()
+				}
+			}(resp)
 
-			// Add to the list of responses that need to be closed
+			// Add to the list of responses that need to be closed immediately
 			responsesToClose = append(responsesToClose, resp)
 
 			// Store the response
@@ -1510,62 +1523,6 @@ func mergeConfigs(global, tenant *ReverseProxyConfig) *ReverseProxyConfig {
 	return merged
 }
 
-// getBackendMap returns a map of backend IDs to their URLs from the global configuration.
-func (m *ReverseProxyModule) getBackendMap() map[string]string {
-	if m.config == nil || m.config.BackendServices == nil {
-		return map[string]string{}
-	}
-	return m.config.BackendServices
-}
-
-// getTenantBackendMap returns a map of backend IDs to their URLs for a specific tenant.
-func (m *ReverseProxyModule) getTenantBackendMap(tenantID modular.TenantID) map[string]string {
-	if m.tenants == nil {
-		return map[string]string{}
-	}
-
-	tenant, exists := m.tenants[tenantID]
-	if !exists || tenant == nil || tenant.BackendServices == nil {
-		return map[string]string{}
-	}
-
-	return tenant.BackendServices
-}
-
-// getBackendURLsByTenant returns all backend URLs for a specific tenant.
-func (m *ReverseProxyModule) getBackendURLsByTenant(tenantID modular.TenantID) map[string]string {
-	return m.getTenantBackendMap(tenantID)
-}
-
-// getBackendByPathAndTenant returns the backend URL for a specific path and tenant.
-func (m *ReverseProxyModule) getBackendByPathAndTenant(path string, tenantID modular.TenantID) (string, bool) {
-	// Get the tenant-specific backend map
-	backendMap := m.getTenantBackendMap(tenantID)
-
-	// Check if there's a direct match for the path
-	if url, ok := backendMap[path]; ok {
-		return url, true
-	}
-
-	// If no direct match, try to find the most specific match
-	var bestMatch string
-	var bestMatchLength int
-
-	for pattern, url := range backendMap {
-		// Check if path starts with the pattern and the pattern is longer than our current best match
-		if strings.HasPrefix(path, pattern) && len(pattern) > bestMatchLength {
-			bestMatch = url
-			bestMatchLength = len(pattern)
-		}
-	}
-
-	if bestMatchLength > 0 {
-		return bestMatch, true
-	}
-
-	return "", false
-}
-
 // registerMetricsEndpoint registers an HTTP endpoint to expose collected metrics
 func (m *ReverseProxyModule) registerMetricsEndpoint(endpoint string) {
 	if endpoint == "" {
@@ -1620,32 +1577,6 @@ func (m *ReverseProxyModule) registerMetricsEndpoint(endpoint string) {
 
 		m.router.HandleFunc(healthEndpoint, healthHandler)
 		m.app.Logger().Info("Registered health check endpoint", "endpoint", healthEndpoint)
-	}
-}
-
-// createRouteHeadersMiddleware creates a middleware for tenant-specific routing
-// This creates a middleware that routes based on header values
-func (m *ReverseProxyModule) createRouteHeadersMiddleware(tenantID modular.TenantID, routeMap map[string]http.Handler) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Check if this request has the tenant header
-			headerValue := r.Header.Get(m.config.TenantIDHeader)
-
-			// If header matches this tenant, use tenant-specific routing
-			if headerValue == string(tenantID) {
-				// Find the appropriate handler for this route from the tenant's route map
-				for route, handler := range routeMap {
-					if route == "/*" || r.URL.Path == route {
-						handler.ServeHTTP(w, r)
-						return
-					}
-				}
-				// If no specific route found, fall through to next handler
-			}
-
-			// Continue with the default handler chain
-			next.ServeHTTP(w, r)
-		})
 	}
 }
 

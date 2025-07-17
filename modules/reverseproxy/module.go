@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -61,6 +62,9 @@ type ReverseProxyModule struct {
 	// Metrics collection
 	metrics       *MetricsCollector
 	enableMetrics bool
+
+	// Health checking
+	healthChecker *HealthChecker
 }
 
 // NewModule creates a new ReverseProxyModule with default settings.
@@ -239,6 +243,26 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 	// Set default backend for the module
 	m.defaultBackend = m.config.DefaultBackend
 
+	// Initialize health checker if enabled
+	if m.config.HealthCheck.Enabled {
+		// Convert logger to slog.Logger
+		var logger *slog.Logger
+		if slogLogger, ok := app.Logger().(*slog.Logger); ok {
+			logger = slogLogger
+		} else {
+			// Create a new slog logger if conversion fails
+			logger = slog.Default()
+		}
+
+		m.healthChecker = NewHealthChecker(
+			&m.config.HealthCheck,
+			m.config.BackendServices,
+			m.httpClient,
+			logger,
+		)
+		app.Logger().Info("Health checker initialized", "backends", len(m.config.BackendServices))
+	}
+
 	return nil
 }
 
@@ -332,7 +356,7 @@ func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 
 // Start sets up all routes for the module and registers them with the router.
 // This includes backend routes, composite routes, and any custom endpoints.
-func (m *ReverseProxyModule) Start(context.Context) error {
+func (m *ReverseProxyModule) Start(ctx context.Context) error {
 	// Load tenant-specific configurations
 	m.loadTenantConfigs()
 
@@ -354,6 +378,13 @@ func (m *ReverseProxyModule) Start(context.Context) error {
 	// Register routes with router
 	m.registerRoutes()
 
+	// Start health checker if enabled
+	if m.healthChecker != nil {
+		if err := m.healthChecker.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start health checker: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -363,6 +394,14 @@ func (m *ReverseProxyModule) Stop(ctx context.Context) error {
 	// Log that we're shutting down
 	if m.app != nil && m.app.Logger() != nil {
 		m.app.Logger().Info("Shutting down reverseproxy module")
+	}
+
+	// Stop health checker if running
+	if m.healthChecker != nil {
+		m.healthChecker.Stop()
+		if m.app != nil && m.app.Logger() != nil {
+			m.app.Logger().Debug("Health checker stopped")
+		}
 	}
 
 	// If we have an HTTP client with a Transport, close idle connections
@@ -906,6 +945,11 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 		tenantHeader := m.config.TenantIDHeader
 		tenantID := modular.TenantID(r.Header.Get(tenantHeader))
 
+		// Record request to backend for health checking
+		if m.healthChecker != nil {
+			m.healthChecker.RecordBackendRequest(backend)
+		}
+
 		// Get the appropriate proxy for this backend and tenant
 		proxy, exists := m.getProxyForBackendAndTenant(backend, tenantID)
 		if !exists {
@@ -1027,6 +1071,11 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Record request to backend for health checking
+		if m.healthChecker != nil {
+			m.healthChecker.RecordBackendRequest(backend)
+		}
+
 		if !proxyExists {
 			http.Error(w, fmt.Sprintf("Backend %s not found", backend), http.StatusInternalServerError)
 			return
@@ -1451,6 +1500,13 @@ func mergeConfigs(global, tenant *ReverseProxyConfig) *ReverseProxyConfig {
 		}
 	}
 
+	// Health check config - prefer tenant's if specified
+	if tenant.HealthCheck.Enabled {
+		merged.HealthCheck = tenant.HealthCheck
+	} else {
+		merged.HealthCheck = global.HealthCheck
+	}
+
 	return merged
 }
 
@@ -1538,6 +1594,32 @@ func (m *ReverseProxyModule) registerMetricsEndpoint(endpoint string) {
 	if m.router != nil {
 		m.router.HandleFunc(endpoint, metricsHandler)
 		m.app.Logger().Info("Registered metrics endpoint", "endpoint", endpoint)
+	}
+
+	// Register health check endpoint if health checking is enabled
+	if m.healthChecker != nil {
+		healthEndpoint := endpoint + "/health"
+		healthHandler := func(w http.ResponseWriter, r *http.Request) {
+			status := m.healthChecker.GetHealthStatus()
+
+			// Convert to JSON
+			jsonData, err := json.Marshal(status)
+			if err != nil {
+				m.app.Logger().Error("Failed to marshal health status data", "error", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+
+			// Set content type and write response
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			if _, err := w.Write(jsonData); err != nil {
+				m.app.Logger().Error("Failed to write health status response", "error", err)
+			}
+		}
+
+		m.router.HandleFunc(healthEndpoint, healthHandler)
+		m.app.Logger().Info("Registered health check endpoint", "endpoint", healthEndpoint)
 	}
 }
 
@@ -1672,4 +1754,25 @@ func (m *ReverseProxyModule) createTenantAwareCatchAllHandler() http.HandlerFunc
 		// No default backend available
 		http.NotFound(w, r)
 	}
+}
+
+// GetHealthStatus returns the health status of all backends.
+func (m *ReverseProxyModule) GetHealthStatus() map[string]*HealthStatus {
+	if m.healthChecker == nil {
+		return nil
+	}
+	return m.healthChecker.GetHealthStatus()
+}
+
+// GetBackendHealthStatus returns the health status of a specific backend.
+func (m *ReverseProxyModule) GetBackendHealthStatus(backendID string) (*HealthStatus, bool) {
+	if m.healthChecker == nil {
+		return nil, false
+	}
+	return m.healthChecker.GetBackendHealthStatus(backendID)
+}
+
+// IsHealthCheckEnabled returns whether health checking is enabled.
+func (m *ReverseProxyModule) IsHealthCheckEnabled() bool {
+	return m.config.HealthCheck.Enabled
 }

@@ -1,81 +1,71 @@
-# ReverseProxy Module - Hostname Forwarding and Path Rewriting
+# ReverseProxy Module - Path Rewriting and Header Rewriting
 
 ## Overview
 
-The reverseproxy module has been enhanced with two key features:
+The reverseproxy module provides comprehensive path rewriting and header rewriting capabilities through per-backend and per-endpoint configuration. This approach gives you fine-grained control over how requests are transformed before being forwarded to backend services.
 
-1. **Hostname Forwarding Fix**: The module no longer passes the hostname forward to backend services, preserving the original request's Host header.
-2. **Path Rewriting Support**: Comprehensive path rewriting capabilities including base path rewriting and per-endpoint path rewriting.
+## Key Features
 
-## Hostname Forwarding
+1. **Per-Backend Configuration**: Configure path rewriting and header rewriting for each backend service
+2. **Per-Endpoint Configuration**: Override backend configuration for specific endpoints within a backend
+3. **Hostname Handling**: Control how the Host header is handled (preserve original, use backend, or use custom)
+4. **Header Rewriting**: Add, modify, or remove headers before forwarding requests
+5. **Path Rewriting**: Transform request paths before forwarding to backends
 
-### Before the Fix
-```go
-// Original request: Host: client.example.com
-// Backend receives: Host: backend.internal.com (hostname forwarded)
-```
+## Configuration Structure
 
-### After the Fix
-```go
-// Original request: Host: client.example.com
-// Backend receives: Host: client.example.com (hostname preserved)
-```
-
-This change ensures that backend services receive the original client's Host header, which is important for:
-- Virtual hosting scenarios
-- SSL certificate validation
-- Application logic that depends on the original hostname
-
-## Path Rewriting Configuration
-
-The new `PathRewritingConfig` provides flexible path transformation options:
+The path rewriting and header rewriting is configured through the `backend_configs` section:
 
 ```yaml
 reverseproxy:
   backend_services:
-    api: "http://internal-api.example.com"
-    legacy: "http://legacy-api.example.com"
+    api: "http://api.internal.com"
+    user: "http://user.internal.com"
   
-  path_rewriting:
-    # Strip base path from all requests
-    strip_base_path: "/api/v1"
-    
-    # Rewrite base path for all requests
-    base_path_rewrite: "/internal/api"
-    
-    # Per-endpoint rewriting rules
-    endpoint_rewrites:
-      users-v1:
-        pattern: "/users/*"
-        replacement: "/internal/users"
-        backend: "api"  # optional: apply only to specific backend
+  backend_configs:
+    api:
+      path_rewriting:
+        strip_base_path: "/api/v1"
+        base_path_rewrite: "/internal/api"
+      header_rewriting:
+        hostname_handling: "preserve_original"
+        set_headers:
+          X-API-Key: "secret-key"
+        remove_headers:
+          - "X-Client-Version"
       
-      legacy-users:
-        pattern: "/legacy/users/*"
-        replacement: "/users"
-        backend: "legacy"
+      endpoints:
+        users:
+          pattern: "/users/*"
+          path_rewriting:
+            base_path_rewrite: "/internal/users"
+          header_rewriting:
+            hostname_handling: "use_custom"
+            custom_hostname: "users.internal.com"
 ```
 
-### Base Path Operations
+## Path Rewriting Configuration
 
-#### Strip Base Path
-Removes a specified base path from all incoming requests:
+### Backend-Level Path Rewriting
+
+Configure path rewriting for an entire backend service:
 
 ```yaml
-path_rewriting:
-  strip_base_path: "/api/v1"
+backend_configs:
+  api:
+    path_rewriting:
+      strip_base_path: "/api/v1"
+      base_path_rewrite: "/internal/api"
 ```
+
+#### Strip Base Path
+Removes a specified base path from all requests to this backend:
 
 - Request: `/api/v1/users/123` → Backend: `/users/123`
 - Request: `/api/v1/orders/456` → Backend: `/orders/456`
 
 #### Base Path Rewrite
-Prepends a new base path to all requests:
-
-```yaml
-path_rewriting:
-  base_path_rewrite: "/internal/api"
-```
+Prepends a new base path to all requests to this backend:
 
 - Request: `/users/123` → Backend: `/internal/api/users/123`
 - Request: `/orders/456` → Backend: `/internal/api/orders/456`
@@ -83,138 +73,140 @@ path_rewriting:
 #### Combined Strip and Rewrite
 Both operations can be used together:
 
-```yaml
-path_rewriting:
-  strip_base_path: "/api/v1"
-  base_path_rewrite: "/internal/api"
-```
-
 - Request: `/api/v1/users/123` → Backend: `/internal/api/users/123`
 
-### Per-Endpoint Rewriting
+### Endpoint-Level Path Rewriting
 
-Define specific rewriting rules for different endpoint patterns:
+Override backend-level configuration for specific endpoints:
 
 ```yaml
-path_rewriting:
-  endpoint_rewrites:
-    users-endpoint:
-      pattern: "/api/users/*"
-      replacement: "/internal/users"
+backend_configs:
+  api:
+    path_rewriting:
+      strip_base_path: "/api/v1"
+      base_path_rewrite: "/internal/api"
     
-    orders-endpoint:
-      pattern: "/api/orders/*"
-      replacement: "/internal/orders"
+    endpoints:
+      users:
+        pattern: "/users/*"
+        path_rewriting:
+          base_path_rewrite: "/internal/users"  # Override backend setting
+      
+      orders:
+        pattern: "/orders/*"
+        path_rewriting:
+          base_path_rewrite: "/internal/orders"
 ```
 
 #### Pattern Matching
 
 - **Exact Match**: `/api/users` matches only `/api/users`
 - **Wildcard Match**: `/api/users/*` matches `/api/users/123`, `/api/users/123/profile`, etc.
-- **Star Match**: `/api/users*` matches `/api/users123`, `/api/users/123`, etc.
+- **Glob Patterns**: Supports glob pattern matching for flexible URL matching
 
-#### Rule Priority
+#### Configuration Priority
 
-When multiple rules could match a path, the first matching rule is applied.
+Configuration is applied in order of precedence:
+1. Endpoint-level configuration (highest priority)
+2. Backend-level configuration
+3. Default behavior (lowest priority)
 
-### Tenant-Specific Path Rewriting
+## Header Rewriting Configuration
 
-Path rewriting rules can be defined per tenant:
+### Hostname Handling
+
+Control how the Host header is handled when forwarding requests:
+
+```yaml
+backend_configs:
+  api:
+    header_rewriting:
+      hostname_handling: "preserve_original"  # Default
+      custom_hostname: "api.internal.com"     # Used with "use_custom"
+```
+
+#### Hostname Handling Options
+
+- **`preserve_original`**: Preserves the original client's Host header (default)
+- **`use_backend`**: Uses the backend service's hostname
+- **`use_custom`**: Uses a custom hostname specified in `custom_hostname`
+
+### Header Manipulation
+
+Add, modify, or remove headers before forwarding requests:
+
+```yaml
+backend_configs:
+  api:
+    header_rewriting:
+      set_headers:
+        X-API-Key: "secret-key"
+        X-Service: "api"
+        X-Version: "v1"
+      remove_headers:
+        - "X-Client-Version"
+        - "X-Debug-Mode"
+```
+
+#### Set Headers
+- Adds new headers or overwrites existing ones
+- Applies to all requests to this backend
+
+#### Remove Headers
+- Removes specified headers from requests
+- Useful for removing sensitive client headers
+
+### Endpoint-Level Header Rewriting
+
+Override backend-level header configuration for specific endpoints:
+
+```yaml
+backend_configs:
+  api:
+    header_rewriting:
+      hostname_handling: "preserve_original"
+      set_headers:
+        X-API-Key: "secret-key"
+    
+    endpoints:
+      public:
+        pattern: "/public/*"
+        header_rewriting:
+          set_headers:
+            X-Auth-Required: "false"
+          remove_headers:
+            - "X-API-Key"  # Remove API key for public endpoints
+```
+
+## Tenant-Specific Configuration
+
+Both path rewriting and header rewriting can be configured per tenant:
 
 ```yaml
 # Global configuration
 reverseproxy:
-  path_rewriting:
-    strip_base_path: "/api/v1"
-    endpoint_rewrites:
-      users:
-        pattern: "/users/*"
-        replacement: "/global/users"
+  backend_configs:
+    api:
+      path_rewriting:
+        strip_base_path: "/api/v1"
+      header_rewriting:
+        hostname_handling: "preserve_original"
+        set_headers:
+          X-API-Key: "global-key"
 
 # Tenant-specific configuration
 tenants:
-  tenant-123:
+  premium:
     reverseproxy:
-      path_rewriting:
-        strip_base_path: "/api/v2"  # Override global setting
-        endpoint_rewrites:
-          users:
-            pattern: "/users/*"
-            replacement: "/tenant/users"  # Override global rule
-```
-
-## Configuration Examples
-
-### Basic Configuration
-```yaml
-reverseproxy:
-  backend_services:
-    api: "http://api.internal.com"
-  default_backend: "api"
-  
-  path_rewriting:
-    strip_base_path: "/api/v1"
-```
-
-### Advanced Configuration
-```yaml
-reverseproxy:
-  backend_services:
-    api: "http://api.internal.com"
-    legacy: "http://legacy.internal.com"
-  
-  routes:
-    "/api/*": "api"
-    "/legacy/*": "legacy"
-  
-  path_rewriting:
-    strip_base_path: "/public"
-    base_path_rewrite: "/internal"
-    
-    endpoint_rewrites:
-      api-users:
-        pattern: "/api/users/*"
-        replacement: "/v2/users"
-        backend: "api"
-      
-      legacy-users:
-        pattern: "/legacy/users/*"
-        replacement: "/users"
-        backend: "legacy"
-      
-      catch-all:
-        pattern: "/*"
-        replacement: "/default"
-```
-
-### Multi-Tenant Configuration
-```yaml
-reverseproxy:
-  backend_services:
-    api: "http://api.internal.com"
-  
-  tenant_id_header: "X-Tenant-ID"
-  
-  path_rewriting:
-    strip_base_path: "/api/v1"
-    endpoint_rewrites:
-      users:
-        pattern: "/users/*"
-        replacement: "/global/users"
-
-# Tenant overrides
-tenants:
-  premium-tenant:
-    reverseproxy:
-      backend_services:
-        api: "http://premium-api.internal.com"
-      
-      path_rewriting:
-        strip_base_path: "/api/v2"
-        endpoint_rewrites:
-          users:
-            pattern: "/users/*"
-            replacement: "/premium/users"
+      backend_configs:
+        api:
+          path_rewriting:
+            strip_base_path: "/api/v2"  # Premium uses v2 API
+            base_path_rewrite: "/premium/api"
+          header_rewriting:
+            set_headers:
+              X-API-Key: "premium-key"
+              X-Tenant-Type: "premium"
 ```
 
 ## Usage Examples
@@ -227,14 +219,29 @@ config := &reverseproxy.ReverseProxyConfig{
     },
     DefaultBackend: "api",
     
-    PathRewriting: reverseproxy.PathRewritingConfig{
-        StripBasePath: "/api/v1",
-        BasePathRewrite: "/internal/api",
-        
-        EndpointRewrites: map[string]reverseproxy.EndpointRewriteRule{
-            "users": {
-                Pattern: "/users/*",
-                Replacement: "/internal/users",
+    BackendConfigs: map[string]reverseproxy.BackendServiceConfig{
+        "api": {
+            PathRewriting: reverseproxy.PathRewritingConfig{
+                StripBasePath:   "/api/v1",
+                BasePathRewrite: "/internal/api",
+            },
+            HeaderRewriting: reverseproxy.HeaderRewritingConfig{
+                HostnameHandling: reverseproxy.HostnamePreserveOriginal,
+                SetHeaders: map[string]string{
+                    "X-API-Key": "secret-key",
+                },
+            },
+            Endpoints: map[string]reverseproxy.EndpointConfig{
+                "users": {
+                    Pattern: "/users/*",
+                    PathRewriting: reverseproxy.PathRewritingConfig{
+                        BasePathRewrite: "/internal/users",
+                    },
+                    HeaderRewriting: reverseproxy.HeaderRewritingConfig{
+                        HostnameHandling: reverseproxy.HostnameUseCustom,
+                        CustomHostname:   "users.internal.com",
+                    },
+                },
             },
         },
     },
@@ -243,27 +250,19 @@ config := &reverseproxy.ReverseProxyConfig{
 
 ### Testing the Configuration
 
-The module includes comprehensive test coverage for both hostname forwarding and path rewriting. Key test scenarios include:
+The module includes comprehensive test coverage for path rewriting and header rewriting. Key test scenarios include:
 
-1. **Hostname Forwarding Tests**: Verify that the original Host header is preserved
-2. **Base Path Rewriting Tests**: Test stripping and rewriting of base paths
-3. **Endpoint Rewriting Tests**: Test pattern matching and replacement logic
-4. **Tenant-Specific Tests**: Verify tenant-specific configurations work correctly
-5. **Edge Cases**: Handle nil configurations, empty paths, multiple slashes, etc.
+1. **Per-Backend Configuration Tests**: Verify backend-specific path and header rewriting
+2. **Per-Endpoint Configuration Tests**: Test endpoint-specific overrides
+3. **Hostname Handling Tests**: Verify different hostname handling modes
+4. **Header Manipulation Tests**: Test setting and removing headers
+5. **Tenant-Specific Tests**: Verify tenant-specific configurations work correctly
+6. **Edge Cases**: Handle nil configurations, empty paths, pattern matching edge cases
 
-## Migration Guide
+## Key Benefits
 
-### From Previous Versions
-
-If you were relying on the hostname forwarding behavior, you may need to update your backend services to handle the original Host header instead of the backend's host.
-
-### New Configuration Options
-
-The new path rewriting configuration is optional and backward compatible. Existing configurations will continue to work unchanged.
-
-## Benefits
-
-1. **Better Security**: Preserving original Host headers improves security for virtual hosting scenarios
-2. **Flexible Path Management**: Support for complex path transformations without changing backend APIs
-3. **Multi-Tenant Support**: Tenant-specific path rewriting rules enable customized routing per tenant
-4. **Backward Compatibility**: All existing configurations continue to work unchanged
+1. **Fine-Grained Control**: Configure path and header rewriting per backend and endpoint
+2. **Flexible Hostname Handling**: Choose how to handle the Host header for each backend
+3. **Header Security**: Add, modify, or remove headers for security and functionality
+4. **Multi-Tenant Support**: Tenant-specific configurations for complex routing scenarios
+5. **Maintainable Configuration**: Clear separation between backend and endpoint concerns

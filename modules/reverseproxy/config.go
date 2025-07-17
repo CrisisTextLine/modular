@@ -19,6 +19,7 @@ type ReverseProxyConfig struct {
 	MetricsEnabled         bool                            `json:"metrics_enabled" yaml:"metrics_enabled" toml:"metrics_enabled" env:"METRICS_ENABLED"`
 	MetricsPath            string                          `json:"metrics_path" yaml:"metrics_path" toml:"metrics_path" env:"METRICS_PATH"`
 	MetricsEndpoint        string                          `json:"metrics_endpoint" yaml:"metrics_endpoint" toml:"metrics_endpoint" env:"METRICS_ENDPOINT"`
+	PathRewriting          PathRewritingConfig             `json:"path_rewriting" yaml:"path_rewriting" toml:"path_rewriting"`
 }
 
 // CompositeRoute defines a route that combines responses from multiple backends.
@@ -26,6 +27,33 @@ type CompositeRoute struct {
 	Pattern  string   `json:"pattern" yaml:"pattern" toml:"pattern" env:"PATTERN"`
 	Backends []string `json:"backends" yaml:"backends" toml:"backends" env:"BACKENDS"`
 	Strategy string   `json:"strategy" yaml:"strategy" toml:"strategy" env:"STRATEGY"`
+}
+
+// PathRewritingConfig defines configuration for path rewriting rules.
+type PathRewritingConfig struct {
+	// StripBasePath removes the specified base path from all requests before forwarding to backends
+	StripBasePath string `json:"strip_base_path" yaml:"strip_base_path" toml:"strip_base_path" env:"STRIP_BASE_PATH"`
+	
+	// BasePathRewrite replaces the base path with a new path for all requests
+	BasePathRewrite string `json:"base_path_rewrite" yaml:"base_path_rewrite" toml:"base_path_rewrite" env:"BASE_PATH_REWRITE"`
+	
+	// EndpointRewrites defines per-endpoint path rewriting rules
+	EndpointRewrites map[string]EndpointRewriteRule `json:"endpoint_rewrites" yaml:"endpoint_rewrites" toml:"endpoint_rewrites"`
+}
+
+// EndpointRewriteRule defines a rewrite rule for a specific endpoint pattern.
+type EndpointRewriteRule struct {
+	// Pattern is the incoming request pattern to match (e.g., "/api/v1/users")
+	Pattern string `json:"pattern" yaml:"pattern" toml:"pattern" env:"PATTERN"`
+	
+	// Replacement is the new path to use when forwarding to backend (e.g., "/users")
+	Replacement string `json:"replacement" yaml:"replacement" toml:"replacement" env:"REPLACEMENT"`
+	
+	// Backend specifies which backend this rule applies to (optional, applies to all if empty)
+	Backend string `json:"backend" yaml:"backend" toml:"backend" env:"BACKEND"`
+	
+	// StripQueryParams removes query parameters from the request when forwarding
+	StripQueryParams bool `json:"strip_query_params" yaml:"strip_query_params" toml:"strip_query_params" env:"STRIP_QUERY_PARAMS"`
 }
 
 // Config provides configuration options for the ReverseProxyModule.

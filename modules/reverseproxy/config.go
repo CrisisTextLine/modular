@@ -33,10 +33,10 @@ type CompositeRoute struct {
 type PathRewritingConfig struct {
 	// StripBasePath removes the specified base path from all requests before forwarding to backends
 	StripBasePath string `json:"strip_base_path" yaml:"strip_base_path" toml:"strip_base_path" env:"STRIP_BASE_PATH"`
-	
+
 	// BasePathRewrite replaces the base path with a new path for all requests
 	BasePathRewrite string `json:"base_path_rewrite" yaml:"base_path_rewrite" toml:"base_path_rewrite" env:"BASE_PATH_REWRITE"`
-	
+
 	// EndpointRewrites defines per-endpoint path rewriting rules
 	EndpointRewrites map[string]EndpointRewriteRule `json:"endpoint_rewrites" yaml:"endpoint_rewrites" toml:"endpoint_rewrites"`
 }
@@ -45,13 +45,13 @@ type PathRewritingConfig struct {
 type EndpointRewriteRule struct {
 	// Pattern is the incoming request pattern to match (e.g., "/api/v1/users")
 	Pattern string `json:"pattern" yaml:"pattern" toml:"pattern" env:"PATTERN"`
-	
+
 	// Replacement is the new path to use when forwarding to backend (e.g., "/users")
 	Replacement string `json:"replacement" yaml:"replacement" toml:"replacement" env:"REPLACEMENT"`
-	
+
 	// Backend specifies which backend this rule applies to (optional, applies to all if empty)
 	Backend string `json:"backend" yaml:"backend" toml:"backend" env:"BACKEND"`
-	
+
 	// StripQueryParams removes query parameters from the request when forwarding
 	StripQueryParams bool `json:"strip_query_params" yaml:"strip_query_params" toml:"strip_query_params" env:"STRIP_QUERY_PARAMS"`
 }

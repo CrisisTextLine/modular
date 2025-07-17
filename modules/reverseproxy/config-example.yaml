@@ -1,0 +1,101 @@
+# Example: API Gateway with Path Rewriting
+# This configuration shows how to use the reverseproxy module as an API gateway
+# with path rewriting capabilities
+
+reverseproxy:
+  # Backend services
+  backend_services:
+    users-api: "http://users-service.internal:8080"
+    orders-api: "http://orders-service.internal:8080"
+    legacy-api: "http://legacy-service.internal:8080"
+  
+  # Default backend for unmatched routes
+  default_backend: "users-api"
+  
+  # Tenant configuration
+  tenant_id_header: "X-Tenant-ID"
+  require_tenant_id: false
+  
+  # Path rewriting configuration
+  path_rewriting:
+    # Strip the API version from all incoming requests
+    strip_base_path: "/api/v1"
+    
+    # Add internal routing prefix
+    base_path_rewrite: "/internal"
+    
+    # Per-endpoint rewriting rules
+    endpoint_rewrites:
+      # Modern users API
+      users-v2:
+        pattern: "/users/*"
+        replacement: "/v2/users"
+        backend: "users-api"
+      
+      # Orders API with different internal structure
+      orders:
+        pattern: "/orders/*"
+        replacement: "/internal/orders"
+        backend: "orders-api"
+      
+      # Legacy API compatibility
+      legacy-users:
+        pattern: "/legacy/users/*"
+        replacement: "/users"
+        backend: "legacy-api"
+      
+      # Health check endpoint
+      health:
+        pattern: "/health"
+        replacement: "/internal/health"
+  
+  # Route configuration
+  routes:
+    "/users/*": "users-api"
+    "/orders/*": "orders-api"
+    "/legacy/*": "legacy-api"
+  
+  # Circuit breaker configuration
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    success_threshold: 3
+    open_timeout: "30s"
+  
+  # Caching configuration
+  cache_enabled: true
+  cache_ttl: "300s"
+  
+  # Request timeout
+  request_timeout: "30s"
+
+# Example tenant-specific overrides
+tenants:
+  premium-tenant:
+    reverseproxy:
+      backend_services:
+        users-api: "http://premium-users-service.internal:8080"
+      
+      path_rewriting:
+        strip_base_path: "/api/v2"  # Different API version for premium
+        endpoint_rewrites:
+          users-premium:
+            pattern: "/users/*"
+            replacement: "/premium/users"
+            backend: "users-api"
+  
+  enterprise-tenant:
+    reverseproxy:
+      backend_services:
+        users-api: "http://enterprise-users-service.internal:8080"
+        orders-api: "http://enterprise-orders-service.internal:8080"
+      
+      path_rewriting:
+        base_path_rewrite: "/enterprise"
+        endpoint_rewrites:
+          users-enterprise:
+            pattern: "/users/*"
+            replacement: "/enterprise/users"
+          orders-enterprise:
+            pattern: "/orders/*"
+            replacement: "/enterprise/orders"

@@ -844,7 +844,7 @@ func (m *ReverseProxyModule) createReverseProxy(target *url.URL) *httputil.Rever
 		req.URL.Scheme = originalTarget.Scheme
 		req.URL.Host = originalTarget.Host
 		req.URL.Path = singleJoiningSlash(originalTarget.Path, rewrittenPath)
-		
+
 		// Handle query parameters
 		if originalTarget.RawQuery != "" && req.URL.RawQuery != "" {
 			req.URL.RawQuery = originalTarget.RawQuery + "&" + req.URL.RawQuery
@@ -875,7 +875,7 @@ func (m *ReverseProxyModule) createReverseProxy(target *url.URL) *httputil.Rever
 			if m.config != nil {
 				tenantIDStr, hasTenant = TenantIDFromRequest(m.config.TenantIDHeader, req)
 			}
-			
+
 			if hasTenant {
 				tenantID := modular.TenantID(tenantIDStr)
 				customDirector := m.directorFactory(backend, tenantID)
@@ -976,19 +976,19 @@ func (m *ReverseProxyModule) matchesPattern(path, pattern string) bool {
 	if path == pattern {
 		return true
 	}
-	
+
 	// If pattern ends with /* it's a prefix match
 	if strings.HasSuffix(pattern, "/*") {
 		prefix := pattern[:len(pattern)-2]
 		return strings.HasPrefix(path, prefix)
 	}
-	
+
 	// If pattern ends with * it's a prefix match
 	if strings.HasSuffix(pattern, "*") {
 		prefix := pattern[:len(pattern)-1]
 		return strings.HasPrefix(path, prefix)
 	}
-	
+
 	return false
 }
 
@@ -998,7 +998,7 @@ func (m *ReverseProxyModule) applyPatternReplacement(path, pattern, replacement 
 	if path == pattern {
 		return replacement
 	}
-	
+
 	// If pattern ends with /* or *, replace the prefix
 	if strings.HasSuffix(pattern, "/*") {
 		prefix := pattern[:len(pattern)-2]
@@ -1013,7 +1013,7 @@ func (m *ReverseProxyModule) applyPatternReplacement(path, pattern, replacement 
 			return replacement + suffix
 		}
 	}
-	
+
 	return path
 }
 

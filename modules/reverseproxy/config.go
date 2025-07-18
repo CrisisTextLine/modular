@@ -164,9 +164,9 @@ type RetryConfig struct {
 // HealthCheckConfig provides configuration for backend health checking.
 type HealthCheckConfig struct {
 	Enabled                  bool                           `json:"enabled" yaml:"enabled" toml:"enabled" env:"ENABLED" default:"false" desc:"Enable health checking for backend services"`
-	Interval                 time.Duration                  `json:"interval" yaml:"interval" toml:"interval" env:"INTERVAL" default:"30s" desc:"Interval between health checks"`
-	Timeout                  time.Duration                  `json:"timeout" yaml:"timeout" toml:"timeout" env:"TIMEOUT" default:"5s" desc:"Timeout for health check requests"`
-	RecentRequestThreshold   time.Duration                  `json:"recent_request_threshold" yaml:"recent_request_threshold" toml:"recent_request_threshold" env:"RECENT_REQUEST_THRESHOLD" default:"60s" desc:"Skip health check if a request to the backend occurred within this time"`
+	Interval                 time.Duration                  `json:"interval" yaml:"interval" toml:"interval" env:"INTERVAL" default:"30000000000" desc:"Interval between health checks"`
+	Timeout                  time.Duration                  `json:"timeout" yaml:"timeout" toml:"timeout" env:"TIMEOUT" default:"5000000000" desc:"Timeout for health check requests"`
+	RecentRequestThreshold   time.Duration                  `json:"recent_request_threshold" yaml:"recent_request_threshold" toml:"recent_request_threshold" env:"RECENT_REQUEST_THRESHOLD" default:"60000000000" desc:"Skip health check if a request to the backend occurred within this time"`
 	HealthEndpoints          map[string]string              `json:"health_endpoints" yaml:"health_endpoints" toml:"health_endpoints" env:"HEALTH_ENDPOINTS" desc:"Custom health check endpoints for specific backends (defaults to base URL)"`
 	ExpectedStatusCodes      []int                          `json:"expected_status_codes" yaml:"expected_status_codes" toml:"expected_status_codes" env:"EXPECTED_STATUS_CODES" default:"[200]" desc:"HTTP status codes considered healthy"`
 	BackendHealthCheckConfig map[string]BackendHealthConfig `json:"backend_health_check_config" yaml:"backend_health_check_config" toml:"backend_health_check_config" desc:"Per-backend health check configuration"`

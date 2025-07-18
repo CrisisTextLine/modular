@@ -133,7 +133,7 @@ func TestHealthChecker_DNSResolution(t *testing.T) {
 	// Test invalid URL
 	dnsResolved, resolvedIPs, err = hc.performDNSCheck("://invalid-url")
 	assert.False(t, dnsResolved)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, resolvedIPs)
 }
 
@@ -685,7 +685,7 @@ func TestModule_HealthCheckDisabled(t *testing.T) {
 
 	// Initialize module
 	err = module.Init(mockApp)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Manually set the test config (this is how other tests do it)
 	module.config = testConfig
@@ -693,7 +693,7 @@ func TestModule_HealthCheckDisabled(t *testing.T) {
 	// Start module
 	ctx := context.Background()
 	err = module.Start(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Verify health checker was not created
 	assert.Nil(t, module.healthChecker)

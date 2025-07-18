@@ -21,6 +21,13 @@ import (
 	"github.com/gobwas/glob"
 )
 
+// ReverseProxyService defines the interface for the reverse proxy service
+// that other modules can use to register custom endpoints
+type ReverseProxyService interface {
+	RegisterCustomEndpoint(pattern string, mapping EndpointMapping)
+	RegisterCompositeRoute(pattern string, route CompositeRoute)
+}
+
 // ReverseProxyModule provides a modular reverse proxy implementation with support for
 // multiple backends, composite routes that combine responses from different backends,
 // and tenant-specific routing configurations.
@@ -468,9 +475,15 @@ func (m *ReverseProxyModule) OnTenantRemoved(tenantID modular.TenantID) {
 }
 
 // ProvidesServices returns the services provided by this module.
-// Currently, this module does not provide any services.
+// The reverse proxy module provides itself as a service so other modules can register custom endpoints.
 func (m *ReverseProxyModule) ProvidesServices() []modular.ServiceProvider {
-	return nil
+	return []modular.ServiceProvider{
+		{
+			Name:        "reverseproxy",
+			Description: "Reverse proxy module providing custom endpoint registration capabilities",
+			Instance:    m,
+		},
+	}
 }
 
 // routerService defines the interface for a service that can register

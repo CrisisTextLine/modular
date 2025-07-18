@@ -344,7 +344,7 @@ func TestProcessConfigDefaults_TimeDuration_InvalidFormat(t *testing.T) {
 
 	cfg := &InvalidDurationConfig{}
 	err := ProcessConfigDefaults(cfg)
-	
+
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse duration value")
 }
@@ -379,11 +379,11 @@ func TestValidateConfig_TimeDuration_RequiredFieldMissing(t *testing.T) {
 
 func TestGenerateSampleConfig_TimeDuration(t *testing.T) {
 	cfg := &DurationTestConfig{}
-	
+
 	// Test YAML generation
 	yamlData, err := GenerateSampleConfig(cfg, "yaml")
 	require.NoError(t, err)
-	
+
 	yamlStr := string(yamlData)
 	assert.Contains(t, yamlStr, "request_timeout: 30s")
 	assert.Contains(t, yamlStr, "cache_ttl: 5m0s")
@@ -392,15 +392,15 @@ func TestGenerateSampleConfig_TimeDuration(t *testing.T) {
 	// Test JSON generation
 	jsonData, err := GenerateSampleConfig(cfg, "json")
 	require.NoError(t, err)
-	
+
 	jsonStr := string(jsonData)
-	assert.Contains(t, jsonStr, "30000000000") // 30s in nanoseconds
+	assert.Contains(t, jsonStr, "30000000000")  // 30s in nanoseconds
 	assert.Contains(t, jsonStr, "300000000000") // 5m in nanoseconds
 }
 
 func TestConfigFeederAndDefaults_TimeDuration_Integration(t *testing.T) {
 	// Test that config feeders and defaults work together properly
-	
+
 	// Create test YAML file with some duration values
 	yamlContent := `request_timeout: 45s
 cache_ttl: 10m
@@ -413,54 +413,54 @@ required_dur: 2h`
 	defer os.Remove(yamlFile)
 
 	cfg := &DurationTestConfig{}
-	
+
 	// First apply config feeder
 	yamlFeeder := feeders.NewYamlFeeder(yamlFile)
 	err = yamlFeeder.Feed(cfg)
 	require.NoError(t, err)
-	
+
 	// Then apply defaults (this is what ValidateConfig does)
 	err = ProcessConfigDefaults(cfg)
 	require.NoError(t, err)
-	
+
 	// Verify that feeder values are preserved and defaults are applied where needed
-	assert.Equal(t, 45*time.Second, cfg.RequestTimeout) // From feeder
-	assert.Equal(t, 10*time.Minute, cfg.CacheTTL)       // From feeder
+	assert.Equal(t, 45*time.Second, cfg.RequestTimeout)             // From feeder
+	assert.Equal(t, 10*time.Minute, cfg.CacheTTL)                   // From feeder
 	assert.Equal(t, 1*time.Hour+30*time.Minute, cfg.HealthInterval) // Default (not in YAML)
-	assert.Equal(t, 2*time.Hour, cfg.RequiredDur)       // From feeder
-	assert.Equal(t, time.Duration(0), cfg.NoDefault)    // No default, no feeder value
+	assert.Equal(t, 2*time.Hour, cfg.RequiredDur)                   // From feeder
+	assert.Equal(t, time.Duration(0), cfg.NoDefault)                // No default, no feeder value
 }
 
 func TestEdgeCases_TimeDuration_Defaults(t *testing.T) {
 	// Test edge cases for duration defaults
-	
+
 	t.Run("zero duration default", func(t *testing.T) {
 		type ZeroDurationConfig struct {
 			Timeout time.Duration `default:"0s"`
 		}
-		
+
 		cfg := &ZeroDurationConfig{}
 		err := ProcessConfigDefaults(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, time.Duration(0), cfg.Timeout)
 	})
-	
+
 	t.Run("very long duration default", func(t *testing.T) {
 		type LongDurationConfig struct {
 			Timeout time.Duration `default:"24h"`
 		}
-		
+
 		cfg := &LongDurationConfig{}
 		err := ProcessConfigDefaults(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, 24*time.Hour, cfg.Timeout)
 	})
-	
+
 	t.Run("complex duration default", func(t *testing.T) {
 		type ComplexDurationConfig struct {
 			Timeout time.Duration `default:"2h30m45s500ms"`
 		}
-		
+
 		cfg := &ComplexDurationConfig{}
 		err := ProcessConfigDefaults(cfg)
 		require.NoError(t, err)
@@ -472,7 +472,7 @@ func TestEdgeCases_TimeDuration_Defaults(t *testing.T) {
 func TestReverseProxyConfig_TimeDuration_Integration(t *testing.T) {
 	// Test the actual reverseproxy module's HealthCheckConfig with duration defaults
 	// This ensures our duration support works with the real-world config that was failing
-	
+
 	// Import reverseproxy config type
 	type HealthCheckConfig struct {
 		Enabled                bool          `json:"enabled" yaml:"enabled" toml:"enabled" env:"ENABLED" default:"false" desc:"Enable health checking for backend services"`
@@ -480,19 +480,19 @@ func TestReverseProxyConfig_TimeDuration_Integration(t *testing.T) {
 		Timeout                time.Duration `json:"timeout" yaml:"timeout" toml:"timeout" env:"TIMEOUT" default:"5s" desc:"Timeout for health check requests"`
 		RecentRequestThreshold time.Duration `json:"recent_request_threshold" yaml:"recent_request_threshold" toml:"recent_request_threshold" env:"RECENT_REQUEST_THRESHOLD" default:"60s" desc:"Skip health check if a request to the backend occurred within this time"`
 	}
-	
+
 	t.Run("defaults applied correctly", func(t *testing.T) {
 		cfg := &HealthCheckConfig{}
 		err := ProcessConfigDefaults(cfg)
 		require.NoError(t, err)
-		
+
 		// Verify all duration defaults are applied correctly
-		assert.Equal(t, false, cfg.Enabled)
+		assert.False(t, cfg.Enabled)
 		assert.Equal(t, 30*time.Second, cfg.Interval)
 		assert.Equal(t, 5*time.Second, cfg.Timeout)
 		assert.Equal(t, 60*time.Second, cfg.RecentRequestThreshold)
 	})
-	
+
 	t.Run("config feeder overrides defaults", func(t *testing.T) {
 		// Create test YAML file
 		yamlContent := `enabled: true
@@ -506,32 +506,32 @@ timeout: 10s
 		defer os.Remove(yamlFile)
 
 		cfg := &HealthCheckConfig{}
-		
+
 		// Apply config feeder first (normal flow)
 		yamlFeeder := feeders.NewYamlFeeder(yamlFile)
 		err = yamlFeeder.Feed(cfg)
 		require.NoError(t, err)
-		
+
 		// Then apply defaults (this is what ValidateConfig does)
 		err = ProcessConfigDefaults(cfg)
 		require.NoError(t, err)
-		
+
 		// Verify feeder values preserved and defaults applied where needed
-		assert.Equal(t, true, cfg.Enabled)              // From feeder
-		assert.Equal(t, 45*time.Second, cfg.Interval)   // From feeder
-		assert.Equal(t, 10*time.Second, cfg.Timeout)    // From feeder
+		assert.True(t, cfg.Enabled)                                 // From feeder
+		assert.Equal(t, 45*time.Second, cfg.Interval)               // From feeder
+		assert.Equal(t, 10*time.Second, cfg.Timeout)                // From feeder
 		assert.Equal(t, 60*time.Second, cfg.RecentRequestThreshold) // Default (not in YAML)
 	})
-	
+
 	t.Run("complete validation flow", func(t *testing.T) {
 		cfg := &HealthCheckConfig{}
-		
+
 		// This is the complete flow that the application uses
 		err := ValidateConfig(cfg)
 		require.NoError(t, err)
-		
+
 		// Verify all defaults are applied
-		assert.Equal(t, false, cfg.Enabled)
+		assert.False(t, cfg.Enabled)
 		assert.Equal(t, 30*time.Second, cfg.Interval)
 		assert.Equal(t, 5*time.Second, cfg.Timeout)
 		assert.Equal(t, 60*time.Second, cfg.RecentRequestThreshold)

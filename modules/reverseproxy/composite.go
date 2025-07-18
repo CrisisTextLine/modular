@@ -90,7 +90,10 @@ func (h *CompositeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			w.WriteHeader(cachedResp.StatusCode)
-			w.Write(cachedResp.Body)
+			if _, err := w.Write(cachedResp.Body); err != nil {
+				http.Error(w, "Failed to write cached response", http.StatusInternalServerError)
+				return
+			}
 			return
 		}
 	}
@@ -137,7 +140,10 @@ func (h *CompositeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 
 	// Copy body to the response writer.
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		http.Error(w, "Failed to write response body", http.StatusInternalServerError)
+		return
+	}
 }
 
 // executeParallel executes all backend requests in parallel.

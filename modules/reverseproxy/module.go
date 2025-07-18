@@ -1017,7 +1017,11 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusServiceUnavailable)
-				w.Write([]byte(`{"error":"Service temporarily unavailable","code":"CIRCUIT_OPEN"}`))
+				if _, err := w.Write([]byte(`{"error":"Service temporarily unavailable","code":"CIRCUIT_OPEN"}`)); err != nil {
+					if m.app != nil && m.app.Logger() != nil {
+						m.app.Logger().Error("Failed to write circuit breaker response", "error", err)
+					}
+				}
 				return
 			} else if err != nil {
 				// Some other error occurred
@@ -1124,7 +1128,11 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusServiceUnavailable)
-				w.Write([]byte(`{"error":"Service temporarily unavailable","code":"CIRCUIT_OPEN"}`))
+				if _, err := w.Write([]byte(`{"error":"Service temporarily unavailable","code":"CIRCUIT_OPEN"}`)); err != nil {
+					if m.app != nil && m.app.Logger() != nil {
+						m.app.Logger().Error("Failed to write circuit breaker response", "error", err)
+					}
+				}
 				return
 			} else if err != nil {
 				// Some other error occurred
@@ -1378,7 +1386,11 @@ func (m *ReverseProxyModule) RegisterCustomEndpoint(pattern string, mapping Endp
 
 		// Write status code and body
 		w.WriteHeader(result.StatusCode)
-		w.Write(result.Body)
+		if _, err := w.Write(result.Body); err != nil {
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Error("Failed to write response body", "error", err)
+			}
+		}
 	}
 
 	// Register the handler with the router
@@ -1539,7 +1551,11 @@ func (m *ReverseProxyModule) registerMetricsEndpoint(endpoint string) {
 		// Set content type and write response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(jsonData)
+		if _, err := w.Write(jsonData); err != nil {
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Error("Failed to write metrics response", "error", err)
+			}
+		}
 	}
 
 	// Register the metrics endpoint with the router

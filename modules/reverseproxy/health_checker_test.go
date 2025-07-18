@@ -452,7 +452,7 @@ func TestHealthChecker_FullIntegration(t *testing.T) {
 		Enabled:                true,
 		Interval:               50 * time.Millisecond, // Fast for testing
 		Timeout:                1 * time.Second,
-		RecentRequestThreshold: 10 * time.Millisecond,
+		RecentRequestThreshold: 80 * time.Millisecond, // Longer than interval
 		ExpectedStatusCodes:    []int{200},
 		HealthEndpoints: map[string]string{
 			"healthy": "/health",
@@ -498,17 +498,19 @@ func TestHealthChecker_FullIntegration(t *testing.T) {
 	assert.Contains(t, status.LastError, "500", "Error should mention status code")
 
 	// Test recent request threshold
+	// Record a request
 	hc.RecordBackendRequest("healthy")
-
-	// Wait for another check interval
-	time.Sleep(100 * time.Millisecond)
+	
+	// Wait for the next health check interval (50ms)
+	// Since threshold is 80ms, the request should still be recent
+	time.Sleep(60 * time.Millisecond)
 
 	// Check that the health check was skipped
 	status, _ = hc.GetBackendHealthStatus("healthy")
 	assert.Greater(t, status.ChecksSkipped, int64(0), "Should have skipped at least one check")
 
 	// Wait for threshold to pass
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond) // Total wait: 90ms, threshold is 80ms
 
 	// Wait for another check interval
 	time.Sleep(100 * time.Millisecond)

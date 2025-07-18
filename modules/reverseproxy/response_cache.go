@@ -29,6 +29,8 @@ type responseCache struct {
 }
 
 // newResponseCache creates a new response cache with the specified TTL and max size
+//
+//nolint:unused // Used in tests
 func newResponseCache(defaultTTL time.Duration, maxCacheSize int, cleanupInterval time.Duration) *responseCache {
 	rc := &responseCache{
 		cache:        make(map[string]*CachedResponse),

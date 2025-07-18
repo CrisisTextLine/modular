@@ -162,18 +162,13 @@ func (h *CompositeHandler) executeParallel(ctx context.Context, w http.ResponseW
 			}
 
 			// Execute the request.
-			resp, err := h.executeBackendRequest(ctx, b, r)
+			resp, err := h.executeBackendRequest(ctx, b, r) //nolint:bodyclose // Response body is closed in mergeResponses cleanup
 			if err != nil {
 				if circuitBreaker != nil {
 					circuitBreaker.RecordFailure()
 				}
 				return
 			}
-			defer func() {
-				if resp != nil && resp.Body != nil {
-					resp.Body.Close()
-				}
-			}()
 
 			// Record success in the circuit breaker.
 			if circuitBreaker != nil {
@@ -215,18 +210,13 @@ func (h *CompositeHandler) executeSequential(ctx context.Context, w http.Respons
 		}
 
 		// Execute the request.
-		resp, err := h.executeBackendRequest(ctx, backend, r)
+		resp, err := h.executeBackendRequest(ctx, backend, r) //nolint:bodyclose // Response body is closed in mergeResponses cleanup
 		if err != nil {
 			if circuitBreaker != nil {
 				circuitBreaker.RecordFailure()
 			}
 			continue
 		}
-		defer func(r *http.Response) {
-			if r != nil && r.Body != nil {
-				r.Body.Close()
-			}
-		}(resp)
 
 		// Record success in the circuit breaker.
 		if circuitBreaker != nil {

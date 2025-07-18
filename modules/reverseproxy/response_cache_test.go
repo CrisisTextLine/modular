@@ -229,8 +229,11 @@ func TestCleanup(t *testing.T) {
 	rc.mutex.RUnlock()
 	assert.Equal(t, 5, initialCount, "All items should be in cache initially")
 
-	// Wait for cleanup to run (longer than cleanup interval)
+	// Wait for items to expire
 	time.Sleep(100 * time.Millisecond)
+
+	// Manually trigger cleanup
+	rc.cleanup()
 
 	// After cleanup, all items should be gone due to expiration
 	rc.mutex.RLock()

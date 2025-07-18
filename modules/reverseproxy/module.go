@@ -1343,19 +1343,14 @@ func (m *ReverseProxyModule) RegisterCustomEndpoint(pattern string, mapping Endp
 			}
 
 			// Execute the request
-			resp, err := m.httpClient.Do(req)
+			resp, err := m.httpClient.Do(req) //nolint:bodyclose // Response body is closed in defer cleanup
 			if err != nil {
 				m.app.Logger().Error("Failed to execute request", "backend", endpoint.Backend, "error", err)
 				continue
 			}
-			defer func(r *http.Response) {
-				if r != nil && r.Body != nil {
-					r.Body.Close()
-				}
-			}(resp)
 
 			// Add to the list of responses that need to be closed immediately
-			responsesToClose = append(responsesToClose, resp)
+			responsesToClose = append(responsesToClose, resp) //nolint:bodyclose // Response body is closed in defer cleanup
 
 			// Store the response
 			responses[endpoint.Backend] = resp

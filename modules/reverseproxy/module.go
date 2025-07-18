@@ -1757,9 +1757,9 @@ func mergeConfigs(global, tenant *ReverseProxyConfig) *ReverseProxyConfig {
 		merged.HealthCheck = tenant.HealthCheck
 	} else {
 		merged.HealthCheck = global.HealthCheck
-  }
+	}
 
-  // Merge backend configurations - tenant settings override global ones
+	// Merge backend configurations - tenant settings override global ones
 	for backendID, globalConfig := range global.BackendConfigs {
 		merged.BackendConfigs[backendID] = globalConfig
 	}
@@ -1771,6 +1771,8 @@ func mergeConfigs(global, tenant *ReverseProxyConfig) *ReverseProxyConfig {
 }
 
 // getBackendMap returns a map of backend IDs to their URLs from the global configuration.
+//
+//nolint:unused
 func (m *ReverseProxyModule) getBackendMap() map[string]string {
 	if m.config == nil || m.config.BackendServices == nil {
 		return map[string]string{}
@@ -1779,6 +1781,8 @@ func (m *ReverseProxyModule) getBackendMap() map[string]string {
 }
 
 // getTenantBackendMap returns a map of backend IDs to their URLs for a specific tenant.
+//
+//nolint:unused
 func (m *ReverseProxyModule) getTenantBackendMap(tenantID modular.TenantID) map[string]string {
 	if m.tenants == nil {
 		return map[string]string{}
@@ -1793,11 +1797,15 @@ func (m *ReverseProxyModule) getTenantBackendMap(tenantID modular.TenantID) map[
 }
 
 // getBackendURLsByTenant returns all backend URLs for a specific tenant.
+//
+//nolint:unused
 func (m *ReverseProxyModule) getBackendURLsByTenant(tenantID modular.TenantID) map[string]string {
 	return m.getTenantBackendMap(tenantID)
 }
 
 // getBackendByPathAndTenant returns the backend URL for a specific path and tenant.
+//
+//nolint:unused
 func (m *ReverseProxyModule) getBackendByPathAndTenant(path string, tenantID modular.TenantID) (string, bool) {
 	// Get the tenant-specific backend map
 	backendMap := m.getTenantBackendMap(tenantID)
@@ -1823,7 +1831,7 @@ func (m *ReverseProxyModule) getBackendByPathAndTenant(path string, tenantID mod
 		return bestMatch, true
 	}
 
-	return merged
+	return "", false
 }
 
 // registerMetricsEndpoint registers an HTTP endpoint to expose collected metrics

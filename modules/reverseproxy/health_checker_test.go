@@ -500,7 +500,7 @@ func TestHealthChecker_FullIntegration(t *testing.T) {
 	// Test recent request threshold
 	// Record a request
 	hc.RecordBackendRequest("healthy")
-	
+
 	// Wait for the next health check interval (50ms)
 	// Since threshold is 80ms, the request should still be recent
 	time.Sleep(60 * time.Millisecond)

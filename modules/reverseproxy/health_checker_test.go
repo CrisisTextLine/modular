@@ -569,14 +569,14 @@ func TestModule_HealthCheckIntegration(t *testing.T) {
 
 	// Initialize module
 	err := module.RegisterConfig(mockApp)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Set up dependencies
 	module.router = mockRouter
 
 	// Initialize module - this will use the registered config (empty)
 	err = module.Init(mockApp)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Manually set the test config (this is how other tests do it)
 	module.config = testConfig
@@ -608,7 +608,7 @@ func TestModule_HealthCheckIntegration(t *testing.T) {
 	// Start module
 	ctx := context.Background()
 	err = module.Start(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Verify health checker was started
 	assert.True(t, module.healthChecker.IsRunning())
@@ -645,7 +645,7 @@ func TestModule_HealthCheckIntegration(t *testing.T) {
 
 	// Stop module
 	err = module.Stop(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Verify health checker was stopped
 	assert.False(t, module.healthChecker.IsRunning())

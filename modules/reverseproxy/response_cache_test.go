@@ -285,6 +285,6 @@ func TestConcurrentAccess(t *testing.T) {
 	count := len(rc.cache)
 	rc.mutex.RUnlock()
 
-	assert.True(t, count > 0, "Cache should contain items after concurrent operations")
-	assert.True(t, count <= 1000, "Cache should not exceed max size")
+	assert.Positive(t, count, "Cache should contain items after concurrent operations")
+	assert.LessOrEqual(t, count, 1000, "Cache should not exceed max size")
 }

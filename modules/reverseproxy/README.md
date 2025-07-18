@@ -11,6 +11,11 @@ The Reverse Proxy module functions as a versatile API gateway that can route req
 ## Key Features
 
 * **Multi-Backend Routing**: Route HTTP requests to any number of configurable backend services
+* **Per-Backend Configuration**: Configure path rewriting and header rewriting for each backend service
+* **Per-Endpoint Configuration**: Override backend configuration for specific endpoints within a backend
+* **Hostname Handling**: Control how the Host header is handled (preserve original, use backend, or use custom)
+* **Header Rewriting**: Add, modify, or remove headers before forwarding requests
+* **Path Rewriting**: Transform request paths before forwarding to backends
 * **Response Aggregation**: Combine responses from multiple backends using various strategies
 * **Custom Response Transformers**: Create custom functions to transform and merge backend responses
 * **Tenant Awareness**: Support for multi-tenant environments with tenant-specific routing
@@ -108,7 +113,35 @@ reverseproxy:
         interval: "45s"
         timeout: "10s"
         expected_status_codes: [200, 201]
-  
+
+  # Per-backend configuration
+  backend_configs:
+    api:
+      path_rewriting:
+        strip_base_path: "/api/v1"
+        base_path_rewrite: "/internal/api"
+      header_rewriting:
+        hostname_handling: "preserve_original"
+        set_headers:
+          X-API-Key: "secret-key"
+          X-Service: "api"
+      
+      endpoints:
+        users:
+          pattern: "/users/*"
+          path_rewriting:
+            base_path_rewrite: "/internal/users"
+          header_rewriting:
+            hostname_handling: "use_custom"
+            custom_hostname: "users.internal.com"
+    
+    auth:
+      header_rewriting:
+        hostname_handling: "use_backend"
+        set_headers:
+          X-Service: "auth"
+
+
   # Composite routes for response aggregation
   composite_routes:
     "/api/user/profile":
@@ -169,7 +202,19 @@ health_check:
 - **Status Monitoring**: Tracks health status, response times, and error details
 - **Metrics Integration**: Exposes health status through metrics endpoints
 
-For detailed documentation and examples, see the [DOCUMENTATION.md](DOCUMENTATION.md) file.
+1. **Per-Backend Configuration**: Configure path rewriting and header rewriting for each backend service
+2. **Per-Endpoint Configuration**: Override backend configuration for specific endpoints
+3. **Hostname Handling**: Control how the Host header is handled for each backend
+4. **Header Rewriting**: Add, modify, or remove headers before forwarding requests
+5. **Path Rewriting**: Transform request paths before forwarding to backends
+6. **Custom Response Transformers**: Create custom functions to transform responses from multiple backends
+7. **Custom Endpoint Mappings**: Define detailed mappings between frontend endpoints and backend services
+8. **Tenant-Specific Routing**: Route requests to different backend URLs based on tenant ID
+
+For detailed documentation and examples, see:
+- [PATH_REWRITING_GUIDE.md](PATH_REWRITING_GUIDE.md) - Complete guide to path rewriting and header rewriting
+- [PER_BACKEND_CONFIGURATION_GUIDE.md](PER_BACKEND_CONFIGURATION_GUIDE.md) - Per-backend and per-endpoint configuration
+- [DOCUMENTATION.md](DOCUMENTATION.md) - General module documentation
 
 ## License
 

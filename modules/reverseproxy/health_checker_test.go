@@ -108,7 +108,7 @@ func TestHealthChecker_DNSResolution(t *testing.T) {
 
 	backends := map[string]string{
 		"valid_host":   "http://localhost:8080",
-		"invalid_host": "http://nonexistent.invalid.domain.xyz:8080",
+		"invalid_host": "http://nonexistent.example.invalid:8080",
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -123,7 +123,8 @@ func TestHealthChecker_DNSResolution(t *testing.T) {
 	assert.NotEmpty(t, resolvedIPs)
 
 	// Test DNS resolution for invalid host
-	dnsResolved, resolvedIPs, err = hc.performDNSCheck("http://nonexistent.invalid.domain.xyz:8080")
+	// Use RFC 2606 reserved domain that should not resolve
+	dnsResolved, resolvedIPs, err = hc.performDNSCheck("http://nonexistent.example.invalid:8080")
 	assert.False(t, dnsResolved)
 	assert.Error(t, err)
 	assert.Empty(t, resolvedIPs)

@@ -175,13 +175,13 @@ func TestHealthChecker_HTTPCheck(t *testing.T) {
 	// Test healthy server
 	healthy, responseTime, err := hc.performHTTPCheck(ctx, "healthy", healthyServer.URL)
 	assert.True(t, healthy)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Greater(t, responseTime, time.Duration(0))
 
 	// Test unhealthy server (500 status)
 	healthy, responseTime, err = hc.performHTTPCheck(ctx, "unhealthy", unhealthyServer.URL)
 	assert.False(t, healthy)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Greater(t, responseTime, time.Duration(0))
 
 	// Test timeout
@@ -195,7 +195,7 @@ func TestHealthChecker_HTTPCheck(t *testing.T) {
 
 	healthy, responseTime, err = hc.performHTTPCheck(ctx, "timeout", timeoutServer.URL)
 	assert.False(t, healthy)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Greater(t, responseTime, time.Duration(0))
 }
 
@@ -494,7 +494,7 @@ func TestHealthChecker_FullIntegration(t *testing.T) {
 	assert.True(t, exists)
 	assert.False(t, status.Healthy, "Unhealthy backend should be marked as unhealthy")
 	assert.True(t, status.DNSResolved, "DNS should be resolved for unhealthy backend")
-	assert.Greater(t, status.TotalChecks, int64(0), "Should have performed at least one check")
+	assert.Positive(t, status.TotalChecks, "Should have performed at least one check")
 	assert.Equal(t, int64(0), status.SuccessfulChecks, "Should have no successful checks")
 	assert.NotEmpty(t, status.LastError, "Should have an error for unhealthy backend")
 	assert.Contains(t, status.LastError, "500", "Error should mention status code")
@@ -509,7 +509,7 @@ func TestHealthChecker_FullIntegration(t *testing.T) {
 
 	// Check that the health check was skipped
 	status, _ = hc.GetBackendHealthStatus("healthy")
-	assert.Greater(t, status.ChecksSkipped, int64(0), "Should have skipped at least one check")
+	assert.Positive(t, status.ChecksSkipped, "Should have skipped at least one check")
 
 	// Wait for threshold to pass
 	time.Sleep(30 * time.Millisecond) // Total wait: 90ms, threshold is 80ms
@@ -531,7 +531,7 @@ func TestModule_HealthCheckIntegration(t *testing.T) {
 			_, _ = w.Write([]byte("OK"))
 		} else {
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"server":"test","path":"%s"}`, r.URL.Path)))
+			fmt.Fprintf(w, `{"server":"test","path":"%s"}`, r.URL.Path)
 		}
 	}))
 	defer server.Close()

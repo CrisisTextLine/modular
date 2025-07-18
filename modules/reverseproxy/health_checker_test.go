@@ -120,14 +120,14 @@ func TestHealthChecker_DNSResolution(t *testing.T) {
 	// Test DNS resolution for valid host
 	dnsResolved, resolvedIPs, err := hc.performDNSCheck("http://localhost:8080")
 	assert.True(t, dnsResolved)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotEmpty(t, resolvedIPs)
 
 	// Test DNS resolution for invalid host
 	// Use RFC 2606 reserved domain that should not resolve
 	dnsResolved, resolvedIPs, err = hc.performDNSCheck("http://nonexistent.example.invalid:8080")
 	assert.False(t, dnsResolved)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, resolvedIPs)
 
 	// Test invalid URL
@@ -474,7 +474,7 @@ func TestHealthChecker_FullIntegration(t *testing.T) {
 	// Start the health checker
 	ctx := context.Background()
 	err := hc.Start(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer hc.Stop()
 
 	// Wait for health checks to complete

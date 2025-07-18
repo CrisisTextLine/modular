@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestHealthChecker_NewHealthChecker tests creation of a health checker
@@ -53,7 +54,7 @@ func TestHealthChecker_StartStop(t *testing.T) {
 	// Create a mock server that returns healthy status
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	}))
 	defer server.Close()
 
@@ -71,7 +72,7 @@ func TestHealthChecker_StartStop(t *testing.T) {
 	assert.False(t, hc.IsRunning())
 
 	err := hc.Start(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, hc.IsRunning())
 
 	// Wait a bit for health checks to run
@@ -83,7 +84,7 @@ func TestHealthChecker_StartStop(t *testing.T) {
 	assert.Contains(t, status, "backend1")
 	assert.True(t, status["backend1"].Healthy)
 	assert.True(t, status["backend1"].DNSResolved)
-	assert.True(t, status["backend1"].TotalChecks > 0)
+	assert.Positive(t, status["backend1"].TotalChecks)
 
 	// Test stopping
 	hc.Stop()
@@ -91,7 +92,7 @@ func TestHealthChecker_StartStop(t *testing.T) {
 
 	// Test that we can start again
 	err = hc.Start(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, hc.IsRunning())
 
 	hc.Stop()
@@ -148,13 +149,13 @@ func TestHealthChecker_HTTPCheck(t *testing.T) {
 	// Create servers with different responses
 	healthyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	}))
 	defer healthyServer.Close()
 
 	unhealthyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Internal Server Error"))
+		_, _ = w.Write([]byte("Internal Server Error"))
 	}))
 	defer unhealthyServer.Close()
 
@@ -436,7 +437,7 @@ func TestHealthChecker_FullIntegration(t *testing.T) {
 	healthyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
+			_, _ = w.Write([]byte("OK"))
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -445,7 +446,7 @@ func TestHealthChecker_FullIntegration(t *testing.T) {
 
 	unhealthyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Internal Server Error"))
+		_, _ = w.Write([]byte("Internal Server Error"))
 	}))
 	defer unhealthyServer.Close()
 
@@ -484,8 +485,8 @@ func TestHealthChecker_FullIntegration(t *testing.T) {
 	assert.True(t, exists)
 	assert.True(t, status.Healthy, "Healthy backend should be marked as healthy")
 	assert.True(t, status.DNSResolved, "DNS should be resolved for healthy backend")
-	assert.Greater(t, status.TotalChecks, int64(0), "Should have performed at least one check")
-	assert.Greater(t, status.SuccessfulChecks, int64(0), "Should have at least one successful check")
+	assert.Positive(t, status.TotalChecks, "Should have performed at least one check")
+	assert.Positive(t, status.SuccessfulChecks, "Should have at least one successful check")
 	assert.Empty(t, status.LastError, "Should have no error for healthy backend")
 
 	// Check unhealthy backend
@@ -527,10 +528,10 @@ func TestModule_HealthCheckIntegration(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "health") {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
+			_, _ = w.Write([]byte("OK"))
 		} else {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(fmt.Sprintf(`{"server":"test","path":"%s"}`, r.URL.Path)))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"server":"test","path":"%s"}`, r.URL.Path)))
 		}
 	}))
 	defer server.Close()
@@ -677,7 +678,7 @@ func TestModule_HealthCheckDisabled(t *testing.T) {
 
 	// Initialize module
 	err := module.RegisterConfig(mockApp)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Set up dependencies
 	module.router = mockRouter

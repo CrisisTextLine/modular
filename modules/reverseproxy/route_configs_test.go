@@ -10,13 +10,13 @@ func TestBasicRouteConfigsFeatureFlagRouting(t *testing.T) {
 	// Create mock backends
 	primaryBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("primary-backend-response"))
+		_, _ = w.Write([]byte("primary-backend-response"))
 	}))
 	defer primaryBackend.Close()
 
 	alternativeBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("alternative-backend-response"))
+		_, _ = w.Write([]byte("alternative-backend-response"))
 	}))
 	defer alternativeBackend.Close()
 
@@ -52,9 +52,9 @@ func TestBasicRouteConfigsFeatureFlagRouting(t *testing.T) {
 				AlternativeBackend: "default",
 			},
 		},
-		DefaultBackend:     "default",
-		TenantIDHeader:     "X-Affiliate-Id",
-		RequireTenantID:    false,
+		DefaultBackend:  "default",
+		TenantIDHeader:  "X-Affiliate-Id",
+		RequireTenantID: false,
 	}
 
 	// Replace config with our configured one
@@ -82,7 +82,7 @@ func TestBasicRouteConfigsFeatureFlagRouting(t *testing.T) {
 		// Set feature flag to false
 		featureFlagEvaluator.SetFlag("avatar-api", false)
 
-		// Start the module 
+		// Start the module
 		if err := reverseProxyModule.Start(app.Context()); err != nil {
 			t.Fatalf("Failed to start module: %v", err)
 		}
@@ -138,13 +138,13 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 	// Create mock backends
 	primaryBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("primary-backend-response"))
+		_, _ = w.Write([]byte("primary-backend-response"))
 	}))
 	defer primaryBackend.Close()
 
 	alternativeBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("alternative-backend-response"))
+		_, _ = w.Write([]byte("alternative-backend-response"))
 	}))
 	defer alternativeBackend.Close()
 
@@ -153,8 +153,8 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 
 	// Create feature flag evaluator with tenant-specific flags
 	featureFlagEvaluator := NewFileBasedFeatureFlagEvaluator()
-	featureFlagEvaluator.SetFlag("avatar-api", true)                          // Global flag is true
-	featureFlagEvaluator.SetTenantFlag("ctl", "avatar-api", false)            // Tenant-specific flag is false
+	featureFlagEvaluator.SetFlag("avatar-api", true)               // Global flag is true
+	featureFlagEvaluator.SetTenantFlag("ctl", "avatar-api", false) // Tenant-specific flag is false
 
 	// Create mock application (needs to be TenantApplication)
 	app := NewMockTenantApplication()
@@ -180,9 +180,9 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 				AlternativeBackend: "default",
 			},
 		},
-		DefaultBackend:     "default",
-		TenantIDHeader:     "X-Affiliate-Id",
-		RequireTenantID:    false,
+		DefaultBackend:  "default",
+		TenantIDHeader:  "X-Affiliate-Id",
+		RequireTenantID: false,
 	}
 
 	// Replace config with our configured one
@@ -206,7 +206,7 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 		t.Fatalf("Failed to initialize module: %v", err)
 	}
 
-	// Start the module 
+	// Start the module
 	if err := reverseProxyModule.Start(app.Context()); err != nil {
 		t.Fatalf("Failed to start module: %v", err)
 	}

@@ -787,7 +787,6 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 								m.app.Logger().Debug("Feature flag disabled for route, using alternative backend",
 									"route", routePath, "flagID", routeConfig.FeatureFlagID,
 									"primary", backendID, "alternative", alternativeBackend)
-								
 								// Create handler for alternative backend
 								altHandler := m.createBackendProxyHandler(alternativeBackend)
 								altHandler(w, r)
@@ -2054,9 +2053,9 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 							alternativeBackend := m.getAlternativeBackend(routeConfig.AlternativeBackend)
 							if alternativeBackend != "" {
 								m.app.Logger().Debug("Feature flag disabled for route, using alternative backend",
-									"path", path, "flagID", routeConfig.FeatureFlagID, 
+									"path", path, "flagID", routeConfig.FeatureFlagID,
 									"primary", primaryBackend, "alternative", alternativeBackend)
-								
+
 								if hasTenant {
 									handler := m.createBackendProxyHandlerForTenant(modular.TenantID(tenantIDStr), alternativeBackend)
 									handler(w, r)

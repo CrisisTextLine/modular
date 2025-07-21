@@ -345,28 +345,15 @@ func (m *ReverseProxyModule) validateConfig() error {
 // interface to register routes with.
 func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 	return func(app modular.Application, services map[string]any) (modular.Module, error) {
-		app.Logger().Info("ReverseProxyModule Constructor called",
-			"available_services", len(services))
-		
-		// Log all available services for debugging
-		for serviceName, serviceInstance := range services {
-			app.Logger().Info("Available service",
-				"name", serviceName,
-				"type", fmt.Sprintf("%T", serviceInstance))
-		}
-		
 		// Get the required router service
 		handleFuncSvc, ok := services["router"].(routerService)
 		if !ok {
 			return nil, fmt.Errorf("%w: %s", ErrServiceNotHandleFunc, "router")
 		}
 		m.router = handleFuncSvc
-		app.Logger().Info("Router service injected successfully")
 
 		// Get the optional httpclient service
 		if httpClientInstance, exists := services["httpclient"]; exists {
-			app.Logger().Info("httpclient service found",
-				"type", fmt.Sprintf("%T", httpClientInstance))
 			if clientService, ok := httpClientInstance.(*http.Client); ok {
 				// Use the provided HTTP client
 				m.httpClient = clientService
@@ -375,8 +362,6 @@ func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 				app.Logger().Warn("httpclient service found but is not *http.Client",
 					"type", fmt.Sprintf("%T", httpClientInstance))
 			}
-		} else {
-			app.Logger().Info("httpclient service not found in services map")
 		}
 
 		return m, nil
@@ -564,8 +549,8 @@ func (m *ReverseProxyModule) RequiresServices() []modular.ServiceDependency {
 		{
 			Name:               "httpclient",
 			Required:           false, // Optional dependency
-			MatchByInterface:   true,
-			SatisfiesInterface: reflect.TypeOf((*http.Client)(nil)).Elem(),
+			MatchByInterface:   false,  // Use exact type matching since http.Client is a struct, not interface
+			SatisfiesInterface: nil,    // Not used for exact type matching
 		},
 	}
 }

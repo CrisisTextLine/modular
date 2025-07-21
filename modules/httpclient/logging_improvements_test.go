@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -129,7 +130,7 @@ func TestLoggingImprovements(t *testing.T) {
 			client := &http.Client{Transport: transport}
 
 			reqBody := bytes.NewBufferString(`{"test": "data"}`)
-			req, err := http.NewRequest("POST", server.URL+"/api/test", reqBody)
+			req, err := http.NewRequestWithContext(context.Background(), "POST", server.URL+"/api/test", reqBody)
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer token123")
 			req.Header.Set("Content-Type", "application/json")
@@ -246,7 +247,7 @@ func TestNoUselessDotDotDotLogs(t *testing.T) {
 
 	// Make a request
 	client := &http.Client{Transport: transport}
-	req, err := http.NewRequest("GET", server.URL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
 	require.NoError(t, err)
 
 	resp, err := client.Do(req)

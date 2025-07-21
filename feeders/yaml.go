@@ -30,6 +30,18 @@ func parseYAMLTag(tag string) (fieldName string, options []string) {
 	return fieldName, options
 }
 
+// getFieldNameFromTag extracts the field name from YAML tag or falls back to struct field name
+func getFieldNameFromTag(fieldType *reflect.StructField) (string, bool) {
+	if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
+		fieldName, _ := parseYAMLTag(yamlTag)
+		if fieldName == "" {
+			fieldName = fieldType.Name
+		}
+		return fieldName, true
+	}
+	return "", false
+}
+
 // YamlFeeder is a feeder that reads YAML files with optional verbose debug logging
 type YamlFeeder struct {
 	Path         string
@@ -213,33 +225,23 @@ func (y *YamlFeeder) processStructFields(rv reflect.Value, data map[string]inter
 
 // processField handles a single struct field with YAML data and field tracking
 func (y *YamlFeeder) processField(field reflect.Value, fieldType *reflect.StructField, data map[string]interface{}, fieldPath string) error {
-	// Handle nested structs
+	// Get field name from YAML tag or use struct field name
+	fieldName, hasYAMLTag := getFieldNameFromTag(fieldType)
+
 	switch field.Kind() {
 	case reflect.Ptr:
 		// Handle pointer types
-		if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
-			fieldName, _ := parseYAMLTag(yamlTag)
-			if fieldName == "" {
-				fieldName = fieldType.Name
-			}
+		if hasYAMLTag {
 			return y.setPointerFromYAML(field, fieldName, data, fieldType.Name, fieldPath)
 		}
 	case reflect.Slice:
 		// Handle slice types
-		if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
-			fieldName, _ := parseYAMLTag(yamlTag)
-			if fieldName == "" {
-				fieldName = fieldType.Name
-			}
+		if hasYAMLTag {
 			return y.setSliceFromYAML(field, fieldName, data, fieldType.Name, fieldPath)
 		}
 	case reflect.Array:
 		// Handle array types
-		if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
-			fieldName, _ := parseYAMLTag(yamlTag)
-			if fieldName == "" {
-				fieldName = fieldType.Name
-			}
+		if hasYAMLTag {
 			return y.setArrayFromYAML(field, fieldName, data, fieldType.Name, fieldPath)
 		}
 	case reflect.Map:
@@ -247,24 +249,19 @@ func (y *YamlFeeder) processField(field reflect.Value, fieldType *reflect.Struct
 			y.logger.Debug("YamlFeeder: Processing map field", "fieldName", fieldType.Name, "fieldPath", fieldPath)
 		}
 
-		// Check if there's a yaml tag for this map
-		if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
-			fieldName, _ := parseYAMLTag(yamlTag)
-			if fieldName == "" {
-				fieldName = fieldType.Name
-			}
+		if hasYAMLTag {
 			// Look for map data using the parsed field name
 			if mapData, found := data[fieldName]; found {
 				if mapDataTyped, ok := mapData.(map[string]interface{}); ok {
 					return y.setMapFromYaml(field, mapDataTyped, fieldType.Name, fieldPath)
 				} else {
 					if y.verboseDebug && y.logger != nil {
-						y.logger.Debug("YamlFeeder: Map YAML data is not a map[string]interface{}", "fieldName", fieldType.Name, "yamlTag", yamlTag, "parsedFieldName", fieldName, "dataType", reflect.TypeOf(mapData))
+						y.logger.Debug("YamlFeeder: Map YAML data is not a map[string]interface{}", "fieldName", fieldType.Name, "parsedFieldName", fieldName, "dataType", reflect.TypeOf(mapData))
 					}
 				}
 			} else {
 				if y.verboseDebug && y.logger != nil {
-					y.logger.Debug("YamlFeeder: Map YAML data not found", "fieldName", fieldType.Name, "yamlTag", yamlTag, "parsedFieldName", fieldName)
+					y.logger.Debug("YamlFeeder: Map YAML data not found", "fieldName", fieldType.Name, "parsedFieldName", fieldName)
 				}
 			}
 		}
@@ -273,24 +270,19 @@ func (y *YamlFeeder) processField(field reflect.Value, fieldType *reflect.Struct
 			y.logger.Debug("YamlFeeder: Processing nested struct", "fieldName", fieldType.Name, "fieldPath", fieldPath)
 		}
 
-		// Check if there's a yaml tag for this nested struct
-		if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
-			fieldName, _ := parseYAMLTag(yamlTag)
-			if fieldName == "" {
-				fieldName = fieldType.Name
-			}
+		if hasYAMLTag {
 			// Look for nested data using the parsed field name
 			if nestedData, found := data[fieldName]; found {
 				if nestedMap, ok := nestedData.(map[string]interface{}); ok {
 					return y.processStructFields(field, nestedMap, fieldPath)
 				} else {
 					if y.verboseDebug && y.logger != nil {
-						y.logger.Debug("YamlFeeder: Nested YAML data is not a map", "fieldName", fieldType.Name, "yamlTag", yamlTag, "parsedFieldName", fieldName, "dataType", reflect.TypeOf(nestedData))
+						y.logger.Debug("YamlFeeder: Nested YAML data is not a map", "fieldName", fieldType.Name, "parsedFieldName", fieldName, "dataType", reflect.TypeOf(nestedData))
 					}
 				}
 			} else {
 				if y.verboseDebug && y.logger != nil {
-					y.logger.Debug("YamlFeeder: Nested YAML data not found", "fieldName", fieldType.Name, "yamlTag", yamlTag, "parsedFieldName", fieldName)
+					y.logger.Debug("YamlFeeder: Nested YAML data not found", "fieldName", fieldType.Name, "parsedFieldName", fieldName)
 				}
 			}
 		} else {
@@ -302,13 +294,9 @@ func (y *YamlFeeder) processField(field reflect.Value, fieldType *reflect.Struct
 		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128,
 		reflect.Chan, reflect.Func, reflect.Interface, reflect.String, reflect.UnsafePointer:
 		// Check for yaml tag for primitive types and other non-struct types
-		if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
-			fieldName, _ := parseYAMLTag(yamlTag)
-			if fieldName == "" {
-				fieldName = fieldType.Name
-			}
+		if hasYAMLTag {
 			if y.verboseDebug && y.logger != nil {
-				y.logger.Debug("YamlFeeder: Found yaml tag", "fieldName", fieldType.Name, "yamlTag", yamlTag, "parsedFieldName", fieldName, "fieldPath", fieldPath)
+				y.logger.Debug("YamlFeeder: Found yaml tag", "fieldName", fieldType.Name, "parsedFieldName", fieldName, "fieldPath", fieldPath)
 			}
 			return y.setFieldFromYaml(field, fieldName, data, fieldType.Name, fieldPath)
 		} else if y.verboseDebug && y.logger != nil {
@@ -316,13 +304,9 @@ func (y *YamlFeeder) processField(field reflect.Value, fieldType *reflect.Struct
 		}
 	default:
 		// Check for yaml tag for primitive types and other non-struct types
-		if yamlTag, exists := fieldType.Tag.Lookup("yaml"); exists {
-			fieldName, _ := parseYAMLTag(yamlTag)
-			if fieldName == "" {
-				fieldName = fieldType.Name
-			}
+		if hasYAMLTag {
 			if y.verboseDebug && y.logger != nil {
-				y.logger.Debug("YamlFeeder: Found yaml tag", "fieldName", fieldType.Name, "yamlTag", yamlTag, "parsedFieldName", fieldName, "fieldPath", fieldPath)
+				y.logger.Debug("YamlFeeder: Found yaml tag", "fieldName", fieldType.Name, "parsedFieldName", fieldName, "fieldPath", fieldPath)
 			}
 			return y.setFieldFromYaml(field, fieldName, data, fieldType.Name, fieldPath)
 		} else if y.verboseDebug && y.logger != nil {

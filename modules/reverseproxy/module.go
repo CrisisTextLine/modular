@@ -68,6 +68,14 @@ type ReverseProxyModule struct {
 	healthChecker *HealthChecker
 }
 
+// Compile-time assertions to ensure interface compliance
+var _ modular.Module = (*ReverseProxyModule)(nil)
+var _ modular.Constructable = (*ReverseProxyModule)(nil)
+var _ modular.ServiceAware = (*ReverseProxyModule)(nil)
+var _ modular.TenantAwareModule = (*ReverseProxyModule)(nil)
+var _ modular.Startable = (*ReverseProxyModule)(nil)
+var _ modular.Stoppable = (*ReverseProxyModule)(nil)
+
 // NewModule creates a new ReverseProxyModule with default settings.
 // This is the primary constructor for the reverseproxy module and should be used
 // when registering the module with the application.
@@ -337,18 +345,38 @@ func (m *ReverseProxyModule) validateConfig() error {
 // interface to register routes with.
 func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 	return func(app modular.Application, services map[string]any) (modular.Module, error) {
+		app.Logger().Info("ReverseProxyModule Constructor called",
+			"available_services", len(services))
+		
+		// Log all available services for debugging
+		for serviceName, serviceInstance := range services {
+			app.Logger().Info("Available service",
+				"name", serviceName,
+				"type", fmt.Sprintf("%T", serviceInstance))
+		}
+		
 		// Get the required router service
 		handleFuncSvc, ok := services["router"].(routerService)
 		if !ok {
 			return nil, fmt.Errorf("%w: %s", ErrServiceNotHandleFunc, "router")
 		}
 		m.router = handleFuncSvc
+		app.Logger().Info("Router service injected successfully")
 
 		// Get the optional httpclient service
-		if clientService, ok := services["httpclient"].(*http.Client); ok {
-			// Use the provided HTTP client
-			m.httpClient = clientService
-			app.Logger().Info("Using HTTP client from httpclient service")
+		if httpClientInstance, exists := services["httpclient"]; exists {
+			app.Logger().Info("httpclient service found",
+				"type", fmt.Sprintf("%T", httpClientInstance))
+			if clientService, ok := httpClientInstance.(*http.Client); ok {
+				// Use the provided HTTP client
+				m.httpClient = clientService
+				app.Logger().Info("Using HTTP client from httpclient service")
+			} else {
+				app.Logger().Warn("httpclient service found but is not *http.Client",
+					"type", fmt.Sprintf("%T", httpClientInstance))
+			}
+		} else {
+			app.Logger().Info("httpclient service not found in services map")
 		}
 
 		return m, nil

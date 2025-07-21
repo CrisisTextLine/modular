@@ -22,6 +22,13 @@ import (
 	"github.com/gobwas/glob"
 )
 
+// httpDoer defines the minimal interface for making HTTP requests.
+// This allows the reverseproxy module to work with any HTTP client
+// that implements the Do method, not just http.Client.
+type httpDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 // ReverseProxyModule provides a modular reverse proxy implementation with support for
 // multiple backends, composite routes that combine responses from different backends,
 // and tenant-specific routing configurations.
@@ -352,16 +359,36 @@ func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 		}
 		m.router = handleFuncSvc
 
-		// Get the optional httpclient service
+		// Get the optional httpclient service (name-based)
 		if httpClientInstance, exists := services["httpclient"]; exists {
 			if clientService, ok := httpClientInstance.(*http.Client); ok {
 				// Use the provided HTTP client
 				m.httpClient = clientService
-				app.Logger().Info("Using HTTP client from httpclient service")
+				app.Logger().Info("Using HTTP client from httpclient service (name-based)")
+				return m, nil
 			} else {
 				app.Logger().Warn("httpclient service found but is not *http.Client",
 					"type", fmt.Sprintf("%T", httpClientInstance))
 			}
+		}
+
+		// Get the optional http-doer service (interface-based)
+		if httpDoerInstance, exists := services["http-doer"]; exists {
+			if doerService, ok := httpDoerInstance.(httpDoer); ok {
+				// Convert httpDoer to *http.Client if possible
+				if client, ok := doerService.(*http.Client); ok {
+					m.httpClient = client
+					app.Logger().Info("Using HTTP client from http-doer service (interface-based)")
+				} else {
+					app.Logger().Warn("http-doer service found but is not *http.Client",
+						"type", fmt.Sprintf("%T", httpDoerInstance))
+				}
+			}
+		}
+
+		// If no HTTP client service was found, we'll create a default one in Init()
+		if m.httpClient == nil {
+			app.Logger().Info("No httpclient service available, will create default client")
 		}
 
 		return m, nil
@@ -549,8 +576,14 @@ func (m *ReverseProxyModule) RequiresServices() []modular.ServiceDependency {
 		{
 			Name:               "httpclient",
 			Required:           false, // Optional dependency
-			MatchByInterface:   false,  // Use exact type matching since http.Client is a struct, not interface
-			SatisfiesInterface: nil,    // Not used for exact type matching
+			MatchByInterface:   false,  // Use name-based matching for the concrete http.Client
+			SatisfiesInterface: nil,    // Not used for name-based matching
+		},
+		{
+			Name:               "http-doer",
+			Required:           false, // Optional dependency
+			MatchByInterface:   true,   // Use interface-based matching
+			SatisfiesInterface: reflect.TypeOf((*httpDoer)(nil)).Elem(),
 		},
 	}
 }

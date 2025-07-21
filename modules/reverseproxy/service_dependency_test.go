@@ -2,7 +2,6 @@ package reverseproxy
 
 import (
 	"net/http"
-	"os"
 	"reflect"
 	"testing"
 
@@ -14,16 +13,8 @@ import (
 // TestReverseProxyServiceDependencyResolution tests that the reverseproxy module
 // can receive HTTP client services via interface-based matching
 func TestReverseProxyServiceDependencyResolution(t *testing.T) {
-	// Clean up any environment variables that might interfere with tests
-	originalRequestTimeout := os.Getenv("REQUEST_TIMEOUT")
-	defer func() {
-		if originalRequestTimeout != "" {
-			os.Setenv("REQUEST_TIMEOUT", originalRequestTimeout)
-		} else {
-			os.Unsetenv("REQUEST_TIMEOUT")
-		}
-	}()
-	os.Unsetenv("REQUEST_TIMEOUT")
+	// Use t.Setenv to isolate environment variables in tests
+	t.Setenv("REQUEST_TIMEOUT", "10s")
 
 	// Test 1: Interface-based service resolution
 	t.Run("InterfaceBasedServiceResolution", func(t *testing.T) {
@@ -95,7 +86,7 @@ func TestHTTPDoerInterfaceImplementation(t *testing.T) {
 	clientType := reflect.TypeOf(client)
 	doerInterface := reflect.TypeOf((*httpDoer)(nil)).Elem()
 
-	assert.True(t, clientType.Implements(doerInterface), 
+	assert.True(t, clientType.Implements(doerInterface),
 		"http.Client should implement httpDoer interface via reflection")
 }
 

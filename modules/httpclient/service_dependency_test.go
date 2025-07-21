@@ -25,7 +25,7 @@ func TestHTTPClientInterface(t *testing.T) {
 	clientType := reflect.TypeOf(client)
 	doerInterface := reflect.TypeOf((*HTTPDoer)(nil)).Elem()
 
-	assert.True(t, clientType.Implements(doerInterface), 
+	assert.True(t, clientType.Implements(doerInterface),
 		"http.Client should implement HTTPDoer interface via reflection")
 }
 

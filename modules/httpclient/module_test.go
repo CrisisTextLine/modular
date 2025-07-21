@@ -11,6 +11,7 @@ import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockApplication implements modular.Application interface for testing
@@ -151,7 +152,7 @@ func TestHTTPClientModule_Init(t *testing.T) {
 	err := module.Init(mockApp)
 
 	// Assertions
-	assert.NoError(t, err, "Init should not return an error")
+	require.NoError(t, err, "Init should not return an error")
 	assert.NotNil(t, module.httpClient, "HTTP client should not be nil")
 	assert.Equal(t, 30*time.Second, module.httpClient.Timeout, "Timeout should be set correctly")
 
@@ -205,7 +206,7 @@ func TestHTTPClientModule_RequestModifier(t *testing.T) {
 	}
 
 	// Create a test request
-	req, _ := http.NewRequest("GET", "http://example.com", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://example.com", nil)
 
 	// Apply the modifier
 	modifiedReq := module.RequestModifier()(req)
@@ -228,7 +229,7 @@ func TestHTTPClientModule_SetRequestModifier(t *testing.T) {
 	})
 
 	// Create a test request
-	req, _ := http.NewRequest("GET", "http://example.com", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://example.com", nil)
 
 	// Apply the modifier
 	modifiedReq := module.modifier(req)
@@ -254,7 +255,7 @@ func TestHTTPClientModule_LoggingTransport(t *testing.T) {
 	}()
 
 	fileLogger, err := NewFileLogger(tmpDir, mockLogger)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Setup test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -286,11 +287,11 @@ func TestHTTPClientModule_LoggingTransport(t *testing.T) {
 	}
 
 	// Make a request
-	req, _ := http.NewRequest("GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
 	resp, err := client.Do(req)
 
 	// Assertions
-	assert.NoError(t, err, "Request should not fail")
+	require.NoError(t, err, "Request should not fail")
 	assert.NotNil(t, resp, "Response should not be nil")
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "Status code should be 200")
 
@@ -332,14 +333,14 @@ func TestHTTPClientModule_IntegrationWithServer(t *testing.T) {
 	}
 
 	// Create request
-	req, _ := http.NewRequest("GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
 
 	// Apply modifier and make the request
 	req = module.RequestModifier()(req)
 	resp, err := module.Client().Do(req)
 
 	// Assertions
-	assert.NoError(t, err, "Request should not fail")
+	require.NoError(t, err, "Request should not fail")
 	assert.NotNil(t, resp, "Response should not be nil")
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "Status code should be 200")
 	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"), "Content-Type should be application/json")

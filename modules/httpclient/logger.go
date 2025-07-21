@@ -50,13 +50,13 @@ func NewFileLogger(baseDir string, logger modular.Logger) (*FileLogger, error) {
 // LogRequest writes request data to a file.
 func (f *FileLogger) LogRequest(id string, data []byte) error {
 	requestFile := filepath.Join(f.requestDir, fmt.Sprintf("request_%s_%d.log", id, time.Now().UnixNano()))
-	return os.WriteFile(requestFile, data, 0644)
+	return os.WriteFile(requestFile, data, 0600)
 }
 
 // LogResponse writes response data to a file.
 func (f *FileLogger) LogResponse(id string, data []byte) error {
 	responseFile := filepath.Join(f.responseDir, fmt.Sprintf("response_%s_%d.log", id, time.Now().UnixNano()))
-	return os.WriteFile(responseFile, data, 0644)
+	return os.WriteFile(responseFile, data, 0600)
 }
 
 // LogTransactionToFile logs both request and response data to a single file for easier analysis.

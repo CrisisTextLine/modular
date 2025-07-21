@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,7 +22,10 @@ type MockApplication struct {
 
 func (m *MockApplication) GetConfigSection(name string) (modular.ConfigProvider, error) {
 	args := m.Called(name)
-	return args.Get(0).(modular.ConfigProvider), args.Error(1)
+	if err := args.Error(1); err != nil {
+		return args.Get(0).(modular.ConfigProvider), fmt.Errorf("failed to get config section %s: %w", name, err)
+	}
+	return args.Get(0).(modular.ConfigProvider), nil
 }
 
 func (m *MockApplication) RegisterConfigSection(name string, provider modular.ConfigProvider) {
@@ -54,12 +58,18 @@ func (m *MockApplication) ConfigSections() map[string]modular.ConfigProvider {
 
 func (m *MockApplication) RegisterService(name string, service any) error {
 	args := m.Called(name, service)
-	return args.Error(0)
+	if err := args.Error(0); err != nil {
+		return fmt.Errorf("failed to register service %s: %w", name, err)
+	}
+	return nil
 }
 
 func (m *MockApplication) GetService(name string, target any) error {
 	args := m.Called(name, target)
-	return args.Error(0)
+	if err := args.Error(0); err != nil {
+		return fmt.Errorf("failed to get service %s: %w", name, err)
+	}
+	return nil
 }
 
 // Add other required methods to satisfy the interface

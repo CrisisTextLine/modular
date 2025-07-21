@@ -428,7 +428,7 @@ func (m *ReverseProxyModule) Stop(ctx context.Context) error {
 
 	// Stop health checker if running
 	if m.healthChecker != nil {
-		m.healthChecker.Stop()
+		m.healthChecker.Stop(ctx)
 		if m.app != nil && m.app.Logger() != nil {
 			m.app.Logger().Debug("Health checker stopped")
 		}

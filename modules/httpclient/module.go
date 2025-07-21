@@ -431,7 +431,7 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			"url", req.URL.String(),
 			"error", err,
 		)
-		return resp, err
+		return resp, fmt.Errorf("http request failed: %w", err)
 	}
 
 	// Log the response
@@ -479,7 +479,10 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		}
 	}
 
-	return resp, err
+	if err != nil {
+		return resp, fmt.Errorf("http request completion failed: %w", err)
+	}
+	return resp, nil
 }
 
 // logRequest logs detailed information about the request.

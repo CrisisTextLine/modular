@@ -381,12 +381,6 @@ func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 			app.Logger().Info("No httpclient service available, will create default client")
 		}
 
-		// Get the optional feature flag evaluator service
-		if ffService, ok := services["featureFlagEvaluator"].(FeatureFlagEvaluator); ok {
-			m.featureFlagEvaluator = ffService
-			app.Logger().Info("Using feature flag evaluator service")
-		}
-
 		return m, nil
 	}
 }
@@ -560,7 +554,7 @@ type routerService interface {
 
 // RequiresServices returns the services required by this module.
 // The reverseproxy module requires a service that implements the routerService
-// interface to register routes with, and optionally a http.Client and FeatureFlagEvaluator.
+// interface to register routes with, and optionally a http.Client.
 func (m *ReverseProxyModule) RequiresServices() []modular.ServiceDependency {
 	return []modular.ServiceDependency{
 		{
@@ -574,12 +568,6 @@ func (m *ReverseProxyModule) RequiresServices() []modular.ServiceDependency {
 			Required:           false, // Optional dependency
 			MatchByInterface:   true,  // Use interface-based matching
 			SatisfiesInterface: reflect.TypeOf((*httpDoer)(nil)).Elem(),
-		},
-		{
-			Name:               "featureFlagEvaluator",
-			Required:           false, // Optional dependency
-			MatchByInterface:   true,
-			SatisfiesInterface: reflect.TypeOf((*FeatureFlagEvaluator)(nil)).Elem(),
 		},
 	}
 }

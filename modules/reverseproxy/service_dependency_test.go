@@ -2,6 +2,7 @@ package reverseproxy
 
 import (
 	"net/http"
+	"os"
 	"reflect"
 	"testing"
 
@@ -11,10 +12,21 @@ import (
 )
 
 // TestReverseProxyServiceDependencyResolution tests that the reverseproxy module
-// can receive HTTP client services both by name and by interface
+// can receive HTTP client services via interface-based matching
 func TestReverseProxyServiceDependencyResolution(t *testing.T) {
-	// Test 1: Name-based service resolution
-	t.Run("NameBasedServiceResolution", func(t *testing.T) {
+	// Clean up any environment variables that might interfere with tests
+	originalRequestTimeout := os.Getenv("REQUEST_TIMEOUT")
+	defer func() {
+		if originalRequestTimeout != "" {
+			os.Setenv("REQUEST_TIMEOUT", originalRequestTimeout)
+		} else {
+			os.Unsetenv("REQUEST_TIMEOUT")
+		}
+	}()
+	os.Unsetenv("REQUEST_TIMEOUT")
+
+	// Test 1: Interface-based service resolution
+	t.Run("InterfaceBasedServiceResolution", func(t *testing.T) {
 		app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), &testLogger{t: t})
 
 		// Create mock HTTP client
@@ -45,40 +57,7 @@ func TestReverseProxyServiceDependencyResolution(t *testing.T) {
 		assert.Same(t, mockClient, reverseProxyModule.httpClient, "Should use the provided HTTP client")
 	})
 
-	// Test 2: Interface-based service resolution
-	t.Run("InterfaceBasedServiceResolution", func(t *testing.T) {
-		app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), &testLogger{t: t})
-
-		// Create mock HTTP client
-		mockClient := &http.Client{}
-
-		// Create a mock router service that satisfies the routerService interface
-		mockRouter := &testRouter{
-			routes: make(map[string]http.HandlerFunc),
-		}
-
-		// Register services manually for testing
-		err := app.RegisterService("router", mockRouter)
-		require.NoError(t, err)
-
-		// Register the HTTP client as an httpDoer interface (not by name "httpclient")
-		err = app.RegisterService("http-doer", mockClient)
-		require.NoError(t, err)
-
-		// Create reverseproxy module
-		reverseProxyModule := NewModule()
-		app.RegisterModule(reverseProxyModule)
-
-		// Initialize application
-		err = app.Init()
-		require.NoError(t, err)
-
-		// Verify the module received the http-doer service
-		assert.NotNil(t, reverseProxyModule.httpClient, "HTTP client should be set")
-		assert.Same(t, mockClient, reverseProxyModule.httpClient, "Should use the provided HTTP client via interface")
-	})
-
-	// Test 3: No HTTP client service (default client creation)
+	// Test 2: No HTTP client service (default client creation)
 	t.Run("DefaultClientCreation", func(t *testing.T) {
 		app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), &testLogger{t: t})
 
@@ -130,7 +109,7 @@ func TestServiceDependencyConfiguration(t *testing.T) {
 
 	// Get service dependencies
 	dependencies := serviceAware.RequiresServices()
-	require.Len(t, dependencies, 3, "reverseproxy should declare 3 service dependencies")
+	require.Len(t, dependencies, 2, "reverseproxy should declare 2 service dependencies")
 
 	// Map dependencies by name for easy checking
 	depMap := make(map[string]modular.ServiceDependency)
@@ -144,18 +123,12 @@ func TestServiceDependencyConfiguration(t *testing.T) {
 	assert.True(t, routerDep.Required, "router dependency should be required")
 	assert.True(t, routerDep.MatchByInterface, "router dependency should use interface matching")
 
-	// Check httpclient dependency (optional, name-based)
+	// Check httpclient dependency (optional, interface-based)
 	httpclientDep, exists := depMap["httpclient"]
 	assert.True(t, exists, "httpclient dependency should exist")
 	assert.False(t, httpclientDep.Required, "httpclient dependency should be optional")
-	assert.False(t, httpclientDep.MatchByInterface, "httpclient dependency should use name matching")
-
-	// Check http-doer dependency (optional, interface-based)
-	doerDep, exists := depMap["http-doer"]
-	assert.True(t, exists, "http-doer dependency should exist")
-	assert.False(t, doerDep.Required, "http-doer dependency should be optional")
-	assert.True(t, doerDep.MatchByInterface, "http-doer dependency should use interface matching")
-	assert.NotNil(t, doerDep.SatisfiesInterface, "http-doer dependency should specify interface")
+	assert.True(t, httpclientDep.MatchByInterface, "httpclient dependency should use interface matching")
+	assert.NotNil(t, httpclientDep.SatisfiesInterface, "httpclient dependency should specify interface")
 }
 
 // testLogger is a simple test logger implementation

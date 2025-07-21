@@ -29,7 +29,7 @@ func TestHTTPClientInterface(t *testing.T) {
 		"http.Client should implement HTTPDoer interface via reflection")
 }
 
-// TestServiceDependencyResolution tests both name-based and interface-based service resolution
+// TestServiceDependencyResolution tests interface-based service resolution
 func TestServiceDependencyResolution(t *testing.T) {
 	// Create test application with proper config provider and logger
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), &testLogger{t: t})
@@ -51,7 +51,7 @@ func TestServiceDependencyResolution(t *testing.T) {
 	require.True(t, ok, "httpclient should be ServiceAware")
 
 	providedServices := serviceAware.ProvidesServices()
-	require.Len(t, providedServices, 3, "httpclient should provide 3 services")
+	require.Len(t, providedServices, 2, "httpclient should provide 2 services")
 
 	// Verify service names and that the http.Client implements HTTPDoer
 	serviceNames := make(map[string]bool)
@@ -64,7 +64,6 @@ func TestServiceDependencyResolution(t *testing.T) {
 	}
 	assert.True(t, serviceNames["httpclient"], "should provide 'httpclient' service")
 	assert.True(t, serviceNames["httpclient-service"], "should provide 'httpclient-service' service")
-	assert.True(t, serviceNames["http-doer"], "should provide 'http-doer' service")
 
 	// Test that the HTTP client implements the HTTPDoer interface
 	require.NotNil(t, httpClient)
@@ -76,7 +75,7 @@ func TestServiceDependencyResolution(t *testing.T) {
 	require.True(t, ok, "consumer should be ServiceAware")
 
 	consumerDependencies := consumerServiceAware.RequiresServices()
-	require.Len(t, consumerDependencies, 2, "consumer should require 2 services")
+	require.Len(t, consumerDependencies, 1, "consumer should require 1 service")
 
 	// Check that the dependencies are correctly configured
 	depMap := make(map[string]modular.ServiceDependency)
@@ -84,21 +83,15 @@ func TestServiceDependencyResolution(t *testing.T) {
 		depMap[dep.Name] = dep
 	}
 
-	// Verify httpclient dependency (name-based)
+	// Verify httpclient dependency (interface-based)
 	httpclientDep, exists := depMap["httpclient"]
 	assert.True(t, exists, "httpclient dependency should exist")
-	assert.False(t, httpclientDep.MatchByInterface, "httpclient should use name-based matching")
-
-	// Verify http-doer dependency (interface-based)
-	doerDep, exists := depMap["http-doer"]
-	assert.True(t, exists, "http-doer dependency should exist")
-	assert.True(t, doerDep.MatchByInterface, "http-doer should use interface-based matching")
+	assert.True(t, httpclientDep.MatchByInterface, "httpclient should use interface-based matching")
 }
 
-// TestConsumerModule simulates a module that depends on httpclient service both by name and interface
+// TestConsumerModule simulates a module that depends on httpclient service via interface
 type TestConsumerModule struct {
-	httpClientByName      *http.Client
-	httpClientByInterface HTTPDoer
+	httpClient HTTPDoer
 }
 
 func NewTestConsumerModule() *TestConsumerModule {
@@ -120,12 +113,7 @@ func (m *TestConsumerModule) ProvidesServices() []modular.ServiceProvider {
 func (m *TestConsumerModule) RequiresServices() []modular.ServiceDependency {
 	return []modular.ServiceDependency{
 		{
-			Name:             "httpclient",
-			Required:         false,
-			MatchByInterface: false, // Name-based matching for the actual client
-		},
-		{
-			Name:               "http-doer",
+			Name:               "httpclient",
 			Required:           false,
 			MatchByInterface:   true,
 			SatisfiesInterface: reflect.TypeOf((*HTTPDoer)(nil)).Elem(),
@@ -135,17 +123,10 @@ func (m *TestConsumerModule) RequiresServices() []modular.ServiceDependency {
 
 func (m *TestConsumerModule) Constructor() modular.ModuleConstructor {
 	return func(app modular.Application, services map[string]any) (modular.Module, error) {
-		// Get name-based service
-		if httpClient, ok := services["httpclient"]; ok {
-			if client, ok := httpClient.(*http.Client); ok {
-				m.httpClientByName = client
-			}
-		}
-
 		// Get interface-based service
-		if httpDoer, ok := services["http-doer"]; ok {
-			if doer, ok := httpDoer.(HTTPDoer); ok {
-				m.httpClientByInterface = doer
+		if httpClient, ok := services["httpclient"]; ok {
+			if doer, ok := httpClient.(HTTPDoer); ok {
+				m.httpClient = doer
 			}
 		}
 

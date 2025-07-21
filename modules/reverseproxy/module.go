@@ -359,29 +359,16 @@ func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 		}
 		m.router = handleFuncSvc
 
-		// Get the optional httpclient service (name-based)
+		// Get the optional httpclient service (interface-based)
 		if httpClientInstance, exists := services["httpclient"]; exists {
-			if clientService, ok := httpClientInstance.(*http.Client); ok {
-				// Use the provided HTTP client
-				m.httpClient = clientService
-				app.Logger().Info("Using HTTP client from httpclient service (name-based)")
-				return m, nil
-			} else {
-				app.Logger().Warn("httpclient service found but is not *http.Client",
-					"type", fmt.Sprintf("%T", httpClientInstance))
-			}
-		}
-
-		// Get the optional http-doer service (interface-based)
-		if httpDoerInstance, exists := services["http-doer"]; exists {
-			if doerService, ok := httpDoerInstance.(httpDoer); ok {
+			if doerService, ok := httpClientInstance.(httpDoer); ok {
 				// Convert httpDoer to *http.Client if possible
 				if client, ok := doerService.(*http.Client); ok {
 					m.httpClient = client
-					app.Logger().Info("Using HTTP client from http-doer service (interface-based)")
+					app.Logger().Info("Using HTTP client from httpclient service")
 				} else {
-					app.Logger().Warn("http-doer service found but is not *http.Client",
-						"type", fmt.Sprintf("%T", httpDoerInstance))
+					app.Logger().Warn("httpclient service found but is not *http.Client",
+						"type", fmt.Sprintf("%T", httpClientInstance))
 				}
 			}
 		}
@@ -576,13 +563,7 @@ func (m *ReverseProxyModule) RequiresServices() []modular.ServiceDependency {
 		{
 			Name:               "httpclient",
 			Required:           false, // Optional dependency
-			MatchByInterface:   false,  // Use name-based matching for the concrete http.Client
-			SatisfiesInterface: nil,    // Not used for name-based matching
-		},
-		{
-			Name:               "http-doer",
-			Required:           false, // Optional dependency
-			MatchByInterface:   true,   // Use interface-based matching
+			MatchByInterface:   true,  // Use interface-based matching
 			SatisfiesInterface: reflect.TypeOf((*httpDoer)(nil)).Elem(),
 		},
 	}

@@ -328,17 +328,12 @@ func (m *HTTPClientModule) ProvidesServices() []modular.ServiceProvider {
 		{
 			Name:        ServiceName,
 			Description: "HTTP client (*http.Client) for direct usage",
-			Instance:    m.httpClient, // Provide the actual *http.Client instance for name-based matching
+			Instance:    m.httpClient, // Provide the actual *http.Client instance
 		},
 		{
 			Name:        "httpclient-service",
 			Description: "HTTP client service interface (ClientService) for advanced features",
 			Instance:    m, // Provide the service interface for modules that need additional features
-		},
-		{
-			Name:        "http-doer",
-			Description: "HTTP doer interface (HTTPDoer) for basic HTTP requests",
-			Instance:    m.httpClient, // Provide the *http.Client as HTTPDoer for interface-based matching
 		},
 	}
 }

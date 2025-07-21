@@ -2,7 +2,6 @@ package reverseproxy
 
 import (
 	"net/http"
-	"reflect"
 	"testing"
 
 	"github.com/CrisisTextLine/modular"
@@ -74,22 +73,6 @@ func TestReverseProxyServiceDependencyResolution(t *testing.T) {
 	})
 }
 
-// TestHTTPDoerInterfaceImplementation tests that http.Client implements the httpDoer interface
-func TestHTTPDoerInterfaceImplementation(t *testing.T) {
-	client := &http.Client{}
-
-	// Test that http.Client implements httpDoer interface
-	var doer httpDoer = client
-	assert.NotNil(t, doer, "http.Client should implement httpDoer interface")
-
-	// Test reflection-based interface checking (this is what the framework uses)
-	clientType := reflect.TypeOf(client)
-	doerInterface := reflect.TypeOf((*httpDoer)(nil)).Elem()
-
-	assert.True(t, clientType.Implements(doerInterface),
-		"http.Client should implement httpDoer interface via reflection")
-}
-
 // TestServiceDependencyConfiguration tests that the reverseproxy module declares the correct dependencies
 func TestServiceDependencyConfiguration(t *testing.T) {
 	module := NewModule()
@@ -100,7 +83,7 @@ func TestServiceDependencyConfiguration(t *testing.T) {
 
 	// Get service dependencies
 	dependencies := serviceAware.RequiresServices()
-	require.Len(t, dependencies, 2, "reverseproxy should declare 2 service dependencies")
+	require.Len(t, dependencies, 3, "reverseproxy should declare 3 service dependencies")
 
 	// Map dependencies by name for easy checking
 	depMap := make(map[string]modular.ServiceDependency)
@@ -114,12 +97,19 @@ func TestServiceDependencyConfiguration(t *testing.T) {
 	assert.True(t, routerDep.Required, "router dependency should be required")
 	assert.True(t, routerDep.MatchByInterface, "router dependency should use interface matching")
 
-	// Check httpclient dependency (optional, interface-based)
+	// Check httpclient dependency (optional, name-based)
 	httpclientDep, exists := depMap["httpclient"]
 	assert.True(t, exists, "httpclient dependency should exist")
 	assert.False(t, httpclientDep.Required, "httpclient dependency should be optional")
-	assert.True(t, httpclientDep.MatchByInterface, "httpclient dependency should use interface matching")
-	assert.NotNil(t, httpclientDep.SatisfiesInterface, "httpclient dependency should specify interface")
+	assert.False(t, httpclientDep.MatchByInterface, "httpclient dependency should use name-based matching")
+	assert.Nil(t, httpclientDep.SatisfiesInterface, "httpclient dependency should not specify interface for name-based matching")
+
+	// Check featureFlagEvaluator dependency (optional, interface-based)
+	featureFlagDep, exists := depMap["featureFlagEvaluator"]
+	assert.True(t, exists, "featureFlagEvaluator dependency should exist")
+	assert.False(t, featureFlagDep.Required, "featureFlagEvaluator dependency should be optional")
+	assert.True(t, featureFlagDep.MatchByInterface, "featureFlagEvaluator dependency should use interface matching")
+	assert.NotNil(t, featureFlagDep.SatisfiesInterface, "featureFlagEvaluator dependency should specify interface")
 }
 
 // testLogger is a simple test logger implementation

@@ -22,13 +22,6 @@ import (
 	"github.com/gobwas/glob"
 )
 
-// httpDoer defines the minimal interface for making HTTP requests.
-// This allows the reverseproxy module to work with any HTTP client
-// that implements the Do method, not just http.Client.
-type httpDoer interface {
-	Do(req *http.Request) (*http.Response, error)
-}
-
 // ReverseProxyModule provides a modular reverse proxy implementation with support for
 // multiple backends, composite routes that combine responses from different backends,
 // and tenant-specific routing configurations.
@@ -362,17 +355,25 @@ func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 		}
 		m.router = handleFuncSvc
 
-		// Get the optional httpclient service (interface-based)
+		// Get the optional httpclient service
 		if httpClientInstance, exists := services["httpclient"]; exists {
-			if doerService, ok := httpClientInstance.(httpDoer); ok {
-				// Convert httpDoer to *http.Client if possible
-				if client, ok := doerService.(*http.Client); ok {
-					m.httpClient = client
-					app.Logger().Info("Using HTTP client from httpclient service")
-				} else {
-					app.Logger().Warn("httpclient service found but is not *http.Client",
-						"type", fmt.Sprintf("%T", httpClientInstance))
-				}
+			if client, ok := httpClientInstance.(*http.Client); ok {
+				m.httpClient = client
+				app.Logger().Info("Using HTTP client from httpclient service")
+			} else {
+				app.Logger().Warn("httpclient service found but is not *http.Client",
+					"type", fmt.Sprintf("%T", httpClientInstance))
+			}
+		}
+
+		// Get the optional feature flag evaluator service
+		if featureFlagSvc, exists := services["featureFlagEvaluator"]; exists {
+			if evaluator, ok := featureFlagSvc.(FeatureFlagEvaluator); ok {
+				m.featureFlagEvaluator = evaluator
+				app.Logger().Info("Using feature flag evaluator from service")
+			} else {
+				app.Logger().Warn("featureFlagEvaluator service found but does not implement FeatureFlagEvaluator",
+					"type", fmt.Sprintf("%T", featureFlagSvc))
 			}
 		}
 
@@ -554,7 +555,7 @@ type routerService interface {
 
 // RequiresServices returns the services required by this module.
 // The reverseproxy module requires a service that implements the routerService
-// interface to register routes with, and optionally a http.Client.
+// interface to register routes with, and optionally a http.Client and FeatureFlagEvaluator.
 func (m *ReverseProxyModule) RequiresServices() []modular.ServiceDependency {
 	return []modular.ServiceDependency{
 		{
@@ -566,8 +567,14 @@ func (m *ReverseProxyModule) RequiresServices() []modular.ServiceDependency {
 		{
 			Name:               "httpclient",
 			Required:           false, // Optional dependency
-			MatchByInterface:   true,  // Use interface-based matching
-			SatisfiesInterface: reflect.TypeOf((*httpDoer)(nil)).Elem(),
+			MatchByInterface:   false, // Use name-based matching
+			SatisfiesInterface: nil,
+		},
+		{
+			Name:               "featureFlagEvaluator",
+			Required:           false, // Optional dependency
+			MatchByInterface:   true,
+			SatisfiesInterface: reflect.TypeOf((*FeatureFlagEvaluator)(nil)).Elem(),
 		},
 	}
 }

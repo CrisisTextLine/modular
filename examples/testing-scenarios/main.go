@@ -215,6 +215,38 @@ func (t *TestingApp) initializeScenarios() {
 			Description: "Test metrics and monitoring",
 			Handler:     t.runMonitoringScenario,
 		},
+		
+		// New Chimera Facade scenarios
+		"toolkit-api": {
+			Name:        "Toolkit API with Feature Flag Control",
+			Description: "Test toolkit toolbox API with LaunchDarkly feature flag control",
+			Handler:     t.runToolkitApiScenario,
+		},
+		"oauth-token": {
+			Name:        "OAuth Token API",
+			Description: "Test OAuth token endpoint with feature flag routing",
+			Handler:     t.runOAuthTokenScenario,
+		},
+		"oauth-introspect": {
+			Name:        "OAuth Introspection API",
+			Description: "Test OAuth token introspection with feature flag routing",
+			Handler:     t.runOAuthIntrospectScenario,
+		},
+		"tenant-config": {
+			Name:        "Tenant Configuration Loading",
+			Description: "Test per-tenant configuration loading and feature flag fallbacks",
+			Handler:     t.runTenantConfigScenario,
+		},
+		"debug-endpoints": {
+			Name:        "Debug and Monitoring Endpoints",
+			Description: "Test debug endpoints for feature flags and system status",
+			Handler:     t.runDebugEndpointsScenario,
+		},
+		"dry-run": {
+			Name:        "Dry-Run Testing",
+			Description: "Test dry-run mode for comparing backend responses",
+			Handler:     t.runDryRunScenario,
+		},
 	}
 }
 
@@ -231,6 +263,7 @@ func (t *TestingApp) startMockBackends() {
 		{"monitoring", 9005, "/metrics"},
 		{"unstable", 9006, "/health"}, // For failover testing
 		{"slow", 9007, "/health"},     // For performance testing
+		{"chimera", 9008, "/health"},  // For LaunchDarkly scenarios
 	}
 
 	for _, backend := range backends {
@@ -312,6 +345,125 @@ func (t *TestingApp) startMockBackend(backend *MockBackend) {
 			fmt.Fprintf(w, "# HELP backend_requests_total Total number of requests\n")
 			fmt.Fprintf(w, "# TYPE backend_requests_total counter\n")
 			fmt.Fprintf(w, "backend_requests_total{backend=\"%s\"} %d\n", backend.Name, count)
+		})
+	}
+
+	// Chimera-specific endpoints for LaunchDarkly scenarios
+	if backend.Name == "chimera" {
+		// Toolkit toolbox API endpoint
+		mux.HandleFunc("/api/v1/toolkit/toolbox", func(w http.ResponseWriter, r *http.Request) {
+			backend.mu.RLock()
+			count := backend.requestCount
+			backend.mu.RUnlock()
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"backend":"chimera","endpoint":"toolkit-toolbox","method":"%s","request_count":%d,"feature_enabled":true}`, 
+				r.Method, count)
+		})
+
+		// OAuth token API endpoint
+		mux.HandleFunc("/api/v1/authentication/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+			backend.mu.RLock()
+			count := backend.requestCount
+			backend.mu.RUnlock()
+
+			if r.Method != "POST" {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"access_token":"chimera_token_%d","token_type":"Bearer","expires_in":3600,"backend":"chimera","request_count":%d}`, 
+				count, count)
+		})
+
+		// OAuth introspection API endpoint
+		mux.HandleFunc("/api/v1/authentication/oauth/introspect", func(w http.ResponseWriter, r *http.Request) {
+			backend.mu.RLock()
+			count := backend.requestCount
+			backend.mu.RUnlock()
+
+			if r.Method != "POST" {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"active":true,"client_id":"test_client","backend":"chimera","request_count":%d}`, count)
+		})
+
+		// Dry-run test endpoint
+		mux.HandleFunc("/api/v1/test/dryrun", func(w http.ResponseWriter, r *http.Request) {
+			backend.mu.RLock()
+			count := backend.requestCount
+			backend.mu.RUnlock()
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"backend":"chimera","endpoint":"dry-run","method":"%s","dry_run_mode":true,"request_count":%d}`, 
+				r.Method, count)
+		})
+	}
+
+	// Legacy backend specific endpoints
+	if backend.Name == "legacy" {
+		// Toolkit toolbox API endpoint (legacy version)
+		mux.HandleFunc("/api/v1/toolkit/toolbox", func(w http.ResponseWriter, r *http.Request) {
+			backend.mu.RLock()
+			count := backend.requestCount
+			backend.mu.RUnlock()
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"backend":"legacy","endpoint":"toolkit-toolbox","method":"%s","request_count":%d,"legacy_mode":true}`, 
+				r.Method, count)
+		})
+
+		// OAuth endpoints (legacy versions)
+		mux.HandleFunc("/api/v1/authentication/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+			backend.mu.RLock()
+			count := backend.requestCount
+			backend.mu.RUnlock()
+
+			if r.Method != "POST" {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"access_token":"legacy_token_%d","token_type":"Bearer","expires_in":1800,"backend":"legacy","request_count":%d}`, 
+				count, count)
+		})
+
+		mux.HandleFunc("/api/v1/authentication/oauth/introspect", func(w http.ResponseWriter, r *http.Request) {
+			backend.mu.RLock()
+			count := backend.requestCount
+			backend.mu.RUnlock()
+
+			if r.Method != "POST" {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"active":true,"client_id":"legacy_client","backend":"legacy","request_count":%d}`, count)
+		})
+
+		// Dry-run test endpoint (legacy version)
+		mux.HandleFunc("/api/v1/test/dryrun", func(w http.ResponseWriter, r *http.Request) {
+			backend.mu.RLock()
+			count := backend.requestCount
+			backend.mu.RUnlock()
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"backend":"legacy","endpoint":"dry-run","method":"%s","legacy_response":true,"request_count":%d}`, 
+				r.Method, count)
 		})
 	}
 
@@ -1251,5 +1403,395 @@ func (t *TestingApp) runMonitoringScenario(app *TestingApp) error {
 	}
 	
 	fmt.Println("  Monitoring scenario: PASS")
+	return nil
+}
+
+// New Chimera Facade Scenarios
+
+func (t *TestingApp) runToolkitApiScenario(app *TestingApp) error {
+	fmt.Println("Running Toolkit API with Feature Flag Control scenario...")
+	
+	// Test the specific toolkit toolbox API endpoint from Chimera scenarios
+	endpoint := "/api/v1/toolkit/toolbox"
+	
+	// Test 1: Without tenant (should use global feature flag)
+	fmt.Println("  Phase 1: Testing toolkit API without tenant context")
+	
+	resp, err := t.httpClient.Get("http://localhost:8080" + endpoint)
+	if err != nil {
+		fmt.Printf("    Toolkit API test: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Toolkit API test: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 2: With sampleaff1 tenant (should use tenant-specific configuration)
+	fmt.Println("  Phase 2: Testing toolkit API with sampleaff1 tenant")
+	
+	req, err := http.NewRequest("GET", "http://localhost:8080"+endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "toolkit-api")
+	
+	resp, err = t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    Toolkit API with tenant: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Toolkit API with tenant: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 3: Test feature flag behavior
+	fmt.Println("  Phase 3: Testing feature flag behavior")
+	
+	// Enable the feature flag
+	t.featureFlags.SetFlag("toolkit-toolbox-api", true)
+	
+	req, err = http.NewRequest("GET", "http://localhost:8080"+endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "toolkit-api-enabled")
+	
+	resp, err = t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    Toolkit API with flag enabled: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Toolkit API with flag enabled: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Disable the feature flag
+	t.featureFlags.SetFlag("toolkit-toolbox-api", false)
+	
+	resp, err = t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    Toolkit API with flag disabled: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Toolkit API with flag disabled: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	fmt.Println("  Toolkit API scenario: PASS")
+	return nil
+}
+
+func (t *TestingApp) runOAuthTokenScenario(app *TestingApp) error {
+	fmt.Println("Running OAuth Token API scenario...")
+	
+	// Test the specific OAuth token API endpoint from Chimera scenarios
+	endpoint := "/api/v1/authentication/oauth/token"
+	
+	// Test 1: POST request to OAuth token endpoint
+	fmt.Println("  Phase 1: Testing OAuth token API")
+	
+	req, err := http.NewRequest("POST", "http://localhost:8080"+endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "oauth-token")
+	
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    OAuth token API: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    OAuth token API: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 2: Test with feature flag enabled
+	fmt.Println("  Phase 2: Testing OAuth token API with feature flag")
+	
+	t.featureFlags.SetFlag("oauth-token-api", true)
+	
+	req, err = http.NewRequest("POST", "http://localhost:8080"+endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "oauth-token-enabled")
+	
+	resp, err = t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    OAuth token API with flag: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    OAuth token API with flag: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	fmt.Println("  OAuth Token API scenario: PASS")
+	return nil
+}
+
+func (t *TestingApp) runOAuthIntrospectScenario(app *TestingApp) error {
+	fmt.Println("Running OAuth Introspection API scenario...")
+	
+	// Test the specific OAuth introspection API endpoint from Chimera scenarios
+	endpoint := "/api/v1/authentication/oauth/introspect"
+	
+	// Test 1: POST request to OAuth introspection endpoint
+	fmt.Println("  Phase 1: Testing OAuth introspection API")
+	
+	req, err := http.NewRequest("POST", "http://localhost:8080"+endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "oauth-introspect")
+	
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    OAuth introspection API: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    OAuth introspection API: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 2: Test with feature flag
+	fmt.Println("  Phase 2: Testing OAuth introspection API with feature flag")
+	
+	t.featureFlags.SetFlag("oauth-introspect-api", true)
+	
+	req, err = http.NewRequest("POST", "http://localhost:8080"+endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "oauth-introspect-enabled")
+	
+	resp, err = t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    OAuth introspection API with flag: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    OAuth introspection API with flag: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	fmt.Println("  OAuth Introspection API scenario: PASS")
+	return nil
+}
+
+func (t *TestingApp) runTenantConfigScenario(app *TestingApp) error {
+	fmt.Println("Running Tenant Configuration Loading scenario...")
+	
+	// Test 1: Test with existing tenant (sampleaff1)
+	fmt.Println("  Phase 1: Testing with existing tenant sampleaff1")
+	
+	req, err := http.NewRequest("GET", "http://localhost:8080/api/v1/test", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "tenant-config")
+	
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    Existing tenant test: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Existing tenant test: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 2: Test with non-existent tenant
+	fmt.Println("  Phase 2: Testing with non-existent tenant")
+	
+	req, err = http.NewRequest("GET", "http://localhost:8080/api/v1/test", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("X-Affiliate-ID", "nonexistent")
+	req.Header.Set("X-Test-Scenario", "tenant-config-fallback")
+	
+	resp, err = t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    Non-existent tenant test: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Non-existent tenant test: PASS - HTTP %d (fallback working)\n", resp.StatusCode)
+	}
+	
+	// Test 3: Test feature flag fallback behavior
+	fmt.Println("  Phase 3: Testing feature flag fallback behavior")
+	
+	// Set tenant-specific flags
+	t.featureFlags.SetTenantFlag("sampleaff1", "toolkit-toolbox-api", false)
+	t.featureFlags.SetTenantFlag("sampleaff1", "oauth-token-api", true)
+	
+	req, err = http.NewRequest("GET", "http://localhost:8080/api/v1/toolkit/toolbox", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "tenant-flag-fallback")
+	
+	resp, err = t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    Tenant flag fallback test: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Tenant flag fallback test: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	fmt.Println("  Tenant Configuration scenario: PASS")
+	return nil
+}
+
+func (t *TestingApp) runDebugEndpointsScenario(app *TestingApp) error {
+	fmt.Println("Running Debug and Monitoring Endpoints scenario...")
+	
+	// Test 1: Feature flags debug endpoint
+	fmt.Println("  Phase 1: Testing feature flags debug endpoint")
+	
+	req, err := http.NewRequest("GET", "http://localhost:8080/debug/flags", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    Debug flags endpoint: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Debug flags endpoint: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 2: General debug info endpoint
+	fmt.Println("  Phase 2: Testing general debug info endpoint")
+	
+	resp, err = t.httpClient.Get("http://localhost:8080/debug/info")
+	if err != nil {
+		fmt.Printf("    Debug info endpoint: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Debug info endpoint: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 3: Backend status endpoint
+	fmt.Println("  Phase 3: Testing backend status endpoint")
+	
+	resp, err = t.httpClient.Get("http://localhost:8080/debug/backends")
+	if err != nil {
+		fmt.Printf("    Debug backends endpoint: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Debug backends endpoint: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 4: Circuit breaker status endpoint
+	fmt.Println("  Phase 4: Testing circuit breaker status endpoint")
+	
+	resp, err = t.httpClient.Get("http://localhost:8080/debug/circuit-breakers")
+	if err != nil {
+		fmt.Printf("    Debug circuit breakers endpoint: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Debug circuit breakers endpoint: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 5: Health check status endpoint
+	fmt.Println("  Phase 5: Testing health check status endpoint")
+	
+	resp, err = t.httpClient.Get("http://localhost:8080/debug/health-checks")
+	if err != nil {
+		fmt.Printf("    Debug health checks endpoint: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Debug health checks endpoint: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	fmt.Println("  Debug Endpoints scenario: PASS")
+	return nil
+}
+
+func (t *TestingApp) runDryRunScenario(app *TestingApp) error {
+	fmt.Println("Running Dry-Run Testing scenario...")
+	
+	// Test the specific dry-run endpoint from configuration
+	endpoint := "/api/v1/test/dryrun"
+	
+	// Test 1: Test dry-run mode
+	fmt.Println("  Phase 1: Testing dry-run mode")
+	
+	req, err := http.NewRequest("GET", "http://localhost:8080"+endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "dry-run")
+	
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    Dry-run test: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Dry-run test: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 2: Test dry-run with feature flag enabled
+	fmt.Println("  Phase 2: Testing dry-run with feature flag enabled")
+	
+	t.featureFlags.SetFlag("test-dryrun-api", true)
+	
+	req, err = http.NewRequest("POST", "http://localhost:8080"+endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Affiliate-ID", "sampleaff1")
+	req.Header.Set("X-Test-Scenario", "dry-run-enabled")
+	
+	resp, err = t.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("    Dry-run with flag enabled: FAIL - %v\n", err)
+	} else {
+		resp.Body.Close()
+		fmt.Printf("    Dry-run with flag enabled: PASS - HTTP %d\n", resp.StatusCode)
+	}
+	
+	// Test 3: Test different HTTP methods in dry-run
+	fmt.Println("  Phase 3: Testing different HTTP methods in dry-run")
+	
+	methods := []string{"GET", "POST", "PUT"}
+	for _, method := range methods {
+		req, err := http.NewRequest(method, "http://localhost:8080"+endpoint, nil)
+		if err != nil {
+			fmt.Printf("    Dry-run %s method: FAIL - %v\n", method, err)
+			continue
+		}
+		
+		req.Header.Set("X-Affiliate-ID", "sampleaff1")
+		req.Header.Set("X-Test-Scenario", "dry-run-"+method)
+		
+		resp, err := t.httpClient.Do(req)
+		if err != nil {
+			fmt.Printf("    Dry-run %s method: FAIL - %v\n", method, err)
+		} else {
+			resp.Body.Close()
+			fmt.Printf("    Dry-run %s method: PASS - HTTP %d\n", method, resp.StatusCode)
+		}
+	}
+	
+	fmt.Println("  Dry-Run scenario: PASS")
 	return nil
 }

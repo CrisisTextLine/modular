@@ -1,5 +1,6 @@
 # Testing Scenarios Configuration
-# Comprehensive configuration for all reverse proxy testing scenarios
+# Comprehensive configuration for all reverse proxy testing scenarios including
+# LaunchDarkly integration, debug endpoints, and dry-run functionality
 
 # Application configuration
 testing_mode: true
@@ -12,7 +13,7 @@ chimux:
   basepath: ""
   allowed_origins: ["*"]
   allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
-  allowed_headers: ["Content-Type", "Authorization", "X-Tenant-ID", "X-Test-Scenario", "X-Feature-Flag"]
+  allowed_headers: ["Content-Type", "Authorization", "X-Tenant-ID", "X-Affiliate-ID", "X-Test-Scenario", "X-Feature-Flag", "X-Request-ID"]
   allow_credentials: false
   max_age: 300
 
@@ -24,7 +25,7 @@ httpserver:
   write_timeout: 30
   idle_timeout: 120
 
-# Reverse Proxy configuration - comprehensive testing setup
+# Reverse Proxy configuration - comprehensive testing setup with LaunchDarkly integration
 reverseproxy:
   # Backend services for different testing scenarios
   backend_services:
@@ -35,8 +36,9 @@ reverseproxy:
     monitoring: "http://localhost:9005"       # Monitoring backend with metrics endpoint
     unstable: "http://localhost:9006"         # Unstable backend for circuit breaker testing
     slow: "http://localhost:9007"             # Slow backend for performance testing
+    chimera: "http://localhost:9008"          # Chimera API backend for LaunchDarkly scenarios
 
-  # Route configuration for different test scenarios
+  # Route configuration for different test scenarios matching Chimera Facade patterns
   routes:
     "/api/v1/*": "primary"                    # Main API routes
     "/api/v2/*": "canary"                     # Canary API routes
@@ -44,24 +46,54 @@ reverseproxy:
     "/metrics/*": "monitoring"                # Monitoring routes
     "/slow/*": "slow"                         # Performance testing routes
 
-  # Route-level feature flag configuration for testing
+  # Route-level feature flag configuration for testing LaunchDarkly scenarios
   route_configs:
-    "/api/v1/*":
-      feature_flag_id: "api-v1-enabled"
+    "/api/v1/toolkit/toolbox":
+      feature_flag_id: "toolkit-toolbox-api"
       alternative_backend: "legacy"
-    "/api/v2/*":
-      feature_flag_id: "api-v2-enabled"
-      alternative_backend: "primary"
-    "/api/canary/*":
-      feature_flag_id: "canary-enabled"
-      alternative_backend: "primary"
+      dry_run: false
+    "/api/v1/authentication/oauth/token":
+      feature_flag_id: "oauth-token-api"
+      alternative_backend: "legacy"
+      dry_run: false
+    "/api/v1/authentication/oauth/introspect":
+      feature_flag_id: "oauth-introspect-api"
+      alternative_backend: "legacy"
+      dry_run: false
+    "/api/v1/test/dryrun":
+      feature_flag_id: "test-dryrun-api"
+      alternative_backend: "legacy"
+      dry_run: true
+      dry_run_backend: "chimera"
 
   # Default backend for unmatched routes
   default_backend: "primary"
 
   # Tenant configuration for multi-tenant testing
-  tenant_id_header: "X-Tenant-ID"
+  tenant_id_header: "X-Affiliate-ID"
   require_tenant_id: false
+
+  # LaunchDarkly integration configuration
+  launchdarkly:
+    sdk_key: ""  # Set via LAUNCHDARKLY_SDK_KEY environment variable
+    environment: "local"
+    timeout: "5s"
+    offline: false
+
+  # Debug endpoints configuration
+  debug_endpoints:
+    enabled: true
+    base_path: "/debug"
+    require_auth: false
+    auth_token: ""
+
+  # Dry-run configuration
+  dry_run:
+    enabled: true
+    log_responses: true
+    max_response_size: 1048576  # 1MB
+    compare_headers: ["Content-Type", "X-API-Version"]
+    ignore_headers: ["Date", "X-Request-ID", "X-Trace-ID"]
 
   # Health check configuration for testing scenarios
   health_check:
@@ -80,6 +112,7 @@ reverseproxy:
       monitoring: "/health"
       unstable: "/health"
       slow: "/health"
+      chimera: "/health"
     
     # Per-backend health check configuration
     backend_health_check_config:
@@ -118,6 +151,12 @@ reverseproxy:
         enabled: true
         interval: "20s"
         timeout: "15s"                        # Longer timeout for slow backend
+        expected_status_codes: [200]
+      
+      chimera:
+        enabled: true
+        interval: "10s"
+        timeout: "5s"
         expected_status_codes: [200]
 
   # Circuit breaker configuration for failover testing
@@ -254,10 +293,32 @@ reverseproxy:
           X-Backend: "slow"
           X-Performance-Test: "true"
           X-Expected-Delay: "high"
+    
+    chimera:
+      # Chimera API backend configuration
+      header_rewriting:
+        hostname_handling: "preserve_original"
+        set_headers:
+          X-Backend: "chimera"
+          X-API-Type: "modern"
+          X-Feature-Flags: "enabled"
 
-# Tenant-specific configuration for multi-tenant testing scenarios
+# Tenant-specific configuration for multi-tenant testing scenarios (Chimera Facade patterns)
 tenants:
-  # Alpha tenant - uses primary backend with enhanced features
+  # Sample affiliate 1 - maps to sampleaff1 from Chimera scenarios
+  sampleaff1:
+    reverseproxy:
+      default_backend: "legacy"
+      backend_configs:
+        legacy:
+          header_rewriting:
+            set_headers:
+              X-Affiliate-ID: "sampleaff1"
+              X-Tenant: "sampleaff1"
+              X-Tier: "standard"
+              X-Rate-Limit: "5000"
+  
+  # Test tenant alpha - uses primary backend with enhanced features
   tenant-alpha:
     reverseproxy:
       default_backend: "primary"
@@ -270,7 +331,7 @@ tenants:
               X-Rate-Limit: "10000"
               X-Features: "enhanced,beta"
   
-  # Beta tenant - uses secondary backend
+  # Test tenant beta - uses secondary backend
   tenant-beta:
     reverseproxy:
       default_backend: "secondary"
@@ -282,38 +343,3 @@ tenants:
               X-Tier: "standard"
               X-Rate-Limit: "5000"
               X-Features: "standard"
-  
-  # Canary tenant - uses canary backend for testing new features
-  tenant-canary:
-    reverseproxy:
-      default_backend: "canary"
-      backend_configs:
-        canary:
-          header_rewriting:
-            set_headers:
-              X-Tenant: "canary"
-              X-Tier: "testing"
-              X-Rate-Limit: "1000"
-              X-Features: "canary,experimental"
-              X-Beta-Tester: "true"
-
-  # Enterprise tenant - uses multiple backends with custom routing
-  tenant-enterprise:
-    reverseproxy:
-      default_backend: "primary"
-      routes:
-        "/api/enterprise/*": "primary"
-        "/api/analytics/*": "monitoring"
-      backend_configs:
-        primary:
-          path_rewriting:
-            strip_base_path: "/api/enterprise"
-            base_path_rewrite: "/enterprise/api"
-          header_rewriting:
-            hostname_handling: "use_custom"
-            custom_hostname: "enterprise.api.internal"
-            set_headers:
-              X-Tenant: "enterprise"
-              X-Tier: "enterprise"
-              X-Rate-Limit: "unlimited"
-              X-Features: "enterprise,advanced,analytics"

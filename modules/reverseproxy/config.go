@@ -23,6 +23,15 @@ type ReverseProxyConfig struct {
 	HealthCheck            HealthCheckConfig               `json:"health_check" yaml:"health_check" toml:"health_check"`
 	// BackendConfigs defines per-backend configurations including path rewriting and header rewriting
 	BackendConfigs map[string]BackendServiceConfig `json:"backend_configs" yaml:"backend_configs" toml:"backend_configs"`
+	
+	// LaunchDarkly integration configuration
+	LaunchDarkly LaunchDarklyConfig `json:"launchdarkly" yaml:"launchdarkly" toml:"launchdarkly"`
+	
+	// Debug endpoints configuration
+	DebugEndpoints DebugEndpointsConfig `json:"debug_endpoints" yaml:"debug_endpoints" toml:"debug_endpoints"`
+	
+	// Dry-run configuration
+	DryRun DryRunConfig `json:"dry_run" yaml:"dry_run" toml:"dry_run"`
 }
 
 // RouteConfig defines feature flag-controlled routing configuration for specific routes.
@@ -35,6 +44,14 @@ type RouteConfig struct {
 	// AlternativeBackend specifies the backend to use when the feature flag is disabled
 	// If FeatureFlagID is specified and evaluates to false, requests will be routed to this backend instead
 	AlternativeBackend string `json:"alternative_backend" yaml:"alternative_backend" toml:"alternative_backend" env:"ALTERNATIVE_BACKEND"`
+	
+	// DryRun enables dry-run mode for this route, sending requests to both backends and comparing responses
+	// When true, requests are sent to both the primary and alternative backends, but only the alternative backend's response is returned
+	DryRun bool `json:"dry_run" yaml:"dry_run" toml:"dry_run" env:"DRY_RUN"`
+	
+	// DryRunBackend specifies the backend to compare against in dry-run mode
+	// If not specified, uses the AlternativeBackend for comparison
+	DryRunBackend string `json:"dry_run_backend" yaml:"dry_run_backend" toml:"dry_run_backend" env:"DRY_RUN_BACKEND"`
 }
 
 // CompositeRoute defines a route that combines responses from multiple backends.

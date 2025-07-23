@@ -300,9 +300,9 @@ func (t *TestingApp) startMockBackend(backend *MockBackend) {
 			backend.Name, count, time.Since(time.Now().Add(-time.Hour)).String())
 	})
 
-	// Metrics endpoint (for monitoring backend)
+	// Metrics endpoint (for monitoring backend only)
 	if backend.Name == "monitoring" {
-		mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/backend-metrics", func(w http.ResponseWriter, r *http.Request) {
 			backend.mu.RLock()
 			count := backend.requestCount
 			backend.mu.RUnlock()

@@ -13,37 +13,37 @@ import (
 type DebugEndpointsConfig struct {
 	// Enabled determines if debug endpoints should be available
 	Enabled bool `json:"enabled" yaml:"enabled" toml:"enabled" env:"DEBUG_ENDPOINTS_ENABLED" default:"false"`
-	
+
 	// BasePath is the base path for debug endpoints
 	BasePath string `json:"base_path" yaml:"base_path" toml:"base_path" env:"DEBUG_BASE_PATH" default:"/debug"`
-	
+
 	// RequireAuth determines if debug endpoints require authentication
 	RequireAuth bool `json:"require_auth" yaml:"require_auth" toml:"require_auth" env:"DEBUG_REQUIRE_AUTH" default:"false"`
-	
+
 	// AuthToken is the token required for debug endpoint access (if RequireAuth is true)
 	AuthToken string `json:"auth_token" yaml:"auth_token" toml:"auth_token" env:"DEBUG_AUTH_TOKEN"`
 }
 
 // DebugInfo represents debugging information about the reverse proxy state.
 type DebugInfo struct {
-	Timestamp          time.Time                  `json:"timestamp"`
-	Tenant             string                     `json:"tenant,omitempty"`
-	Environment        string                     `json:"environment"`
-	LaunchDarklyEnabled bool                      `json:"launchDarklyEnabled"`
-	Flags              map[string]interface{}     `json:"flags,omitempty"`
-	BackendServices    map[string]string          `json:"backendServices"`
-	Routes             map[string]string          `json:"routes"`
-	CircuitBreakers    map[string]CircuitBreakerInfo `json:"circuitBreakers,omitempty"`
-	HealthChecks       map[string]HealthInfo      `json:"healthChecks,omitempty"`
+	Timestamp           time.Time                     `json:"timestamp"`
+	Tenant              string                        `json:"tenant,omitempty"`
+	Environment         string                        `json:"environment"`
+	LaunchDarklyEnabled bool                          `json:"launchDarklyEnabled"`
+	Flags               map[string]interface{}        `json:"flags,omitempty"`
+	BackendServices     map[string]string             `json:"backendServices"`
+	Routes              map[string]string             `json:"routes"`
+	CircuitBreakers     map[string]CircuitBreakerInfo `json:"circuitBreakers,omitempty"`
+	HealthChecks        map[string]HealthInfo         `json:"healthChecks,omitempty"`
 }
 
 // CircuitBreakerInfo represents circuit breaker status information.
 type CircuitBreakerInfo struct {
-	State         string    `json:"state"`
-	FailureCount  int       `json:"failureCount"`
-	SuccessCount  int       `json:"successCount"`
-	LastFailure   time.Time `json:"lastFailure,omitempty"`
-	LastAttempt   time.Time `json:"lastAttempt,omitempty"`
+	State        string    `json:"state"`
+	FailureCount int       `json:"failureCount"`
+	SuccessCount int       `json:"successCount"`
+	LastFailure  time.Time `json:"lastFailure,omitempty"`
+	LastAttempt  time.Time `json:"lastAttempt,omitempty"`
 }
 
 // HealthInfo represents backend health information.
@@ -56,13 +56,13 @@ type HealthInfo struct {
 
 // DebugHandler handles debug endpoint requests.
 type DebugHandler struct {
-	config             DebugEndpointsConfig
-	featureFlagEval    FeatureFlagEvaluator
-	proxyConfig        *ReverseProxyConfig
-	tenantService      modular.TenantService
-	logger             modular.Logger
-	circuitBreakers    map[string]*CircuitBreaker
-	healthCheckers     map[string]*HealthChecker
+	config          DebugEndpointsConfig
+	featureFlagEval FeatureFlagEvaluator
+	proxyConfig     *ReverseProxyConfig
+	tenantService   modular.TenantService
+	logger          modular.Logger
+	circuitBreakers map[string]*CircuitBreaker
+	healthCheckers  map[string]*HealthChecker
 }
 
 // NewDebugHandler creates a new debug handler.
@@ -96,19 +96,19 @@ func (d *DebugHandler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Feature flags debug endpoint
 	mux.HandleFunc(d.config.BasePath+"/flags", d.handleFlags)
-	
+
 	// General debug info endpoint
 	mux.HandleFunc(d.config.BasePath+"/info", d.handleInfo)
-	
+
 	// Backend status endpoint
 	mux.HandleFunc(d.config.BasePath+"/backends", d.handleBackends)
-	
+
 	// Circuit breaker status endpoint
 	mux.HandleFunc(d.config.BasePath+"/circuit-breakers", d.handleCircuitBreakers)
-	
+
 	// Health check status endpoint
 	mux.HandleFunc(d.config.BasePath+"/health-checks", d.handleHealthChecks)
-	
+
 	d.logger.Info("Debug endpoints registered", "basePath", d.config.BasePath)
 }
 
@@ -120,11 +120,11 @@ func (d *DebugHandler) handleFlags(w http.ResponseWriter, r *http.Request) {
 
 	// Get tenant from request
 	tenantID := d.getTenantID(r)
-	
+
 	// Get feature flags
 	var flags map[string]interface{}
 	var launchDarklyEnabled bool
-	
+
 	if d.featureFlagEval != nil {
 		// Check if LaunchDarkly is available
 		if ldEval, ok := d.featureFlagEval.(*LaunchDarklyFeatureFlagEvaluator); ok {
@@ -138,7 +138,7 @@ func (d *DebugHandler) handleFlags(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		
+
 		// If LaunchDarkly flags not available, try to get from tenant config
 		if flags == nil {
 			flags = make(map[string]interface{})
@@ -174,7 +174,7 @@ func (d *DebugHandler) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tenantID := d.getTenantID(r)
-	
+
 	debugInfo := DebugInfo{
 		Timestamp:       time.Now(),
 		Tenant:          string(tenantID),
@@ -250,7 +250,7 @@ func (d *DebugHandler) handleCircuitBreakers(w http.ResponseWriter, r *http.Requ
 	}
 
 	cbInfo := make(map[string]CircuitBreakerInfo)
-	
+
 	for name, cb := range d.circuitBreakers {
 		cbInfo[name] = CircuitBreakerInfo{
 			State:        cb.GetState().String(),
@@ -278,7 +278,7 @@ func (d *DebugHandler) handleHealthChecks(w http.ResponseWriter, r *http.Request
 	}
 
 	healthInfo := make(map[string]HealthInfo)
-	
+
 	for name, hc := range d.healthCheckers {
 		healthStatuses := hc.GetHealthStatus()
 		if status, exists := healthStatuses[name]; exists {
@@ -332,7 +332,7 @@ func (d *DebugHandler) getTenantID(r *http.Request) modular.TenantID {
 	if tenantIDHeader == "" {
 		tenantIDHeader = "X-Tenant-ID"
 	}
-	
+
 	tenantID := r.Header.Get(tenantIDHeader)
 	return modular.TenantID(tenantID)
 }

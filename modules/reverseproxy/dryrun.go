@@ -15,33 +15,33 @@ import (
 type DryRunConfig struct {
 	// Enabled determines if dry-run mode is available
 	Enabled bool `json:"enabled" yaml:"enabled" toml:"enabled" env:"DRY_RUN_ENABLED" default:"false"`
-	
+
 	// LogResponses determines if response bodies should be logged (can be verbose)
 	LogResponses bool `json:"log_responses" yaml:"log_responses" toml:"log_responses" env:"DRY_RUN_LOG_RESPONSES" default:"false"`
-	
+
 	// MaxResponseSize is the maximum response size to compare (in bytes)
 	MaxResponseSize int64 `json:"max_response_size" yaml:"max_response_size" toml:"max_response_size" env:"DRY_RUN_MAX_RESPONSE_SIZE" default:"1048576"` // 1MB
-	
+
 	// CompareHeaders determines which headers should be compared
 	CompareHeaders []string `json:"compare_headers" yaml:"compare_headers" toml:"compare_headers" env:"DRY_RUN_COMPARE_HEADERS"`
-	
+
 	// IgnoreHeaders lists headers to ignore during comparison
 	IgnoreHeaders []string `json:"ignore_headers" yaml:"ignore_headers" toml:"ignore_headers" env:"DRY_RUN_IGNORE_HEADERS"`
 }
 
 // DryRunResult represents the result of a dry-run comparison.
 type DryRunResult struct {
-	Timestamp        time.Time              `json:"timestamp"`
-	RequestID        string                 `json:"requestId,omitempty"`
-	TenantID         string                 `json:"tenantId,omitempty"`
-	Endpoint         string                 `json:"endpoint"`
-	Method           string                 `json:"method"`
-	PrimaryBackend   string                 `json:"primaryBackend"`
-	SecondaryBackend string                 `json:"secondaryBackend"`
-	PrimaryResponse  ResponseInfo           `json:"primaryResponse"`
-	SecondaryResponse ResponseInfo          `json:"secondaryResponse"`
-	Comparison       ComparisonResult       `json:"comparison"`
-	Duration         DurationInfo           `json:"duration"`
+	Timestamp         time.Time        `json:"timestamp"`
+	RequestID         string           `json:"requestId,omitempty"`
+	TenantID          string           `json:"tenantId,omitempty"`
+	Endpoint          string           `json:"endpoint"`
+	Method            string           `json:"method"`
+	PrimaryBackend    string           `json:"primaryBackend"`
+	SecondaryBackend  string           `json:"secondaryBackend"`
+	PrimaryResponse   ResponseInfo     `json:"primaryResponse"`
+	SecondaryResponse ResponseInfo     `json:"secondaryResponse"`
+	Comparison        ComparisonResult `json:"comparison"`
+	Duration          DurationInfo     `json:"duration"`
 }
 
 // ResponseInfo contains information about a backend response.
@@ -56,11 +56,11 @@ type ResponseInfo struct {
 
 // ComparisonResult contains the results of comparing two responses.
 type ComparisonResult struct {
-	StatusCodeMatch bool                   `json:"statusCodeMatch"`
-	HeadersMatch    bool                   `json:"headersMatch"`
-	BodyMatch       bool                   `json:"bodyMatch"`
-	Differences     []string               `json:"differences,omitempty"`
-	HeaderDiffs     map[string]HeaderDiff  `json:"headerDiffs,omitempty"`
+	StatusCodeMatch bool                  `json:"statusCodeMatch"`
+	HeadersMatch    bool                  `json:"headersMatch"`
+	BodyMatch       bool                  `json:"bodyMatch"`
+	Differences     []string              `json:"differences,omitempty"`
+	HeaderDiffs     map[string]HeaderDiff `json:"headerDiffs,omitempty"`
 }
 
 // HeaderDiff represents a difference in header values.
@@ -78,9 +78,9 @@ type DurationInfo struct {
 
 // DryRunHandler handles dry-run request processing.
 type DryRunHandler struct {
-	config        DryRunConfig
-	httpClient    *http.Client
-	logger        modular.Logger
+	config     DryRunConfig
+	httpClient *http.Client
+	logger     modular.Logger
 }
 
 // NewDryRunHandler creates a new dry-run handler.
@@ -97,11 +97,11 @@ func NewDryRunHandler(config DryRunConfig, logger modular.Logger) *DryRunHandler
 // ProcessDryRun processes a request in dry-run mode, sending it to both backends and comparing responses.
 func (d *DryRunHandler) ProcessDryRun(ctx context.Context, req *http.Request, primaryBackend, secondaryBackend string) (*DryRunResult, error) {
 	if !d.config.Enabled {
-		return nil, fmt.Errorf("dry-run mode is not enabled")
+		return nil, ErrDryRunModeNotEnabled
 	}
 
 	startTime := time.Now()
-	
+
 	// Create dry-run result
 	result := &DryRunResult{
 		Timestamp:        startTime,
@@ -235,7 +235,7 @@ func (d *DryRunHandler) compareResponses(primary, secondary ResponseInfo) Compar
 	// Compare status codes
 	result.StatusCodeMatch = primary.StatusCode == secondary.StatusCode
 	if !result.StatusCodeMatch {
-		result.Differences = append(result.Differences, 
+		result.Differences = append(result.Differences,
 			fmt.Sprintf("Status code: primary=%d, secondary=%d", primary.StatusCode, secondary.StatusCode))
 	}
 
@@ -251,7 +251,7 @@ func (d *DryRunHandler) compareResponses(primary, secondary ResponseInfo) Compar
 	// Check for errors
 	if primary.Error != "" || secondary.Error != "" {
 		if primary.Error != secondary.Error {
-			result.Differences = append(result.Differences, 
+			result.Differences = append(result.Differences,
 				fmt.Sprintf("Error: primary='%s', secondary='%s'", primary.Error, secondary.Error))
 		}
 	}
@@ -263,7 +263,7 @@ func (d *DryRunHandler) compareResponses(primary, secondary ResponseInfo) Compar
 func (d *DryRunHandler) compareHeaders(primaryHeaders, secondaryHeaders map[string]string, result ComparisonResult) bool {
 	headersMatch := true
 	ignoreMap := make(map[string]bool)
-	
+
 	// Build ignore map
 	for _, header := range d.config.IgnoreHeaders {
 		ignoreMap[header] = true
@@ -287,7 +287,7 @@ func (d *DryRunHandler) compareHeaders(primaryHeaders, secondaryHeaders map[stri
 		if ignoreMap[key] {
 			continue
 		}
-		
+
 		// If compare headers are specified, only compare those
 		if len(compareMap) > 0 && !compareMap[key] {
 			continue
@@ -314,7 +314,7 @@ func (d *DryRunHandler) compareHeaders(primaryHeaders, secondaryHeaders map[stri
 		if ignoreMap[key] {
 			continue
 		}
-		
+
 		if len(compareMap) > 0 && !compareMap[key] {
 			continue
 		}

@@ -2,6 +2,7 @@ package reverseproxy
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -13,22 +14,22 @@ import (
 type LaunchDarklyConfig struct {
 	// SDKKey is the LaunchDarkly SDK key
 	SDKKey string `json:"sdk_key" yaml:"sdk_key" toml:"sdk_key" env:"LAUNCHDARKLY_SDK_KEY"`
-	
+
 	// Environment is the LaunchDarkly environment
 	Environment string `json:"environment" yaml:"environment" toml:"environment" env:"LAUNCHDARKLY_ENVIRONMENT" default:"production"`
-	
+
 	// Timeout for LaunchDarkly operations
 	Timeout time.Duration `json:"timeout" yaml:"timeout" toml:"timeout" env:"LAUNCHDARKLY_TIMEOUT" default:"5s"`
-	
+
 	// BaseURI for LaunchDarkly API (optional, for on-premise)
 	BaseURI string `json:"base_uri" yaml:"base_uri" toml:"base_uri" env:"LAUNCHDARKLY_BASE_URI"`
-	
+
 	// StreamURI for LaunchDarkly streaming (optional, for on-premise)
 	StreamURI string `json:"stream_uri" yaml:"stream_uri" toml:"stream_uri" env:"LAUNCHDARKLY_STREAM_URI"`
-	
+
 	// EventsURI for LaunchDarkly events (optional, for on-premise)
 	EventsURI string `json:"events_uri" yaml:"events_uri" toml:"events_uri" env:"LAUNCHDARKLY_EVENTS_URI"`
-	
+
 	// Offline mode for testing
 	Offline bool `json:"offline" yaml:"offline" toml:"offline" env:"LAUNCHDARKLY_OFFLINE" default:"false"`
 }
@@ -54,12 +55,12 @@ func NewLaunchDarklyFeatureFlagEvaluator(config LaunchDarklyConfig, fallback Fea
 
 	// If SDK key is not provided, use fallback mode
 	if config.SDKKey == "" {
-		evaluator.logger.Warn("LaunchDarkly SDK key not provided, using fallback evaluator")
+		evaluator.logger.WarnContext(context.Background(), "LaunchDarkly SDK key not provided, using fallback evaluator")
 		return evaluator, nil
 	}
 
 	// For this implementation, we'll use the fallback evaluator until LaunchDarkly is properly integrated
-	evaluator.logger.Info("LaunchDarkly placeholder evaluator initialized, using fallback for actual evaluation")
+	evaluator.logger.InfoContext(context.Background(), "LaunchDarkly placeholder evaluator initialized, using fallback for actual evaluation")
 	evaluator.isAvailable = false // Set to false to always use fallback
 
 	return evaluator, nil
@@ -70,7 +71,11 @@ func (l *LaunchDarklyFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, fla
 	// If LaunchDarkly is not available, use fallback
 	if !l.isAvailable {
 		if l.fallback != nil {
-			return l.fallback.EvaluateFlag(ctx, flagID, tenantID, req)
+			result, err := l.fallback.EvaluateFlag(ctx, flagID, tenantID, req)
+			if err != nil {
+				return false, fmt.Errorf("fallback feature flag evaluation failed: %w", err)
+			}
+			return result, nil
 		}
 		return false, nil
 	}
@@ -78,9 +83,13 @@ func (l *LaunchDarklyFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, fla
 	// TODO: Implement actual LaunchDarkly evaluation when SDK is properly integrated
 	// For now, always fall back to the fallback evaluator
 	if l.fallback != nil {
-		return l.fallback.EvaluateFlag(ctx, flagID, tenantID, req)
+		result, err := l.fallback.EvaluateFlag(ctx, flagID, tenantID, req)
+		if err != nil {
+			return false, fmt.Errorf("fallback feature flag evaluation failed: %w", err)
+		}
+		return result, nil
 	}
-	
+
 	return false, nil
 }
 
@@ -88,10 +97,10 @@ func (l *LaunchDarklyFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, fla
 func (l *LaunchDarklyFeatureFlagEvaluator) EvaluateFlagWithDefault(ctx context.Context, flagID string, tenantID modular.TenantID, req *http.Request, defaultValue bool) bool {
 	result, err := l.EvaluateFlag(ctx, flagID, tenantID, req)
 	if err != nil {
-		l.logger.Warn("Feature flag evaluation failed, using default", 
-			"flag", flagID, 
-			"tenant", tenantID, 
-			"default", defaultValue, 
+		l.logger.WarnContext(ctx, "Feature flag evaluation failed, using default",
+			"flag", flagID,
+			"tenant", tenantID,
+			"default", defaultValue,
 			"error", err)
 		return defaultValue
 	}
@@ -139,13 +148,13 @@ func NewTenantConfigFeatureFlagEvaluator(logger *slog.Logger) *TenantConfigFeatu
 // LoadTenantConfig loads feature flag configuration for a specific tenant.
 func (t *TenantConfigFeatureFlagEvaluator) LoadTenantConfig(tenantID modular.TenantID, config map[string]bool) {
 	t.tenantConfigs[tenantID] = config
-	t.logger.Debug("Loaded tenant feature flag config", "tenant", tenantID, "flags", len(config))
+	t.logger.DebugContext(context.Background(), "Loaded tenant feature flag config", "tenant", tenantID, "flags", len(config))
 }
 
 // LoadGlobalConfig loads global feature flag configuration.
 func (t *TenantConfigFeatureFlagEvaluator) LoadGlobalConfig(config map[string]bool) {
 	t.globalConfig = config
-	t.logger.Debug("Loaded global feature flag config", "flags", len(config))
+	t.logger.DebugContext(context.Background(), "Loaded global feature flag config", "flags", len(config))
 }
 
 // EvaluateFlag evaluates a feature flag using tenant configuration.
@@ -154,9 +163,9 @@ func (t *TenantConfigFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, fla
 	if tenantID != "" {
 		if tenantConfig, exists := t.tenantConfigs[tenantID]; exists {
 			if value, found := tenantConfig[flagID]; found {
-				t.logger.Debug("Feature flag found in tenant config", 
-					"flag", flagID, 
-					"tenant", tenantID, 
+				t.logger.DebugContext(ctx, "Feature flag found in tenant config",
+					"flag", flagID,
+					"tenant", tenantID,
 					"value", value)
 				return value, nil
 			}
@@ -165,16 +174,16 @@ func (t *TenantConfigFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, fla
 
 	// Fall back to global configuration
 	if value, found := t.globalConfig[flagID]; found {
-		t.logger.Debug("Feature flag found in global config", 
-			"flag", flagID, 
+		t.logger.DebugContext(ctx, "Feature flag found in global config",
+			"flag", flagID,
 			"value", value)
 		return value, nil
 	}
 
-	t.logger.Debug("Feature flag not found in config, defaulting to false", 
-		"flag", flagID, 
+	t.logger.DebugContext(ctx, "Feature flag not found in config, defaulting to false",
+		"flag", flagID,
 		"tenant", tenantID)
-	return false, nil
+	return false, fmt.Errorf("feature flag %s not found: %w", flagID, ErrFeatureFlagNotFound)
 }
 
 // EvaluateFlagWithDefault evaluates a feature flag with a default value.

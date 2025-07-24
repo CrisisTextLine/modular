@@ -18,4 +18,5 @@ var (
 	ErrBackendNotFound          = errors.New("backend not found")
 	ErrBackendProxyNil          = errors.New("backend proxy is nil")
 	ErrFeatureFlagNotFound      = errors.New("feature flag not found")
+	ErrDryRunModeNotEnabled     = errors.New("dry-run mode is not enabled")
 )

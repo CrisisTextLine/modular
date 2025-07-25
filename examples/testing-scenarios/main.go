@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -113,6 +114,9 @@ func main() {
 	app.RegisterModule(chimux.NewChiMuxModule())
 	app.RegisterModule(reverseproxy.NewModule())
 	app.RegisterModule(httpserver.NewHTTPServerModule())
+
+	// Add custom health endpoint for application health (not backend health)
+	testApp.registerHealthEndpoint(app)
 
 	// Start mock backends
 	testApp.startMockBackends()
@@ -533,6 +537,38 @@ func (t *TestingApp) registerTestTenants(tenantService modular.TenantService) {
 	}
 
 	t.app.Logger().Info("Registered test tenants", "count", len(tenants))
+}
+
+// registerHealthEndpoint adds a health endpoint that responds with the application's own health status
+func (t *TestingApp) registerHealthEndpoint(app modular.Application) {
+	// Get the chimux router service
+	var router chimux.BasicRouter
+	if err := app.GetService("router", &router); err != nil {
+		app.Logger().Error("Failed to get router service", "error", err)
+		return
+	}
+
+	// Register health endpoint that responds with application health, not backend health
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		
+		// Simple health response indicating the reverse proxy application is running
+		response := map[string]interface{}{
+			"status":    "healthy",
+			"service":   "testing-scenarios-reverse-proxy",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"version":   "1.0.0",
+			"uptime":    time.Since(time.Now().Add(-time.Hour)).String(), // placeholder uptime
+		}
+		
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			app.Logger().Error("Failed to encode health response", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+	})
+
+	app.Logger().Info("Registered application health endpoint at /health")
 }
 
 type ScenarioConfig struct {

@@ -39,6 +39,7 @@ reverseproxy:
     chimera: "http://localhost:9008"          # Chimera API backend for LaunchDarkly scenarios
 
   # Route configuration for different test scenarios matching Chimera Facade patterns
+  # Note: /health endpoint is handled directly by the application, not proxied to backends
   routes:
     "/api/v1/*": "primary"                    # Main API routes
     "/api/v2/*": "canary"                     # Canary API routes

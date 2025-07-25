@@ -29,7 +29,6 @@ type DebugInfo struct {
 	Timestamp           time.Time                     `json:"timestamp"`
 	Tenant              string                        `json:"tenant,omitempty"`
 	Environment         string                        `json:"environment"`
-	LaunchDarklyEnabled bool                          `json:"launchDarklyEnabled"`
 	Flags               map[string]interface{}        `json:"flags,omitempty"`
 	BackendServices     map[string]string             `json:"backendServices"`
 	Routes              map[string]string             `json:"routes"`
@@ -123,41 +122,26 @@ func (d *DebugHandler) handleFlags(w http.ResponseWriter, r *http.Request) {
 
 	// Get feature flags
 	var flags map[string]interface{}
-	var launchDarklyEnabled bool
 
 	if d.featureFlagEval != nil {
-		// Check if LaunchDarkly is available
-		if ldEval, ok := d.featureFlagEval.(*LaunchDarklyFeatureFlagEvaluator); ok {
-			launchDarklyEnabled = ldEval.IsAvailable()
-			if launchDarklyEnabled {
-				flagsResult, err := ldEval.GetAllFlags(r.Context(), tenantID, r)
-				if err != nil {
-					d.logger.Error("Failed to get LaunchDarkly flags", "error", err)
-				} else {
-					flags = flagsResult
-				}
-			}
-		}
-
-		// If LaunchDarkly flags not available, try to get from tenant config
-		if flags == nil {
-			flags = make(map[string]interface{})
-			// Add tenant-specific flags if available
-			if tenantID != "" && d.tenantService != nil {
-				// Try to get tenant config
-				// Since the tenant service interface doesn't expose config directly,
-				// we'll skip this for now and just indicate the source
-				flags["_source"] = "tenant_config"
-			}
+		// Try to get flags from feature flag evaluator
+		flags = make(map[string]interface{})
+		// Add tenant-specific flags if available
+		if tenantID != "" && d.tenantService != nil {
+			// Try to get tenant config
+			// Since the tenant service interface doesn't expose config directly,
+			// we'll skip this for now and just indicate the source
+			flags["_source"] = "tenant_config"
 		}
 	}
 
-	debugInfo := map[string]interface{}{
-		"timestamp":           time.Now(),
-		"tenant":              string(tenantID),
-		"environment":         "local", // Could be configured
-		"launchDarklyEnabled": launchDarklyEnabled,
-		"flags":               flags,
+	debugInfo := DebugInfo{
+		Timestamp:       time.Now(),
+		Tenant:          string(tenantID),
+		Environment:     "local", // Could be configured
+		Flags:           flags,
+		BackendServices: d.proxyConfig.BackendServices,
+		Routes:          d.proxyConfig.Routes,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -175,17 +159,27 @@ func (d *DebugHandler) handleInfo(w http.ResponseWriter, r *http.Request) {
 
 	tenantID := d.getTenantID(r)
 
+	// Get feature flags
+	var flags map[string]interface{}
+	if d.featureFlagEval != nil {
+		// Try to get flags from feature flag evaluator
+		flags = make(map[string]interface{})
+		// Add tenant-specific flags if available
+		if tenantID != "" && d.tenantService != nil {
+			// Try to get tenant config
+			// Since the tenant service interface doesn't expose config directly,
+			// we'll skip this for now and just indicate the source
+			flags["_source"] = "tenant_config"
+		}
+	}
+
 	debugInfo := DebugInfo{
 		Timestamp:       time.Now(),
 		Tenant:          string(tenantID),
 		Environment:     "local", // Could be configured
+		Flags:           flags,
 		BackendServices: d.proxyConfig.BackendServices,
 		Routes:          d.proxyConfig.Routes,
-	}
-
-	// Add LaunchDarkly status
-	if ldEval, ok := d.featureFlagEval.(*LaunchDarklyFeatureFlagEvaluator); ok {
-		debugInfo.LaunchDarklyEnabled = ldEval.IsAvailable()
 	}
 
 	// Add circuit breaker info

@@ -24,9 +24,6 @@ type ReverseProxyConfig struct {
 	// BackendConfigs defines per-backend configurations including path rewriting and header rewriting
 	BackendConfigs map[string]BackendServiceConfig `json:"backend_configs" yaml:"backend_configs" toml:"backend_configs"`
 
-	// LaunchDarkly integration configuration
-	LaunchDarkly LaunchDarklyConfig `json:"launchdarkly" yaml:"launchdarkly" toml:"launchdarkly"`
-
 	// Debug endpoints configuration
 	DebugEndpoints DebugEndpointsConfig `json:"debug_endpoints" yaml:"debug_endpoints" toml:"debug_endpoints"`
 

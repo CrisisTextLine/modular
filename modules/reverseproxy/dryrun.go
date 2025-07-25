@@ -27,6 +27,9 @@ type DryRunConfig struct {
 
 	// IgnoreHeaders lists headers to ignore during comparison
 	IgnoreHeaders []string `json:"ignore_headers" yaml:"ignore_headers" toml:"ignore_headers" env:"DRY_RUN_IGNORE_HEADERS"`
+
+	// DefaultResponseBackend specifies which backend response to return by default ("primary" or "secondary")
+	DefaultResponseBackend string `json:"default_response_backend" yaml:"default_response_backend" toml:"default_response_backend" env:"DRY_RUN_DEFAULT_RESPONSE_BACKEND" default:"primary"`
 }
 
 // DryRunResult represents the result of a dry-run comparison.
@@ -42,6 +45,7 @@ type DryRunResult struct {
 	SecondaryResponse ResponseInfo     `json:"secondaryResponse"`
 	Comparison        ComparisonResult `json:"comparison"`
 	Duration          DurationInfo     `json:"duration"`
+	ReturnedResponse  string           `json:"returnedResponse"` // "primary" or "secondary" - indicates which response was returned to client
 }
 
 // ResponseInfo contains information about a backend response.
@@ -155,6 +159,13 @@ func (d *DryRunHandler) ProcessDryRun(ctx context.Context, req *http.Request, pr
 		Secondary: result.SecondaryResponse.ResponseTime,
 	}
 
+	// Determine which response to return based on configuration
+	if d.config.DefaultResponseBackend == "secondary" {
+		result.ReturnedResponse = "secondary"
+	} else {
+		result.ReturnedResponse = "primary" // Default to primary
+	}
+
 	// Compare responses
 	result.Comparison = d.compareResponses(result.PrimaryResponse, result.SecondaryResponse)
 
@@ -162,6 +173,14 @@ func (d *DryRunHandler) ProcessDryRun(ctx context.Context, req *http.Request, pr
 	d.logDryRunResult(result)
 
 	return result, nil
+}
+
+// GetReturnedResponse returns the response information that should be sent to the client.
+func (d *DryRunResult) GetReturnedResponse() ResponseInfo {
+	if d.ReturnedResponse == "secondary" {
+		return d.SecondaryResponse
+	}
+	return d.PrimaryResponse
 }
 
 // sendRequest sends a request to a specific backend and returns response information.

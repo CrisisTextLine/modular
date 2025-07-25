@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// TestNewFeatures tests the newly added features for LaunchDarkly, debug endpoints, and dry-run
+// TestNewFeatures tests the newly added features for debug endpoints and dry-run functionality
 func TestNewFeatures(t *testing.T) {
 	// Create a logger for tests
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -77,62 +77,6 @@ func TestNewFeatures(t *testing.T) {
 		result = evaluator.EvaluateFlagWithDefault(ctx, "missing-flag", "", req, true)
 		if result != true {
 			t.Errorf("Expected default value true for missing flag, got %v", result)
-		}
-	})
-
-	t.Run("LaunchDarklyFeatureFlagEvaluator", func(t *testing.T) {
-		fallback := NewTenantConfigFeatureFlagEvaluator(logger)
-		fallback.LoadGlobalConfig(map[string]bool{
-			"fallback-flag": true,
-		})
-
-		// Test with empty SDK key (fallback mode)
-		config := LaunchDarklyConfig{
-			SDKKey:      "",
-			Environment: "test",
-			Timeout:     5 * time.Second,
-		}
-
-		evaluator, err := NewLaunchDarklyFeatureFlagEvaluator(config, fallback, logger)
-		if err != nil {
-			t.Fatalf("Failed to create LaunchDarkly evaluator: %v", err)
-		}
-
-		ctx := context.Background()
-		req := httptest.NewRequest("GET", "/test", nil)
-
-		// Should use fallback evaluator
-		result, err := evaluator.EvaluateFlag(ctx, "fallback-flag", "", req)
-		if err != nil {
-			t.Errorf("LaunchDarkly fallback evaluation failed: %v", err)
-		}
-		if result != true {
-			t.Errorf("Expected fallback flag to be true, got %v", result)
-		}
-
-		// Test unavailable flag with default
-		result = evaluator.EvaluateFlagWithDefault(ctx, "missing-flag", "", req, false)
-		if result != false {
-			t.Errorf("Expected default value false for missing flag, got %v", result)
-		}
-
-		// Verify availability
-		if evaluator.IsAvailable() {
-			t.Error("Expected LaunchDarkly to be unavailable without SDK key")
-		}
-
-		// Test GetAllFlags
-		flags, err := evaluator.GetAllFlags(ctx, "", req)
-		if err != nil {
-			t.Errorf("GetAllFlags failed: %v", err)
-		}
-		if flags != nil {
-			t.Errorf("Expected nil flags when LaunchDarkly unavailable, got %v", flags)
-		}
-
-		// Test Close
-		if err := evaluator.Close(); err != nil {
-			t.Errorf("Close failed: %v", err)
 		}
 	})
 
@@ -436,40 +380,6 @@ func TestScenarioIntegration(t *testing.T) {
 		"oauth-introspect-api": true,
 	})
 
-	// Test LaunchDarkly integration with fallback
-	ldConfig := LaunchDarklyConfig{
-		SDKKey:      "", // Empty to trigger fallback
-		Environment: "local",
-		Timeout:     5 * time.Second,
-	}
-
-	ldEvaluator, err := NewLaunchDarklyFeatureFlagEvaluator(ldConfig, evaluator, logger)
-	if err != nil {
-		t.Fatalf("Failed to create LaunchDarkly evaluator: %v", err)
-	}
-
-	ctx := context.Background()
-	req := httptest.NewRequest("GET", "/api/v1/toolkit/toolbox", nil)
-	req.Header.Set("X-Affiliate-ID", "sampleaff1")
-
-	// Test toolkit API flag evaluation
-	result, err := ldEvaluator.EvaluateFlag(ctx, "toolkit-toolbox-api", "sampleaff1", req)
-	if err != nil {
-		t.Errorf("Toolkit API flag evaluation failed: %v", err)
-	}
-	if result != false { // Should be false for sampleaff1
-		t.Errorf("Expected toolkit API flag to be false for sampleaff1, got %v", result)
-	}
-
-	// Test OAuth token API flag evaluation
-	result, err = ldEvaluator.EvaluateFlag(ctx, "oauth-token-api", "sampleaff1", req)
-	if err != nil {
-		t.Errorf("OAuth token API flag evaluation failed: %v", err)
-	}
-	if result != true { // Should be true for sampleaff1
-		t.Errorf("Expected OAuth token API flag to be true for sampleaff1, got %v", result)
-	}
-
 	// Test dry-run functionality with different backends
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -490,17 +400,19 @@ func TestScenarioIntegration(t *testing.T) {
 	defer secondaryServer.Close()
 
 	dryRunConfig := DryRunConfig{
-		Enabled:         true,
-		LogResponses:    true,
-		MaxResponseSize: 1048576,
-		CompareHeaders:  []string{"Content-Type"},
-		IgnoreHeaders:   []string{"Date", "X-Request-ID"},
+		Enabled:                true,
+		LogResponses:           true,
+		MaxResponseSize:        1048576,
+		CompareHeaders:         []string{"Content-Type"},
+		IgnoreHeaders:          []string{"Date", "X-Request-ID"},
+		DefaultResponseBackend: "secondary", // Test returning secondary response
 	}
 
 	dryRunHandler := NewDryRunHandler(dryRunConfig, logger)
 	dryRunReq := httptest.NewRequest("GET", "/api/v1/test/dryrun", nil)
 	dryRunReq.Header.Set("X-Affiliate-ID", "sampleaff1")
 
+	ctx := context.Background()
 	dryRunResult, err := dryRunHandler.ProcessDryRun(ctx, dryRunReq, primaryServer.URL, secondaryServer.URL)
 	if err != nil {
 		t.Fatalf("Dry-run processing failed: %v", err)
@@ -522,6 +434,17 @@ func TestScenarioIntegration(t *testing.T) {
 	// Status codes should match
 	if !dryRunResult.Comparison.StatusCodeMatch {
 		t.Error("Expected status codes to match between backends")
+	}
+
+	// Test that the returned response indicates which backend was used
+	if dryRunResult.ReturnedResponse != "secondary" {
+		t.Errorf("Expected returned response to be 'secondary', got %s", dryRunResult.ReturnedResponse)
+	}
+
+	// Test the GetReturnedResponse method
+	returnedResponse := dryRunResult.GetReturnedResponse()
+	if returnedResponse.StatusCode != http.StatusOK {
+		t.Errorf("Expected returned response status 200, got %d", returnedResponse.StatusCode)
 	}
 
 	// Body content should be different (chimera vs legacy response)

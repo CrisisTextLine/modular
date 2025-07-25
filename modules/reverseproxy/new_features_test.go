@@ -2,6 +2,7 @@ package reverseproxy
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -141,7 +142,9 @@ func TestNewFeatures(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-Backend", "primary")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"backend":"primary","message":"test"}`))
+			if _, err := w.Write([]byte(`{"backend":"primary","message":"test"}`)); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 		}))
 		defer primaryServer.Close()
 
@@ -149,7 +152,9 @@ func TestNewFeatures(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-Backend", "secondary")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"backend":"secondary","message":"test"}`))
+			if _, err := w.Write([]byte(`{"backend":"secondary","message":"test"}`)); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 		}))
 		defer secondaryServer.Close()
 
@@ -166,7 +171,7 @@ func TestNewFeatures(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error when dry-run is disabled")
 		}
-		if err != ErrDryRunModeNotEnabled {
+		if !errors.Is(err, ErrDryRunModeNotEnabled) {
 			t.Errorf("Expected ErrDryRunModeNotEnabled, got %v", err)
 		}
 
@@ -284,7 +289,8 @@ func TestNewFeatures(t *testing.T) {
 
 		for _, endpoint := range endpoints {
 			t.Run(endpoint.description, func(t *testing.T) {
-				req, err := http.NewRequest("GET", server.URL+endpoint.path, nil)
+				ctx := context.Background()
+				req, err := http.NewRequestWithContext(ctx, "GET", server.URL+endpoint.path, nil)
 				if err != nil {
 					t.Fatalf("Failed to create request: %v", err)
 				}
@@ -295,7 +301,11 @@ func TestNewFeatures(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Request failed: %v", err)
 				}
-				defer resp.Body.Close()
+				defer func() {
+					if err := resp.Body.Close(); err != nil {
+						t.Errorf("Failed to close response body: %v", err)
+					}
+				}()
 
 				if resp.StatusCode != http.StatusOK {
 					t.Errorf("Expected status 200, got %d", resp.StatusCode)
@@ -325,7 +335,8 @@ func TestNewFeatures(t *testing.T) {
 			defer authServer.Close()
 
 			// Test without auth token
-			req, err := http.NewRequest("GET", authServer.URL+"/debug/flags", nil)
+			ctx := context.Background()
+			req, err := http.NewRequestWithContext(ctx, "GET", authServer.URL+"/debug/flags", nil)
 			if err != nil {
 				t.Fatalf("Failed to create request: %v", err)
 			}
@@ -335,13 +346,17 @@ func TestNewFeatures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("Failed to close response body: %v", err)
+				}
+			}()
 
 			if resp.StatusCode != http.StatusUnauthorized {
 				t.Errorf("Expected status 401 without auth, got %d", resp.StatusCode)
 			}
 
-			ctx := context.Background()
+			ctx = context.Background()
 			// Test with correct auth token
 			req, err = http.NewRequestWithContext(ctx, "GET", authServer.URL+"/debug/flags", nil)
 			if err != nil {
@@ -353,7 +368,11 @@ func TestNewFeatures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("Failed to close response body: %v", err)
+				}
+			}()
 
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("Expected status 200 with correct auth, got %d", resp.StatusCode)
@@ -370,7 +389,11 @@ func TestNewFeatures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("Failed to close response body: %v", err)
+				}
+			}()
 
 			if resp.StatusCode != http.StatusForbidden {
 				t.Errorf("Expected status 403 with wrong auth, got %d", resp.StatusCode)
@@ -451,14 +474,18 @@ func TestScenarioIntegration(t *testing.T) {
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"chimera","endpoint":"toolkit-toolbox","feature_enabled":true}`))
+		if _, err := w.Write([]byte(`{"backend":"chimera","endpoint":"toolkit-toolbox","feature_enabled":true}`)); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer primaryServer.Close()
 
 	secondaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"legacy","endpoint":"toolkit-toolbox","legacy_mode":true}`))
+		if _, err := w.Write([]byte(`{"backend":"legacy","endpoint":"toolkit-toolbox","legacy_mode":true}`)); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer secondaryServer.Close()
 

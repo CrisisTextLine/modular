@@ -341,8 +341,9 @@ func TestNewFeatures(t *testing.T) {
 				t.Errorf("Expected status 401 without auth, got %d", resp.StatusCode)
 			}
 
+			ctx := context.Background()
 			// Test with correct auth token
-			req, err = http.NewRequest("GET", authServer.URL+"/debug/flags", nil)
+			req, err = http.NewRequestWithContext(ctx, "GET", authServer.URL+"/debug/flags", nil)
 			if err != nil {
 				t.Fatalf("Failed to create request: %v", err)
 			}
@@ -359,7 +360,7 @@ func TestNewFeatures(t *testing.T) {
 			}
 
 			// Test with incorrect auth token
-			req, err = http.NewRequest("GET", authServer.URL+"/debug/flags", nil)
+			req, err = http.NewRequestWithContext(ctx, "GET", authServer.URL+"/debug/flags", nil)
 			if err != nil {
 				t.Fatalf("Failed to create request: %v", err)
 			}
@@ -399,17 +400,17 @@ func TestScenarioIntegration(t *testing.T) {
 	// Create feature flag evaluator with typical Chimera scenarios
 	evaluator := NewTenantConfigFeatureFlagEvaluator(logger)
 	evaluator.LoadGlobalConfig(map[string]bool{
-		"toolkit-toolbox-api":      false,
-		"oauth-token-api":          false,
-		"oauth-introspect-api":     false,
-		"test-dryrun-api":          true,
+		"toolkit-toolbox-api":  false,
+		"oauth-token-api":      false,
+		"oauth-introspect-api": false,
+		"test-dryrun-api":      true,
 	})
 
 	// Load tenant-specific config (like sampleaff1 from scenarios)
 	evaluator.LoadTenantConfig("sampleaff1", map[string]bool{
-		"toolkit-toolbox-api":      false,
-		"oauth-token-api":          true,
-		"oauth-introspect-api":     true,
+		"toolkit-toolbox-api":  false,
+		"oauth-token-api":      true,
+		"oauth-introspect-api": true,
 	})
 
 	// Test LaunchDarkly integration with fallback
@@ -455,7 +456,7 @@ func TestScenarioIntegration(t *testing.T) {
 	defer primaryServer.Close()
 
 	secondaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json") 
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"backend":"legacy","endpoint":"toolkit-toolbox","legacy_mode":true}`))
 	}))

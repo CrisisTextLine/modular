@@ -26,14 +26,14 @@ type DebugEndpointsConfig struct {
 
 // DebugInfo represents debugging information about the reverse proxy state.
 type DebugInfo struct {
-	Timestamp           time.Time                     `json:"timestamp"`
-	Tenant              string                        `json:"tenant,omitempty"`
-	Environment         string                        `json:"environment"`
-	Flags               map[string]interface{}        `json:"flags,omitempty"`
-	BackendServices     map[string]string             `json:"backendServices"`
-	Routes              map[string]string             `json:"routes"`
-	CircuitBreakers     map[string]CircuitBreakerInfo `json:"circuitBreakers,omitempty"`
-	HealthChecks        map[string]HealthInfo         `json:"healthChecks,omitempty"`
+	Timestamp       time.Time                     `json:"timestamp"`
+	Tenant          string                        `json:"tenant,omitempty"`
+	Environment     string                        `json:"environment"`
+	Flags           map[string]interface{}        `json:"flags,omitempty"`
+	BackendServices map[string]string             `json:"backendServices"`
+	Routes          map[string]string             `json:"routes"`
+	CircuitBreakers map[string]CircuitBreakerInfo `json:"circuitBreakers,omitempty"`
+	HealthChecks    map[string]HealthInfo         `json:"healthChecks,omitempty"`
 }
 
 // CircuitBreakerInfo represents circuit breaker status information.
@@ -327,6 +327,18 @@ func (d *DebugHandler) getTenantID(r *http.Request) modular.TenantID {
 		tenantIDHeader = "X-Tenant-ID"
 	}
 
+	// Check the configured tenant ID header first
 	tenantID := r.Header.Get(tenantIDHeader)
+	if tenantID != "" {
+		return modular.TenantID(tenantID)
+	}
+
+	// Also check X-Affiliate-ID as a fallback if the configured header is different
+	if tenantIDHeader != "X-Affiliate-ID" {
+		if affiliateID := r.Header.Get("X-Affiliate-ID"); affiliateID != "" {
+			return modular.TenantID(affiliateID)
+		}
+	}
+
 	return modular.TenantID(tenantID)
 }

@@ -1,6 +1,7 @@
 package reverseproxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -44,7 +45,7 @@ func TestDebugHandler(t *testing.T) {
 		}
 
 		debugHandler := NewDebugHandler(config, featureFlagEval, proxyConfig, nil, logger)
-		
+
 		// Test authentication required
 		t.Run("RequiresAuthentication", func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/debug/info", nil)
@@ -208,7 +209,11 @@ func TestDebugHandler(t *testing.T) {
 
 		for _, endpoint := range endpoints {
 			t.Run(fmt.Sprintf("Route%s", endpoint), func(t *testing.T) {
-				resp, err := http.Get(server.URL + endpoint)
+				req, err := http.NewRequestWithContext(context.Background(), "GET", server.URL+endpoint, nil)
+				require.NoError(t, err)
+
+				client := &http.Client{}
+				resp, err := client.Do(req)
 				require.NoError(t, err)
 				defer resp.Body.Close()
 
@@ -307,7 +312,7 @@ func TestDebugHandlerWithMocks(t *testing.T) {
 	debugHandler := NewDebugHandler(config, nil, proxyConfig, nil, logger)
 
 	t.Run("CircuitBreakerInfo", func(t *testing.T) {
-		// Create mock circuit breakers  
+		// Create mock circuit breakers
 		mockCircuitBreakers := map[string]*CircuitBreaker{
 			"primary": NewCircuitBreaker("primary", nil),
 		}
@@ -352,6 +357,14 @@ func TestDebugHandlerWithMocks(t *testing.T) {
 		require.NoError(t, err)
 
 		// Health checkers may not populate immediately, so just check structure
-		assert.NotNil(t, response.HealthChecks)
+		// Since the health checker hasn't been started, the status map will be empty
+		// Due to omitempty JSON tag, empty maps become nil after JSON round-trip
+		// This is expected behavior, so we'll check that it's either nil or empty
+		if len(mockHealthCheckers) > 0 {
+			// HealthChecks can be nil (omitted due to omitempty) or empty map
+			if response.HealthChecks != nil {
+				assert.Empty(t, response.HealthChecks)
+			}
+		}
 	})
 }

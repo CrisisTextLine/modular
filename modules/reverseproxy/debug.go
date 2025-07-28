@@ -327,18 +327,6 @@ func (d *DebugHandler) getTenantID(r *http.Request) modular.TenantID {
 		tenantIDHeader = "X-Tenant-ID"
 	}
 
-	// Check the configured tenant ID header first
 	tenantID := r.Header.Get(tenantIDHeader)
-	if tenantID != "" {
-		return modular.TenantID(tenantID)
-	}
-
-	// Also check X-Affiliate-ID as a fallback if the configured header is different
-	if tenantIDHeader != "X-Affiliate-ID" {
-		if affiliateID := r.Header.Get("X-Affiliate-ID"); affiliateID != "" {
-			return modular.TenantID(affiliateID)
-		}
-	}
-
 	return modular.TenantID(tenantID)
 }

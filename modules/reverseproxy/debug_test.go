@@ -272,21 +272,6 @@ func TestDebugHandler(t *testing.T) {
 			assert.Equal(t, "test-tenant", response.Tenant)
 		})
 
-		t.Run("FromAffiliateHeader", func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/debug/info", nil)
-			req.Header.Set("X-Affiliate-ID", "affiliate-123")
-			w := httptest.NewRecorder()
-
-			debugHandler.handleInfo(w, req)
-
-			assert.Equal(t, http.StatusOK, w.Code)
-
-			var response DebugInfo
-			err := json.NewDecoder(w.Body).Decode(&response)
-			require.NoError(t, err)
-
-			assert.Equal(t, "affiliate-123", response.Tenant)
-		})
 	})
 }
 

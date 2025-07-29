@@ -37,7 +37,14 @@ type FileBasedFeatureFlagEvaluator struct {
 }
 
 // NewFileBasedFeatureFlagEvaluator creates a new tenant-aware feature flag evaluator.
-func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logger) *FileBasedFeatureFlagEvaluator {
+func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logger) (*FileBasedFeatureFlagEvaluator, error) {
+	// Validate parameters
+	if app == nil {
+		return nil, fmt.Errorf("app cannot be nil")
+	}
+	if logger == nil {
+		return nil, fmt.Errorf("logger cannot be nil")
+	}
 	// Get tenant service
 	var tenantService modular.TenantService
 	if err := app.GetService("tenantService", &tenantService); err != nil {

@@ -5,18 +5,15 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
-
-	"github.com/CrisisTextLine/modular"
 )
 
 // TestFeatureFlagEvaluatorServiceExposure tests that the module exposes the feature flag evaluator as a service
 func TestFeatureFlagEvaluatorServiceExposure(t *testing.T) {
 	tests := []struct {
-		name              string
-		config            *ReverseProxyConfig
-		expectService     bool
-		expectGlobalFlags int
-		expectTenantFlags int
+		name          string
+		config        *ReverseProxyConfig
+		expectService bool
+		expectFlags   int
 	}{
 		{
 			name: "FeatureFlagsDisabled",
@@ -40,9 +37,8 @@ func TestFeatureFlagEvaluatorServiceExposure(t *testing.T) {
 					Enabled: true,
 				},
 			},
-			expectService:     true,
-			expectGlobalFlags: 0,
-			expectTenantFlags: 0,
+			expectService: true,
+			expectFlags:   0,
 		},
 		{
 			name: "FeatureFlagsEnabledWithDefaults",
@@ -52,23 +48,14 @@ func TestFeatureFlagEvaluatorServiceExposure(t *testing.T) {
 				},
 				FeatureFlags: FeatureFlagsConfig{
 					Enabled: true,
-					GlobalFlags: map[string]bool{
-						"global-flag-1": true,
-						"global-flag-2": false,
-					},
-					TenantFlags: map[string]map[string]bool{
-						"tenant1": {
-							"tenant-flag-1": true,
-						},
-						"tenant2": {
-							"tenant-flag-2": false,
-						},
+					Flags: map[string]bool{
+						"flag-1": true,
+						"flag-2": false,
 					},
 				},
 			},
-			expectService:     true,
-			expectGlobalFlags: 2,
-			expectTenantFlags: 2,
+			expectService: true,
+			expectFlags:   2,
 		},
 	}
 
@@ -134,31 +121,15 @@ func TestFeatureFlagEvaluatorServiceExposure(t *testing.T) {
 				// Test configuration was applied correctly
 				req, _ := http.NewRequestWithContext(context.Background(), "GET", "/test", nil)
 
-				// Test global flags
-				if tt.expectGlobalFlags > 0 {
-					for flagID, expectedValue := range tt.config.FeatureFlags.GlobalFlags {
+				// Test flags
+				if tt.expectFlags > 0 {
+					for flagID, expectedValue := range tt.config.FeatureFlags.Flags {
 						actualValue, err := evaluator.EvaluateFlag(context.Background(), flagID, "", req)
 						if err != nil {
 							t.Errorf("Error evaluating flag %s: %v", flagID, err)
 						}
 						if actualValue != expectedValue {
-							t.Errorf("Global flag %s: expected %v, got %v", flagID, expectedValue, actualValue)
-						}
-					}
-				}
-
-				// Test tenant flags
-				if tt.expectTenantFlags > 0 {
-					for tenantIDStr, tenantFlags := range tt.config.FeatureFlags.TenantFlags {
-						tenantID := modular.TenantID(tenantIDStr)
-						for flagID, expectedValue := range tenantFlags {
-							actualValue, err := evaluator.EvaluateFlag(context.Background(), flagID, tenantID, req)
-							if err != nil {
-								t.Errorf("Error evaluating tenant flag %s for tenant %s: %v", flagID, tenantID, err)
-							}
-							if actualValue != expectedValue {
-								t.Errorf("Tenant flag %s for tenant %s: expected %v, got %v", flagID, tenantID, expectedValue, actualValue)
-							}
+							t.Errorf("Flag %s: expected %v, got %v", flagID, expectedValue, actualValue)
 						}
 					}
 				}
@@ -195,7 +166,7 @@ func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 		},
 		FeatureFlags: FeatureFlagsConfig{
 			Enabled: true,
-			GlobalFlags: map[string]bool{
+			Flags: map[string]bool{
 				"internal-flag": true,
 			},
 		},

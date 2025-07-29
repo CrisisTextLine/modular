@@ -240,9 +240,6 @@ type FeatureFlagsConfig struct {
 	// Enabled determines whether to create and expose the built-in FileBasedFeatureFlagEvaluator service
 	Enabled bool `json:"enabled" yaml:"enabled" toml:"enabled" env:"ENABLED" default:"false" desc:"Enable the built-in file-based feature flag evaluator service"`
 
-	// GlobalFlags defines default values for global feature flags
-	GlobalFlags map[string]bool `json:"global_flags" yaml:"global_flags" toml:"global_flags" desc:"Default values for global feature flags"`
-
-	// TenantFlags defines default values for tenant-specific feature flags
-	TenantFlags map[string]map[string]bool `json:"tenant_flags" yaml:"tenant_flags" toml:"tenant_flags" desc:"Default values for tenant-specific feature flags"`
+	// Flags defines default values for feature flags. Tenant-specific overrides come from tenant config files.
+	Flags map[string]bool `json:"flags" yaml:"flags" toml:"flags" desc:"Default values for feature flags"`
 }

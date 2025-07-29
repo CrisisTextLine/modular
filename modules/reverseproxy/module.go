@@ -416,26 +416,15 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 	if m.featureFlagEvaluator == nil && m.config.FeatureFlags.Enabled {
 		m.featureFlagEvaluator = NewFileBasedFeatureFlagEvaluator()
 
-		// Configure with default global flags
-		if m.config.FeatureFlags.GlobalFlags != nil {
-			for flagID, enabled := range m.config.FeatureFlags.GlobalFlags {
+		// Configure with default flags
+		if m.config.FeatureFlags.Flags != nil {
+			for flagID, enabled := range m.config.FeatureFlags.Flags {
 				m.featureFlagEvaluator.(*FileBasedFeatureFlagEvaluator).SetFlag(flagID, enabled)
 			}
 		}
 
-		// Configure with default tenant flags
-		if m.config.FeatureFlags.TenantFlags != nil {
-			for tenantIDStr, tenantFlags := range m.config.FeatureFlags.TenantFlags {
-				tenantID := modular.TenantID(tenantIDStr)
-				for flagID, enabled := range tenantFlags {
-					m.featureFlagEvaluator.(*FileBasedFeatureFlagEvaluator).SetTenantFlag(tenantID, flagID, enabled)
-				}
-			}
-		}
-
 		m.app.Logger().Info("Created and configured built-in feature flag evaluator",
-			"globalFlags", len(m.config.FeatureFlags.GlobalFlags),
-			"tenantFlags", len(m.config.FeatureFlags.TenantFlags))
+			"flags", len(m.config.FeatureFlags.Flags))
 	}
 
 	// Start health checker if enabled

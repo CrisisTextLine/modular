@@ -217,7 +217,11 @@ func (d *DryRunHandler) sendRequest(ctx context.Context, originalReq *http.Reque
 		response.Error = fmt.Sprintf("request failed: %v", err)
 		return response
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("failed to close response body: %v\n", err)
+		}
+	}()
 
 	response.StatusCode = resp.StatusCode
 

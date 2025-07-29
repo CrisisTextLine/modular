@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"sync"
 	"syscall"
@@ -94,7 +95,13 @@ func main() {
 	testApp.initializeScenarios()
 
 	// Create and register feature flag evaluator
-	testApp.featureFlags = reverseproxy.NewFileBasedFeatureFlagEvaluator()
+	var logger *slog.Logger
+	if slogLogger, ok := app.Logger().(*slog.Logger); ok {
+		logger = slogLogger
+	} else {
+		logger = slog.Default()
+	}
+	testApp.featureFlags = reverseproxy.NewFileBasedFeatureFlagEvaluator(app, logger)
 	if err := app.RegisterService("featureFlagEvaluator", testApp.featureFlags); err != nil {
 		app.Logger().Error("Failed to register feature flag evaluator", "error", err)
 		os.Exit(1)
@@ -107,8 +114,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Register test tenants
-	testApp.registerTestTenants(tenantService)
+	// Register tenant config loader to load tenant configurations from files
+	tenantConfigLoader := modular.NewFileBasedTenantConfigLoader(modular.TenantConfigParams{
+		ConfigNameRegex: regexp.MustCompile(`^[\w-]+\.yaml$`),
+		ConfigDir:       "tenants",
+		ConfigFeeders: []modular.Feeder{
+			feeders.NewYamlFeeder(""),
+		},
+	})
+	if err := app.RegisterService("tenantConfigLoader", tenantConfigLoader); err != nil {
+		app.Logger().Error("Failed to register tenant config loader", "error", err)
+		os.Exit(1)
+	}
 
 	// Register modules
 	app.RegisterModule(chimux.NewChiMuxModule())
@@ -494,51 +511,6 @@ func (t *TestingApp) stopMockBackends() {
 	}
 }
 
-func (t *TestingApp) registerTestTenants(tenantService modular.TenantService) {
-	// Register test tenants with different configurations
-	tenants := []struct {
-		id              string
-		defaultBackend  string
-		backendServices map[string]string
-	}{
-		{
-			id:             "tenant-alpha",
-			defaultBackend: "primary",
-			backendServices: map[string]string{
-				"primary": "http://localhost:9001",
-			},
-		},
-		{
-			id:             "tenant-beta",
-			defaultBackend: "secondary",
-			backendServices: map[string]string{
-				"secondary": "http://localhost:9002",
-			},
-		},
-		{
-			id:             "tenant-canary",
-			defaultBackend: "canary",
-			backendServices: map[string]string{
-				"canary": "http://localhost:9003",
-			},
-		},
-	}
-
-	for _, tenant := range tenants {
-		err := tenantService.RegisterTenant(modular.TenantID(tenant.id), map[string]modular.ConfigProvider{
-			"reverseproxy": modular.NewStdConfigProvider(&reverseproxy.ReverseProxyConfig{
-				DefaultBackend:  tenant.defaultBackend,
-				BackendServices: tenant.backendServices,
-			}),
-		})
-		if err != nil {
-			t.app.Logger().Error("Failed to register tenant", "tenant", tenant.id, "error", err)
-		}
-	}
-
-	t.app.Logger().Info("Registered test tenants", "count", len(tenants))
-}
-
 // registerHealthEndpoint adds a health endpoint that responds with the application's own health status
 func (t *TestingApp) registerHealthEndpoint(app modular.Application) {
 	// Get the chimux router service
@@ -884,9 +856,6 @@ func (t *TestingApp) runFeatureFlagScenario(app *TestingApp) error {
 	fmt.Println("  Phase 1: Testing feature flag enabled routing")
 	
 	// Enable API v1 feature flag
-	t.featureFlags.SetFlag("api-v1-enabled", true)
-	t.featureFlags.SetFlag("api-v2-enabled", false)
-	t.featureFlags.SetFlag("canary-enabled", false)
 	
 	testCases := []struct {
 		endpoint     string
@@ -927,8 +896,6 @@ func (t *TestingApp) runFeatureFlagScenario(app *TestingApp) error {
 	fmt.Println("  Phase 2: Testing tenant-specific feature flags")
 	
 	// Set tenant-specific flags
-	t.featureFlags.SetTenantFlag("tenant-alpha", "api-v2-enabled", true)
-	t.featureFlags.SetTenantFlag("tenant-beta", "canary-enabled", true)
 	
 	tenantTests := []struct {
 		tenant      string
@@ -971,9 +938,6 @@ func (t *TestingApp) runFeatureFlagScenario(app *TestingApp) error {
 	
 	// Toggle flags and test
 	fmt.Printf("    Enabling all feature flags... ")
-	t.featureFlags.SetFlag("api-v1-enabled", true)
-	t.featureFlags.SetFlag("api-v2-enabled", true)
-	t.featureFlags.SetFlag("canary-enabled", true)
 	
 	resp, err := t.httpClient.Get("http://localhost:8080/api/v2/test")
 	if err != nil {
@@ -988,9 +952,6 @@ func (t *TestingApp) runFeatureFlagScenario(app *TestingApp) error {
 	}
 	
 	fmt.Printf("    Disabling all feature flags... ")
-	t.featureFlags.SetFlag("api-v1-enabled", false)
-	t.featureFlags.SetFlag("api-v2-enabled", false)
-	t.featureFlags.SetFlag("canary-enabled", false)
 	
 	resp, err = t.httpClient.Get("http://localhost:8080/api/v1/test")
 	if err != nil {
@@ -1484,7 +1445,6 @@ func (t *TestingApp) runToolkitApiScenario(app *TestingApp) error {
 	fmt.Println("  Phase 3: Testing feature flag behavior")
 	
 	// Enable the feature flag
-	t.featureFlags.SetFlag("toolkit-toolbox-api", true)
 	
 	req, err = http.NewRequest("GET", "http://localhost:8080"+endpoint, nil)
 	if err != nil {
@@ -1503,7 +1463,6 @@ func (t *TestingApp) runToolkitApiScenario(app *TestingApp) error {
 	}
 	
 	// Disable the feature flag
-	t.featureFlags.SetFlag("toolkit-toolbox-api", false)
 	
 	resp, err = t.httpClient.Do(req)
 	if err != nil {
@@ -1546,7 +1505,6 @@ func (t *TestingApp) runOAuthTokenScenario(app *TestingApp) error {
 	// Test 2: Test with feature flag enabled
 	fmt.Println("  Phase 2: Testing OAuth token API with feature flag")
 	
-	t.featureFlags.SetFlag("oauth-token-api", true)
 	
 	req, err = http.NewRequest("POST", "http://localhost:8080"+endpoint, nil)
 	if err != nil {
@@ -1598,7 +1556,6 @@ func (t *TestingApp) runOAuthIntrospectScenario(app *TestingApp) error {
 	// Test 2: Test with feature flag
 	fmt.Println("  Phase 2: Testing OAuth introspection API with feature flag")
 	
-	t.featureFlags.SetFlag("oauth-introspect-api", true)
 	
 	req, err = http.NewRequest("POST", "http://localhost:8080"+endpoint, nil)
 	if err != nil {
@@ -1666,8 +1623,6 @@ func (t *TestingApp) runTenantConfigScenario(app *TestingApp) error {
 	fmt.Println("  Phase 3: Testing feature flag fallback behavior")
 	
 	// Set tenant-specific flags
-	t.featureFlags.SetTenantFlag("sampleaff1", "toolkit-toolbox-api", false)
-	t.featureFlags.SetTenantFlag("sampleaff1", "oauth-token-api", true)
 	
 	req, err = http.NewRequest("GET", "http://localhost:8080/api/v1/toolkit/toolbox", nil)
 	if err != nil {
@@ -1786,7 +1741,6 @@ func (t *TestingApp) runDryRunScenario(app *TestingApp) error {
 	// Test 2: Test dry-run with feature flag enabled
 	fmt.Println("  Phase 2: Testing dry-run with feature flag enabled")
 	
-	t.featureFlags.SetFlag("test-dryrun-api", true)
 	
 	req, err = http.NewRequest("POST", "http://localhost:8080"+endpoint, nil)
 	if err != nil {

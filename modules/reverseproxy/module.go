@@ -414,17 +414,19 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 
 	// Create and configure feature flag evaluator if none was provided via service
 	if m.featureFlagEvaluator == nil && m.config.FeatureFlags.Enabled {
-		m.featureFlagEvaluator = NewFileBasedFeatureFlagEvaluator()
-
-		// Configure with default flags
-		if m.config.FeatureFlags.Flags != nil {
-			for flagID, enabled := range m.config.FeatureFlags.Flags {
-				m.featureFlagEvaluator.(*FileBasedFeatureFlagEvaluator).SetFlag(flagID, enabled)
-			}
+		// Convert the logger to *slog.Logger
+		var logger *slog.Logger
+		if slogLogger, ok := m.app.Logger().(*slog.Logger); ok {
+			logger = slogLogger
+		} else {
+			// Fallback to a default logger if conversion fails
+			logger = slog.Default()
 		}
 
-		m.app.Logger().Info("Created and configured built-in feature flag evaluator",
-			"flags", len(m.config.FeatureFlags.Flags))
+		//nolint:contextcheck // Constructor doesn't need context, it creates the evaluator for later use
+		m.featureFlagEvaluator = NewFileBasedFeatureFlagEvaluator(m.app, logger)
+
+		m.app.Logger().Info("Created built-in feature flag evaluator using tenant-aware configuration")
 	}
 
 	// Start health checker if enabled

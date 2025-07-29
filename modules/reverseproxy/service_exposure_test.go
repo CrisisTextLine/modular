@@ -150,11 +150,11 @@ func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 	mockRouter := &testRouter{routes: make(map[string]http.HandlerFunc)}
 
 	// Create external feature flag evaluator
-	externalEvaluator := NewFileBasedFeatureFlagEvaluator()
-	externalEvaluator.SetFlag("external-flag", true)
-
-	// Create mock application
 	app := NewMockTenantApplication()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	externalEvaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+
+	// Create mock application - already created above
 
 	// Create module
 	module := NewModule()
@@ -259,7 +259,9 @@ func TestFeatureFlagEvaluatorConfigValidation(t *testing.T) {
 // TestServiceProviderInterface tests that the service properly implements the expected interface
 func TestServiceProviderInterface(t *testing.T) {
 	// Create the evaluator
-	evaluator := NewFileBasedFeatureFlagEvaluator()
+	app := NewMockTenantApplication()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
 
 	// Test that it implements FeatureFlagEvaluator
 	var _ FeatureFlagEvaluator = evaluator

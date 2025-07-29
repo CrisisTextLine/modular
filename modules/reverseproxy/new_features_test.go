@@ -17,22 +17,39 @@ func TestNewFeatures(t *testing.T) {
 	// Create a logger for tests
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	t.Run("TenantConfigFeatureFlagEvaluator", func(t *testing.T) {
-		evaluator := NewTenantConfigFeatureFlagEvaluator(logger)
-
-		// Test loading global config
-		globalConfig := map[string]bool{
-			"global-flag": true,
-			"api-v2":      false,
+	t.Run("FileBasedFeatureFlagEvaluator_TenantAware", func(t *testing.T) {
+		// Create mock application with tenant support
+		app := NewMockTenantApplication()
+		config := &ReverseProxyConfig{
+			FeatureFlags: FeatureFlagsConfig{
+				Enabled: true,
+				Flags: map[string]bool{
+					"global-flag": true,
+					"api-v2":      false,
+				},
+			},
 		}
-		evaluator.LoadGlobalConfig(globalConfig)
+		app.SetConfig(config)
 
-		// Test loading tenant config
-		tenantConfig := map[string]bool{
-			"tenant-flag": true,
-			"global-flag": false, // Override global
+		// Register tenant with override configuration
+		tenantService := modular.NewStandardTenantService(logger)
+		app.RegisterService("tenantService", tenantService)
+
+		// Register tenant with specific config
+		tenantConfig := &ReverseProxyConfig{
+			FeatureFlags: FeatureFlagsConfig{
+				Enabled: true,
+				Flags: map[string]bool{
+					"tenant-flag": true,
+					"global-flag": false, // Override global
+				},
+			},
 		}
-		evaluator.LoadTenantConfig("tenant-1", tenantConfig)
+		tenantService.RegisterTenant("tenant-1", map[string]modular.ConfigProvider{
+			"reverseproxy": modular.NewStdConfigProvider(tenantConfig),
+		})
+
+		evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
 
 		ctx := context.Background()
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -181,27 +198,35 @@ func TestNewFeatures(t *testing.T) {
 	})
 
 	t.Run("DebugHandler", func(t *testing.T) {
-		// Create feature flag evaluator
-		evaluator := NewTenantConfigFeatureFlagEvaluator(logger)
-		evaluator.LoadGlobalConfig(map[string]bool{
-			"test-flag": true,
-			"api-v2":    false,
-		})
-
-		// Create proxy config
+		// Create mock application with feature flag configuration
+		app := NewMockTenantApplication()
 		config := &ReverseProxyConfig{
+			FeatureFlags: FeatureFlagsConfig{
+				Enabled: true,
+				Flags: map[string]bool{
+					"test-flag": true,
+					"api-v2":    false,
+				},
+			},
 			BackendServices: map[string]string{
 				"primary":   "http://localhost:9001",
 				"secondary": "http://localhost:9002",
 			},
-			Routes: map[string]string{
-				"/api/v1/*": "primary",
-				"/api/v2/*": "secondary",
-			},
-			DefaultBackend:  "primary",
-			TenantIDHeader:  "X-Tenant-ID",
-			RequireTenantID: false,
 		}
+		app.SetConfig(config)
+
+		// Create feature flag evaluator
+		evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+
+		// Update config with routes
+		config.Routes = map[string]string{
+			"/api/v1/*": "primary",
+			"/api/v2/*": "secondary",
+		}
+		config.DefaultBackend = "primary"
+		config.TenantIDHeader = "X-Tenant-ID"
+		config.RequireTenantID = false
+		app.SetConfig(config)
 
 		// Create debug handler
 		debugConfig := DebugEndpointsConfig{
@@ -364,21 +389,42 @@ func TestScenarioIntegration(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	// Create feature flag evaluator with typical Chimera scenarios
-	evaluator := NewTenantConfigFeatureFlagEvaluator(logger)
-	evaluator.LoadGlobalConfig(map[string]bool{
-		"toolkit-toolbox-api":  false,
-		"oauth-token-api":      false,
-		"oauth-introspect-api": false,
-		"test-dryrun-api":      true,
+	// Create mock application with global feature flag configuration
+	app := NewMockTenantApplication()
+	config := &ReverseProxyConfig{
+		FeatureFlags: FeatureFlagsConfig{
+			Enabled: true,
+			Flags: map[string]bool{
+				"toolkit-toolbox-api":  false,
+				"oauth-token-api":      false,
+				"oauth-introspect-api": false,
+				"test-dryrun-api":      true,
+			},
+		},
+	}
+	app.SetConfig(config)
+
+	// Create tenant service and register tenant with overrides
+	tenantService := modular.NewStandardTenantService(logger)
+	app.RegisterService("tenantService", tenantService)
+
+	// Register tenant with specific config (like sampleaff1 from scenarios)
+	tenantConfig := &ReverseProxyConfig{
+		FeatureFlags: FeatureFlagsConfig{
+			Enabled: true,
+			Flags: map[string]bool{
+				"toolkit-toolbox-api":  false,
+				"oauth-token-api":      true,
+				"oauth-introspect-api": true,
+			},
+		},
+	}
+	tenantService.RegisterTenant("sampleaff1", map[string]modular.ConfigProvider{
+		"reverseproxy": modular.NewStdConfigProvider(tenantConfig),
 	})
 
-	// Load tenant-specific config (like sampleaff1 from scenarios)
-	evaluator.LoadTenantConfig("sampleaff1", map[string]bool{
-		"toolkit-toolbox-api":  false,
-		"oauth-token-api":      true,
-		"oauth-introspect-api": true,
-	})
+	// Create feature flag evaluator with typical Chimera scenarios
+	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
 
 	// Test dry-run functionality with different backends
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -33,7 +33,8 @@ func TestDebugHandler(t *testing.T) {
 	}
 
 	// Create a mock feature flag evaluator
-	featureFlagEval := NewFileBasedFeatureFlagEvaluator()
+	mockApp := NewMockTenantApplication()
+	featureFlagEval := NewFileBasedFeatureFlagEvaluator(mockApp, logger)
 
 	// Test with authentication enabled
 	t.Run("WithAuthentication", func(t *testing.T) {

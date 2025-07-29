@@ -214,6 +214,18 @@ reverseproxy:
   metrics_path: "/metrics"
   metrics_endpoint: "/reverseproxy/metrics"
 
+  # Feature flags configuration with default values
+  feature_flags:
+    enabled: true
+    flags:
+      api-v1-enabled: true
+      api-v2-enabled: false
+      canary-enabled: false
+      toolkit-toolbox-api: true
+      oauth-token-api: true
+      oauth-introspect-api: true
+      test-dryrun-api: true
+
   # Composite routes for testing multi-backend responses
   composite_routes:
     "/api/dashboard":

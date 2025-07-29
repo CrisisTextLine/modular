@@ -29,6 +29,9 @@ type ReverseProxyConfig struct {
 
 	// Dry-run configuration
 	DryRun DryRunConfig `json:"dry_run" yaml:"dry_run" toml:"dry_run"`
+
+	// Feature flag configuration
+	FeatureFlags FeatureFlagsConfig `json:"feature_flags" yaml:"feature_flags" toml:"feature_flags"`
 }
 
 // RouteConfig defines feature flag-controlled routing configuration for specific routes.
@@ -230,4 +233,16 @@ type BackendHealthConfig struct {
 	Interval            time.Duration `json:"interval" yaml:"interval" toml:"interval" env:"INTERVAL" desc:"Override global interval for this backend"`
 	Timeout             time.Duration `json:"timeout" yaml:"timeout" toml:"timeout" env:"TIMEOUT" desc:"Override global timeout for this backend"`
 	ExpectedStatusCodes []int         `json:"expected_status_codes" yaml:"expected_status_codes" toml:"expected_status_codes" env:"EXPECTED_STATUS_CODES" desc:"Override global expected status codes for this backend"`
+}
+
+// FeatureFlagsConfig provides configuration for the built-in feature flag evaluator.
+type FeatureFlagsConfig struct {
+	// Enabled determines whether to create and expose the built-in FileBasedFeatureFlagEvaluator service
+	Enabled bool `json:"enabled" yaml:"enabled" toml:"enabled" env:"ENABLED" default:"false" desc:"Enable the built-in file-based feature flag evaluator service"`
+
+	// GlobalFlags defines default values for global feature flags
+	GlobalFlags map[string]bool `json:"global_flags" yaml:"global_flags" toml:"global_flags" desc:"Default values for global feature flags"`
+
+	// TenantFlags defines default values for tenant-specific feature flags
+	TenantFlags map[string]map[string]bool `json:"tenant_flags" yaml:"tenant_flags" toml:"tenant_flags" desc:"Default values for tenant-specific feature flags"`
 }

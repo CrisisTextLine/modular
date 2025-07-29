@@ -412,6 +412,32 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to register routes: %w", err)
 	}
 
+	// Create and configure feature flag evaluator if none was provided via service
+	if m.featureFlagEvaluator == nil && m.config.FeatureFlags.Enabled {
+		m.featureFlagEvaluator = NewFileBasedFeatureFlagEvaluator()
+
+		// Configure with default global flags
+		if m.config.FeatureFlags.GlobalFlags != nil {
+			for flagID, enabled := range m.config.FeatureFlags.GlobalFlags {
+				m.featureFlagEvaluator.(*FileBasedFeatureFlagEvaluator).SetFlag(flagID, enabled)
+			}
+		}
+
+		// Configure with default tenant flags
+		if m.config.FeatureFlags.TenantFlags != nil {
+			for tenantIDStr, tenantFlags := range m.config.FeatureFlags.TenantFlags {
+				tenantID := modular.TenantID(tenantIDStr)
+				for flagID, enabled := range tenantFlags {
+					m.featureFlagEvaluator.(*FileBasedFeatureFlagEvaluator).SetTenantFlag(tenantID, flagID, enabled)
+				}
+			}
+		}
+
+		m.app.Logger().Info("Created and configured built-in feature flag evaluator",
+			"globalFlags", len(m.config.FeatureFlags.GlobalFlags),
+			"tenantFlags", len(m.config.FeatureFlags.TenantFlags))
+	}
+
 	// Start health checker if enabled
 	if m.healthChecker != nil {
 		if err := m.healthChecker.Start(ctx); err != nil {
@@ -538,9 +564,19 @@ func (m *ReverseProxyModule) OnTenantRemoved(tenantID modular.TenantID) {
 }
 
 // ProvidesServices returns the services provided by this module.
-// Currently, this module does not provide any services.
+// This module can provide a featureFlagEvaluator service if configured to do so.
 func (m *ReverseProxyModule) ProvidesServices() []modular.ServiceProvider {
-	return nil
+	var services []modular.ServiceProvider
+
+	// Only provide the feature flag evaluator service if we have one and it's enabled in config
+	if m.featureFlagEvaluator != nil && m.config != nil && m.config.FeatureFlags.Enabled {
+		services = append(services, modular.ServiceProvider{
+			Name:     "featureFlagEvaluator",
+			Instance: m.featureFlagEvaluator,
+		})
+	}
+
+	return services
 }
 
 // routerService defines the interface for a service that can register

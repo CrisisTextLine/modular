@@ -56,7 +56,10 @@ func testRouteConfigWithFlag(t *testing.T, flagEnabled bool, expectedResponse st
 	tenantService := modular.NewStandardTenantService(logger)
 	app.RegisterService("tenantService", tenantService)
 	
-	featureFlagEvaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	if err != nil {
+		t.Fatalf("Failed to create feature flag evaluator: %v", err)
+	}
 
 	// Create reverse proxy module
 	module := NewModule()
@@ -181,7 +184,10 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 		"reverseproxy": NewStdConfigProvider(tenantConfig),
 	})
 	
-	featureFlagEvaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	if err != nil {
+		t.Fatalf("Failed to create feature flag evaluator: %v", err)
+	}
 
 	// Create mock application (needs to be TenantApplication) - already created above
 

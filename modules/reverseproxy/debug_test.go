@@ -34,7 +34,10 @@ func TestDebugHandler(t *testing.T) {
 
 	// Create a mock feature flag evaluator
 	mockApp := NewMockTenantApplication()
-	featureFlagEval := NewFileBasedFeatureFlagEvaluator(mockApp, logger)
+	featureFlagEval, err := NewFileBasedFeatureFlagEvaluator(mockApp, logger)
+	if err != nil {
+		t.Fatalf("Failed to create feature flag evaluator: %v", err)
+	}
 
 	// Test with authentication enabled
 	t.Run("WithAuthentication", func(t *testing.T) {

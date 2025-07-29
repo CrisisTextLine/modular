@@ -40,10 +40,10 @@ type FileBasedFeatureFlagEvaluator struct {
 func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logger) (*FileBasedFeatureFlagEvaluator, error) {
 	// Validate parameters
 	if app == nil {
-		return nil, fmt.Errorf("app cannot be nil")
+		return nil, ErrApplicationNil
 	}
 	if logger == nil {
-		return nil, fmt.Errorf("logger cannot be nil")
+		return nil, ErrLoggerNil
 	}
 	// Get tenant service
 	var tenantService modular.TenantService
@@ -73,7 +73,7 @@ func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logg
 		app:               app,
 		tenantAwareConfig: tenantAwareConfig,
 		logger:            logger,
-	}
+	}, nil
 }
 
 // EvaluateFlag evaluates a feature flag using tenant-aware configuration.

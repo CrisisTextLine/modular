@@ -424,7 +424,11 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 		}
 
 		//nolint:contextcheck // Constructor doesn't need context, it creates the evaluator for later use
-		m.featureFlagEvaluator = NewFileBasedFeatureFlagEvaluator(m.app, logger)
+		evaluator, err := NewFileBasedFeatureFlagEvaluator(m.app, logger)
+		if err != nil {
+			return fmt.Errorf("failed to create feature flag evaluator: %w", err)
+		}
+		m.featureFlagEvaluator = evaluator
 
 		m.app.Logger().Info("Created built-in feature flag evaluator using tenant-aware configuration")
 	}

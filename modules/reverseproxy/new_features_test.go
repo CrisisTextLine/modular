@@ -54,7 +54,10 @@ func TestNewFeatures(t *testing.T) {
 			t.Fatalf("Failed to register tenant: %v", err)
 		}
 
-		evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+		evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+		if err != nil {
+			t.Fatalf("Failed to create feature flag evaluator: %v", err)
+		}
 
 		ctx := context.Background()
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -221,7 +224,10 @@ func TestNewFeatures(t *testing.T) {
 		app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 		// Create feature flag evaluator
-		evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+		evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+		if err != nil {
+			t.Fatalf("Failed to create feature flag evaluator: %v", err)
+		}
 
 		// Update config with routes
 		config.Routes = map[string]string{
@@ -432,7 +438,10 @@ func TestScenarioIntegration(t *testing.T) {
 	}
 
 	// Create feature flag evaluator with typical Chimera scenarios
-	_ = NewFileBasedFeatureFlagEvaluator(app, logger) // Created for completeness but not used in this integration test
+	_, err = NewFileBasedFeatureFlagEvaluator(app, logger) // Created for completeness but not used in this integration test
+	if err != nil {
+		t.Fatalf("Failed to create feature flag evaluator: %v", err)
+	}
 
 	// Test dry-run functionality with different backends
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

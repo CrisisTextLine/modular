@@ -34,7 +34,10 @@ func TestFileBasedFeatureFlagEvaluator_WithMockApp(t *testing.T) {
 		t.Fatalf("Failed to register tenant service: %v", err)
 	}
 
-	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+	evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	if err != nil {
+		t.Fatalf("Failed to create feature flag evaluator: %v", err)
+	}
 
 	req := httptest.NewRequest("GET", "/test", nil)
 
@@ -85,7 +88,10 @@ func TestFileBasedFeatureFlagEvaluator_WithDefault(t *testing.T) {
 		t.Fatalf("Failed to register tenant service: %v", err)
 	}
 
-	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+	evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	if err != nil {
+		t.Fatalf("Failed to create feature flag evaluator: %v", err)
+	}
 
 	req := httptest.NewRequest("GET", "/test", nil)
 
@@ -129,7 +135,10 @@ func TestFileBasedFeatureFlagEvaluator_Disabled(t *testing.T) {
 		t.Fatalf("Failed to register tenant service: %v", err)
 	}
 
-	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+	evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	if err != nil {
+		t.Fatalf("Failed to create feature flag evaluator: %v", err)
+	}
 
 	req := httptest.NewRequest("GET", "/test", nil)
 

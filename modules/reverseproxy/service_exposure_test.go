@@ -171,7 +171,10 @@ func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 	}
 	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(externalConfig))
 	
-	externalEvaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+	externalEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	if err != nil {
+		t.Fatalf("Failed to create feature flag evaluator: %v", err)
+	}
 
 	// Create mock application - already created above
 
@@ -296,7 +299,10 @@ func TestServiceProviderInterface(t *testing.T) {
 	// Create the evaluator
 	app := NewMockTenantApplication()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+	evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	if err != nil {
+		t.Fatalf("Failed to create feature flag evaluator: %v", err)
+	}
 
 	// Test that it implements FeatureFlagEvaluator
 	var _ FeatureFlagEvaluator = evaluator

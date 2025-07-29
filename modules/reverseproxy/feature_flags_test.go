@@ -29,7 +29,10 @@ func TestFileBasedFeatureFlagEvaluator_WithMockApp(t *testing.T) {
 
 	// Create tenant service (optional for this test)
 	tenantService := modular.NewStandardTenantService(logger)
-	app.RegisterService("tenantService", tenantService)
+	err := app.RegisterService("tenantService", tenantService)
+	if err != nil {
+		t.Fatalf("Failed to register tenant service: %v", err)
+	}
 
 	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
 
@@ -77,7 +80,10 @@ func TestFileBasedFeatureFlagEvaluator_WithDefault(t *testing.T) {
 	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 	tenantService := modular.NewStandardTenantService(logger)
-	app.RegisterService("tenantService", tenantService)
+	err := app.RegisterService("tenantService", tenantService)
+	if err != nil {
+		t.Fatalf("Failed to register tenant service: %v", err)
+	}
 
 	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
 
@@ -118,14 +124,17 @@ func TestFileBasedFeatureFlagEvaluator_Disabled(t *testing.T) {
 	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 	tenantService := modular.NewStandardTenantService(logger)
-	app.RegisterService("tenantService", tenantService)
+	err := app.RegisterService("tenantService", tenantService)
+	if err != nil {
+		t.Fatalf("Failed to register tenant service: %v", err)
+	}
 
 	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 
 	// Test that flags return error when disabled
-	_, err := evaluator.EvaluateFlag(context.Background(), "test-flag", "", req)
+	_, err = evaluator.EvaluateFlag(context.Background(), "test-flag", "", req)
 	if err == nil {
 		t.Error("Expected error when feature flags are disabled")
 	}

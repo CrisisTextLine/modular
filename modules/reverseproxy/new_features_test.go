@@ -47,9 +47,12 @@ func TestNewFeatures(t *testing.T) {
 				},
 			},
 		}
-		tenantService.RegisterTenant("tenant-1", map[string]modular.ConfigProvider{
+		err := tenantService.RegisterTenant("tenant-1", map[string]modular.ConfigProvider{
 			"reverseproxy": modular.NewStdConfigProvider(tenantConfig),
 		})
+		if err != nil {
+			t.Fatalf("Failed to register tenant: %v", err)
+		}
 
 		evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
 
@@ -421,9 +424,12 @@ func TestScenarioIntegration(t *testing.T) {
 			},
 		},
 	}
-	tenantService.RegisterTenant("sampleaff1", map[string]modular.ConfigProvider{
+	err := tenantService.RegisterTenant("sampleaff1", map[string]modular.ConfigProvider{
 		"reverseproxy": modular.NewStdConfigProvider(tenantConfig),
 	})
+	if err != nil {
+		t.Fatalf("Failed to register tenant: %v", err)
+	}
 
 	// Create feature flag evaluator with typical Chimera scenarios
 	_ = NewFileBasedFeatureFlagEvaluator(app, logger) // Created for completeness but not used in this integration test

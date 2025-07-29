@@ -7,6 +7,8 @@ import (
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/CrisisTextLine/modular"
 )
 
 // TestFeatureFlagEvaluatorServiceExposure tests that the module exposes the feature flag evaluator as a service
@@ -68,6 +70,9 @@ func TestFeatureFlagEvaluatorServiceExposure(t *testing.T) {
 
 			// Create mock application
 			app := NewMockTenantApplication()
+
+			// Register the configuration with the application
+			app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(tt.config))
 
 			// Create module
 			module := NewModule()
@@ -154,9 +159,37 @@ func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 	// Create external feature flag evaluator
 	app := NewMockTenantApplication()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	
+	// Configure the external evaluator with flags
+	externalConfig := &ReverseProxyConfig{
+		FeatureFlags: FeatureFlagsConfig{
+			Enabled: true,
+			Flags: map[string]bool{
+				"external-flag": true,
+			},
+		},
+	}
+	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(externalConfig))
+	
 	externalEvaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
 
 	// Create mock application - already created above
+
+	// Create a separate application for the module
+	moduleApp := NewMockTenantApplication()
+	
+	// Register the module configuration with the module app
+	moduleApp.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(&ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"test": "http://test:8080",
+		},
+		FeatureFlags: FeatureFlagsConfig{
+			Enabled: true,
+			Flags: map[string]bool{
+				"internal-flag": true,
+			},
+		},
+	}))
 
 	// Create module
 	module := NewModule()
@@ -179,14 +212,14 @@ func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 		"router":               mockRouter,
 		"featureFlagEvaluator": externalEvaluator,
 	}
-	constructedModule, err := module.Constructor()(app, services)
+	constructedModule, err := module.Constructor()(moduleApp, services)
 	if err != nil {
 		t.Fatalf("Failed to construct module: %v", err)
 	}
 	module = constructedModule.(*ReverseProxyModule)
 
 	// Set the app reference
-	module.app = app
+	module.app = moduleApp
 
 	// Start the module
 	if err := module.Start(context.Background()); err != nil {

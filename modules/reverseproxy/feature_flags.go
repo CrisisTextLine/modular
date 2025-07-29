@@ -75,7 +75,7 @@ func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logg
 // 2. Tenant-specific overrides come from tenant configuration files
 // 3. During request processing, tenant context determines which configuration to use
 //
-//nolint:contextcheck // Creating tenant context is intentional here for tenant-aware config lookup
+//nolint:contextcheck // Skipping context check because this code intentionally creates a new tenant context if one does not exist, enabling tenant-aware configuration lookup.
 func (f *FileBasedFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, flagID string, tenantID modular.TenantID, req *http.Request) (bool, error) {
 	// Create context with tenant ID if provided and not already a tenant context
 	if tenantID != "" {

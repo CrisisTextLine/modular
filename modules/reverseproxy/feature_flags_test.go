@@ -25,7 +25,7 @@ func TestFileBasedFeatureFlagEvaluator_WithMockApp(t *testing.T) {
 	}
 
 	app := NewMockTenantApplication()
-	app.SetConfig(config)
+	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 	// Create tenant service (optional for this test)
 	tenantService := modular.NewStandardTenantService(logger)
@@ -74,7 +74,7 @@ func TestFileBasedFeatureFlagEvaluator_WithDefault(t *testing.T) {
 	}
 
 	app := NewMockTenantApplication()
-	app.SetConfig(config)
+	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 	tenantService := modular.NewStandardTenantService(logger)
 	app.RegisterService("tenantService", tenantService)
@@ -115,7 +115,7 @@ func TestFileBasedFeatureFlagEvaluator_Disabled(t *testing.T) {
 	}
 
 	app := NewMockTenantApplication()
-	app.SetConfig(config)
+	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 	tenantService := modular.NewStandardTenantService(logger)
 	app.RegisterService("tenantService", tenantService)

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/CrisisTextLine/modular"
 )
 
 // TestNewFeatures tests the newly added features for debug endpoints and dry-run functionality
@@ -29,7 +31,7 @@ func TestNewFeatures(t *testing.T) {
 				},
 			},
 		}
-		app.SetConfig(config)
+		app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 		// Register tenant with override configuration
 		tenantService := modular.NewStandardTenantService(logger)
@@ -213,7 +215,7 @@ func TestNewFeatures(t *testing.T) {
 				"secondary": "http://localhost:9002",
 			},
 		}
-		app.SetConfig(config)
+		app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 		// Create feature flag evaluator
 		evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
@@ -226,7 +228,7 @@ func TestNewFeatures(t *testing.T) {
 		config.DefaultBackend = "primary"
 		config.TenantIDHeader = "X-Tenant-ID"
 		config.RequireTenantID = false
-		app.SetConfig(config)
+		app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 		// Create debug handler
 		debugConfig := DebugEndpointsConfig{
@@ -402,7 +404,7 @@ func TestScenarioIntegration(t *testing.T) {
 			},
 		},
 	}
-	app.SetConfig(config)
+	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 	// Create tenant service and register tenant with overrides
 	tenantService := modular.NewStandardTenantService(logger)
@@ -424,7 +426,7 @@ func TestScenarioIntegration(t *testing.T) {
 	})
 
 	// Create feature flag evaluator with typical Chimera scenarios
-	evaluator := NewFileBasedFeatureFlagEvaluator(app, logger)
+	_ = NewFileBasedFeatureFlagEvaluator(app, logger) // Created for completeness but not used in this integration test
 
 	// Test dry-run functionality with different backends
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

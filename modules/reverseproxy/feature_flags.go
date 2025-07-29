@@ -45,10 +45,19 @@ func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logg
 		tenantService = nil
 	}
 
+	// Get the default configuration from the application
+	var defaultConfigProvider modular.ConfigProvider
+	if configProvider, err := app.GetConfigSection("reverseproxy"); err == nil {
+		defaultConfigProvider = configProvider
+	} else {
+		// Fallback to empty config if no section is registered
+		defaultConfigProvider = modular.NewStdConfigProvider(&ReverseProxyConfig{})
+	}
+
 	// Create tenant-aware config for feature flags
 	// This will use the "reverseproxy" section from configurations
 	tenantAwareConfig := modular.NewTenantAwareConfig(
-		modular.NewStdConfigProvider(&ReverseProxyConfig{}),
+		defaultConfigProvider,
 		tenantService,
 		"reverseproxy",
 	)

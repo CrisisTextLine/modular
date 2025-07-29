@@ -1,9 +1,13 @@
 package reverseproxy
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+
+	"github.com/CrisisTextLine/modular"
 )
 
 func TestBasicRouteConfigsFeatureFlagRouting(t *testing.T) {
@@ -78,7 +82,7 @@ func TestBasicRouteConfigsFeatureFlagRouting(t *testing.T) {
 	}
 
 	// Set up configuration with feature flag disabled
-	config := &ReverseProxyConfig{
+	config = &ReverseProxyConfig{
 		FeatureFlags: FeatureFlagsConfig{
 			Enabled: true,
 			Flags: map[string]bool{
@@ -91,15 +95,13 @@ func TestBasicRouteConfigsFeatureFlagRouting(t *testing.T) {
 		},
 		RouteConfigs: map[string]RouteConfig{
 			"/api/v1/avatar/*": {
-				Pattern:            "/api/v1/avatar/*",
-				Backend:            "primary",
 				FeatureFlagID:      "avatar-api",
 				AlternativeBackend: "alternative",
 			},
 		},
 		DefaultBackend: "primary",
 	}
-	app.SetConfig(config)
+	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 	// Start the module
 	if err := reverseProxyModule.Start(app.Context()); err != nil {

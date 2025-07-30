@@ -12,7 +12,7 @@ type ReverseProxyConfig struct {
 	CircuitBreakerConfig   CircuitBreakerConfig            `json:"circuit_breaker" yaml:"circuit_breaker" toml:"circuit_breaker"`
 	BackendCircuitBreakers map[string]CircuitBreakerConfig `json:"backend_circuit_breakers" yaml:"backend_circuit_breakers" toml:"backend_circuit_breakers"`
 	CompositeRoutes        map[string]CompositeRoute       `json:"composite_routes" yaml:"composite_routes" toml:"composite_routes"`
-	TenantIDHeader         string                          `json:"tenant_id_header" yaml:"tenant_id_header" toml:"tenant_id_header" env:"TENANT_ID_HEADER"`
+	TenantIDHeader         string                          `json:"tenant_id_header" yaml:"tenant_id_header" toml:"tenant_id_header" env:"TENANT_ID_HEADER" default:"X-Tenant-ID"`
 	RequireTenantID        bool                            `json:"require_tenant_id" yaml:"require_tenant_id" toml:"require_tenant_id" env:"REQUIRE_TENANT_ID"`
 	CacheEnabled           bool                            `json:"cache_enabled" yaml:"cache_enabled" toml:"cache_enabled" env:"CACHE_ENABLED"`
 	CacheTTL               time.Duration                   `json:"cache_ttl" yaml:"cache_ttl" toml:"cache_ttl" env:"CACHE_TTL"`

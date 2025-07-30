@@ -334,11 +334,6 @@ func (d *DebugHandler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 
 // getTenantID extracts tenant ID from request.
 func (d *DebugHandler) getTenantID(r *http.Request) modular.TenantID {
-	tenantIDHeader := d.proxyConfig.TenantIDHeader
-	if tenantIDHeader == "" {
-		tenantIDHeader = "X-Tenant-ID"
-	}
-
-	tenantID := r.Header.Get(tenantIDHeader)
+	tenantID := r.Header.Get(d.proxyConfig.TenantIDHeader)
 	return modular.TenantID(tenantID)
 }

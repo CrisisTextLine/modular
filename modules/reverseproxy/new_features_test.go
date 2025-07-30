@@ -133,7 +133,7 @@ func TestNewFeatures(t *testing.T) {
 		disabledConfig := DryRunConfig{
 			Enabled: false,
 		}
-		disabledHandler := NewDryRunHandler(disabledConfig, NewMockLogger())
+		disabledHandler := NewDryRunHandler(disabledConfig, "X-Tenant-ID", NewMockLogger())
 		req := httptest.NewRequest("GET", "/test", nil)
 
 		ctx := context.Background()
@@ -155,7 +155,7 @@ func TestNewFeatures(t *testing.T) {
 			IgnoreHeaders:   []string{"Date"},
 		}
 
-		enabledHandler := NewDryRunHandler(enabledConfig, NewMockLogger())
+		enabledHandler := NewDryRunHandler(enabledConfig, "X-Tenant-ID", NewMockLogger())
 		req = httptest.NewRequest("POST", "/test", strings.NewReader(`{"test":"data"}`))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Request-ID", "test-123")
@@ -475,7 +475,7 @@ func TestScenarioIntegration(t *testing.T) {
 		DefaultResponseBackend: "secondary", // Test returning secondary response
 	}
 
-	dryRunHandler := NewDryRunHandler(dryRunConfig, logger)
+	dryRunHandler := NewDryRunHandler(dryRunConfig, "X-Affiliate-ID", logger)
 	dryRunReq := httptest.NewRequest("GET", "/api/v1/test/dryrun", nil)
 	dryRunReq.Header.Set("X-Affiliate-ID", "sampleaff1")
 

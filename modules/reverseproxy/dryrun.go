@@ -82,15 +82,20 @@ type DurationInfo struct {
 
 // DryRunHandler handles dry-run request processing.
 type DryRunHandler struct {
-	config     DryRunConfig
-	httpClient *http.Client
-	logger     modular.Logger
+	config         DryRunConfig
+	tenantIDHeader string
+	httpClient     *http.Client
+	logger         modular.Logger
 }
 
 // NewDryRunHandler creates a new dry-run handler.
-func NewDryRunHandler(config DryRunConfig, logger modular.Logger) *DryRunHandler {
+func NewDryRunHandler(config DryRunConfig, tenantIDHeader string, logger modular.Logger) *DryRunHandler {
+	if tenantIDHeader == "" {
+		tenantIDHeader = "X-Tenant-ID" // Default fallback
+	}
 	return &DryRunHandler{
-		config: config,
+		config:         config,
+		tenantIDHeader: tenantIDHeader,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -110,7 +115,7 @@ func (d *DryRunHandler) ProcessDryRun(ctx context.Context, req *http.Request, pr
 	result := &DryRunResult{
 		Timestamp:        startTime,
 		RequestID:        req.Header.Get("X-Request-ID"),
-		TenantID:         req.Header.Get("X-Tenant-ID"),
+		TenantID:         req.Header.Get(d.tenantIDHeader),
 		Endpoint:         req.URL.Path,
 		Method:           req.Method,
 		PrimaryBackend:   primaryBackend,

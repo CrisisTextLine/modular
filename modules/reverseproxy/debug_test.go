@@ -29,8 +29,8 @@ func TestDebugHandler(t *testing.T) {
 			"/api/v1/users": "primary",
 			"/api/v2/data":  "secondary",
 		},
-		DefaultBackend:  "primary",
-		TenantIDHeader:  "X-Tenant-ID", // Set explicit default for testing
+		DefaultBackend: "primary",
+		TenantIDHeader: "X-Tenant-ID", // Set explicit default for testing
 	}
 
 	// Create a mock feature flag evaluator

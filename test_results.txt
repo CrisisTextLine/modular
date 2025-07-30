@@ -1,0 +1,82 @@
+2025/07/30 15:34:16 INFO Starting module module=failing
+2025/07/30 15:34:16 INFO Stopping module module=failing
+2025/07/30 15:34:16 ERROR Error stopping module module=failing error="module stop failed"
+
+🔍 ==> DEBUG: All Module Interface Implementations <==
+🔍 Debugging module 'problematic' (type: *modular.ProblematicModule)
+   Memory address: 0xc000580228
+   ✅ ServiceAware
+   ✅ Startable
+   ✅ Stoppable
+   ✅ Constructable
+   ✅ Module
+   ❌ Configurable
+   ❌ DependencyAware
+   📦 Provides 0 services, Requires 0 services
+   🏗️  Has constructor - this module may be replaced during injection!
+
+🔍 Debugging module 'correct' (type: *modular.CorrectModule)
+   Memory address: 0xc000580240
+   ❌ DependencyAware
+   ✅ ServiceAware
+   ✅ Startable
+   ✅ Stoppable
+   ✅ Constructable
+   ✅ Module
+   ❌ Configurable
+   📦 Provides 0 services, Requires 0 services
+   🏗️  Has constructor - this module may be replaced during injection!
+
+
+🔍 ==> DEBUG: All Module Interface Implementations <==
+🔍 Debugging module 'correct' (type: *modular.CorrectModule)
+   Memory address: 0xc000580348
+   ❌ DependencyAware
+   ✅ ServiceAware
+   ✅ Startable
+   ✅ Stoppable
+   ✅ Constructable
+   ✅ Module
+   ❌ Configurable
+   📦 Provides 0 services, Requires 0 services
+   🏗️  Has constructor - this module may be replaced during injection!
+
+🔍 Debugging module 'problematic' (type: *modular.BrokenModuleImplementation)
+   Memory address: 0xc00034dca0
+   ✅ Module
+   ❌ Configurable
+   ❌ DependencyAware
+   ❌ ServiceAware
+   ❌ Startable
+   ❌ Stoppable
+   ❌ Constructable
+
+--- FAIL: TestModuleAwareEnvironmentVariableSearching (0.00s)
+    --- FAIL: TestModuleAwareEnvironmentVariableSearching/reverseproxy_module_env_var_priority (0.00s)
+        --- FAIL: TestModuleAwareEnvironmentVariableSearching/reverseproxy_module_env_var_priority/multiple_fields_with_mixed_env_vars (0.00s)
+            module_aware_env_config_test.go:192: 
+                	Error Trace:	/home/runner/work/modular/modular/module_aware_env_config_test.go:192
+                	Error:      	Not equal: 
+                	            	expected: "backend.example.com"
+                	            	actual  : "http://reverseproxy.example.com"
+                	            	
+                	            	Diff:
+                	            	--- Expected
+                	            	+++ Actual
+                	            	@@ -1 +1 @@
+                	            	-backend.example.com
+                	            	+http://reverseproxy.example.com
+                	Test:       	TestModuleAwareEnvironmentVariableSearching/reverseproxy_module_env_var_priority/multiple_fields_with_mixed_env_vars
+            module_aware_env_config_test.go:193: 
+                	Error Trace:	/home/runner/work/modular/modular/module_aware_env_config_test.go:193
+                	Error:      	Not equal: 
+                	            	expected: 5000
+                	            	actual  : 60
+                	Test:       	TestModuleAwareEnvironmentVariableSearching/reverseproxy_module_env_var_priority/multiple_fields_with_mixed_env_vars
+2025/07/30 15:34:16 INFO Loading tenant configurations from files directory=/this/directory/should/not/exist pattern=^tenant\d+\.json$
+2025/07/30 15:34:16 ERROR Tenant config directory does not exist directory=/this/directory/should/not/exist
+2025/07/30 15:34:16 ERROR Failed to load tenant configurations error="tenant config directory does not exist: stat /this/directory/should/not/exist: no such file or directory"
+FAIL
+FAIL	github.com/CrisisTextLine/modular	0.039s
+ok  	github.com/CrisisTextLine/modular/feeders	(cached)
+FAIL

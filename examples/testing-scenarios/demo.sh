@@ -138,7 +138,7 @@ echo -n "  Concurrent requests (5x)... "
 success_count=0
 for i in {1..5}; do
     if curl -s -f "$PROXY_URL/api/v1/load" >/dev/null 2>&1; then
-        ((success_count++))
+        success_count=$((success_count + 1))
     fi
 done
 

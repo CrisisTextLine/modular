@@ -170,7 +170,7 @@ for i in {1..10}; do
     status_code="${response: -3}"
     
     if [[ "$status_code" == "200" ]]; then
-        ((success_count++))
+        success_count=$((success_count + 1))
     fi
 done
 

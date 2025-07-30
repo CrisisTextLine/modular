@@ -98,7 +98,7 @@ echo -n "  Stability test... "
 success_count=0
 for i in {1..10}; do
     if curl -s -f "$PROXY_URL/health" >/dev/null 2>&1; then
-        ((success_count++))
+        success_count=$((success_count + 1))
     fi
     sleep 0.5
 done

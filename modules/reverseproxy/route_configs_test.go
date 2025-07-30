@@ -173,7 +173,7 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 			},
 		},
 	}
-	app.RegisterConfigSection("reverseproxy", NewStdConfigProvider(globalConfig))
+	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(globalConfig))
 
 	// Register tenant "ctl" with overridden flag
 	tenantConfig := &ReverseProxyConfig{

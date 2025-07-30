@@ -124,14 +124,26 @@ func (d *DebugHandler) handleFlags(w http.ResponseWriter, r *http.Request) {
 	var flags map[string]interface{}
 
 	if d.featureFlagEval != nil {
-		// Try to get flags from feature flag evaluator
+		// Get flags from feature flag evaluator by accessing the configuration
 		flags = make(map[string]interface{})
-		// Add tenant-specific flags if available
-		if tenantID != "" && d.tenantService != nil {
-			// Try to get tenant config
-			// Since the tenant service interface doesn't expose config directly,
-			// we'll skip this for now and just indicate the source
-			flags["_source"] = "tenant_config"
+
+		// Create context for tenant-aware configuration lookup
+		//nolint:contextcheck // Creating tenant context from request context for configuration lookup
+		ctx := r.Context()
+		if tenantID != "" {
+			ctx = modular.NewTenantContext(ctx, tenantID)
+		}
+
+		// Try to get the current configuration to show available flags
+		if fileBasedEval, ok := d.featureFlagEval.(*FileBasedFeatureFlagEvaluator); ok {
+			config := fileBasedEval.tenantAwareConfig.GetConfigWithContext(ctx).(*ReverseProxyConfig)
+			if config != nil && config.FeatureFlags.Enabled && config.FeatureFlags.Flags != nil {
+				for flagName, flagValue := range config.FeatureFlags.Flags {
+					flags[flagName] = flagValue
+				}
+				flags["_source"] = "tenant_aware_config"
+				flags["_tenant"] = string(tenantID)
+			}
 		}
 	}
 

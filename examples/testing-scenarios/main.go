@@ -40,7 +40,6 @@ type TestingApp struct {
 	app           modular.Application
 	backends      map[string]*MockBackend
 	scenarios     map[string]TestingScenario
-	featureFlags  *reverseproxy.FileBasedFeatureFlagEvaluator
 	mu            sync.RWMutex
 	running       bool
 	httpClient    *http.Client
@@ -94,23 +93,8 @@ func main() {
 	// Initialize testing scenarios
 	testApp.initializeScenarios()
 
-	// Create and register feature flag evaluator
-	var logger *slog.Logger
-	if slogLogger, ok := app.Logger().(*slog.Logger); ok {
-		logger = slogLogger
-	} else {
-		logger = slog.Default()
-	}
-	var err error
-	testApp.featureFlags, err = reverseproxy.NewFileBasedFeatureFlagEvaluator(app, logger)
-	if err != nil {
-		app.Logger().Error("Failed to create feature flag evaluator", "error", err)
-		os.Exit(1)
-	}
-	if err := app.RegisterService("featureFlagEvaluator", testApp.featureFlags); err != nil {
-		app.Logger().Error("Failed to register feature flag evaluator", "error", err)
-		os.Exit(1)
-	}
+	// Note: featureFlagEvaluator service is now automatically registered by the reverseproxy module
+	// when feature flags are enabled in configuration. No manual registration needed.
 
 	// Create tenant service
 	tenantService := modular.NewStandardTenantService(app.Logger())

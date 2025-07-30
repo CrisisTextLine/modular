@@ -101,7 +101,12 @@ func main() {
 	} else {
 		logger = slog.Default()
 	}
-	testApp.featureFlags = reverseproxy.NewFileBasedFeatureFlagEvaluator(app, logger)
+	var err error
+	testApp.featureFlags, err = reverseproxy.NewFileBasedFeatureFlagEvaluator(app, logger)
+	if err != nil {
+		app.Logger().Error("Failed to create feature flag evaluator", "error", err)
+		os.Exit(1)
+	}
 	if err := app.RegisterService("featureFlagEvaluator", testApp.featureFlags); err != nil {
 		app.Logger().Error("Failed to register feature flag evaluator", "error", err)
 		os.Exit(1)

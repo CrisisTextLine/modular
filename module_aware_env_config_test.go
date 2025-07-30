@@ -1,6 +1,7 @@
 package modular
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -12,16 +13,16 @@ import (
 func TestModuleAwareEnvironmentVariableSearching(t *testing.T) {
 	t.Run("reverseproxy_module_env_var_priority", func(t *testing.T) {
 		type ReverseProxyConfig struct {
-			DryRun          bool   `env:"DRY_RUN"`
-			DefaultBackend  string `env:"DEFAULT_BACKEND"`
-			RequestTimeout  int    `env:"REQUEST_TIMEOUT"`
+			DryRun         bool   `env:"MODTEST_DRY_RUN"`
+			DefaultBackend string `env:"MODTEST_DEFAULT_BACKEND"`
+			RequestTimeout int    `env:"MODTEST_REQUEST_TIMEOUT"`
 		}
 
-		// Clear all relevant environment variables
+		// Clear all relevant environment variables (using unique test prefix)
 		envVars := []string{
-			"DRY_RUN", "REVERSEPROXY_DRY_RUN", "DRY_RUN_REVERSEPROXY",
-			"DEFAULT_BACKEND", "REVERSEPROXY_DEFAULT_BACKEND", "DEFAULT_BACKEND_REVERSEPROXY",
-			"REQUEST_TIMEOUT", "REVERSEPROXY_REQUEST_TIMEOUT", "REQUEST_TIMEOUT_REVERSEPROXY",
+			"MODTEST_DRY_RUN", "REVERSEPROXY_MODTEST_DRY_RUN", "MODTEST_DRY_RUN_REVERSEPROXY",
+			"MODTEST_DEFAULT_BACKEND", "REVERSEPROXY_MODTEST_DEFAULT_BACKEND", "MODTEST_DEFAULT_BACKEND_REVERSEPROXY",
+			"MODTEST_REQUEST_TIMEOUT", "REVERSEPROXY_MODTEST_REQUEST_TIMEOUT", "MODTEST_REQUEST_TIMEOUT_REVERSEPROXY",
 		}
 		for _, env := range envVars {
 			os.Unsetenv(env)
@@ -30,9 +31,9 @@ func TestModuleAwareEnvironmentVariableSearching(t *testing.T) {
 		t.Run("module_prefix_takes_priority", func(t *testing.T) {
 			// Set up all variants to test priority
 			testEnvVars := map[string]string{
-				"REVERSEPROXY_DRY_RUN": "true",   // Should win (highest priority)
-				"DRY_RUN_REVERSEPROXY": "false",  // Lower priority
-				"DRY_RUN":              "false",  // Lowest priority
+				"REVERSEPROXY_MODTEST_DRY_RUN": "true",  // Should win (highest priority)
+				"MODTEST_DRY_RUN_REVERSEPROXY": "false", // Lower priority
+				"MODTEST_DRY_RUN":              "false", // Lowest priority
 			}
 
 			for key, value := range testEnvVars {
@@ -73,8 +74,8 @@ func TestModuleAwareEnvironmentVariableSearching(t *testing.T) {
 
 			// Set up suffix and base variants only (no prefix)
 			testEnvVars := map[string]string{
-				"DRY_RUN_REVERSEPROXY": "true",   // Should win (higher priority than base)
-				"DRY_RUN":              "false",  // Lower priority
+				"MODTEST_DRY_RUN_REVERSEPROXY": "true",  // Should win (higher priority than base)
+				"MODTEST_DRY_RUN":              "false", // Lower priority
 			}
 
 			for key, value := range testEnvVars {
@@ -115,7 +116,7 @@ func TestModuleAwareEnvironmentVariableSearching(t *testing.T) {
 
 			// Set up only base variant
 			testEnvVars := map[string]string{
-				"DRY_RUN": "true", // Should be used as last resort
+				"MODTEST_DRY_RUN": "true", // Should be used as last resort
 			}
 
 			for key, value := range testEnvVars {
@@ -156,9 +157,9 @@ func TestModuleAwareEnvironmentVariableSearching(t *testing.T) {
 
 			// Set up mixed variants to test all fields
 			testEnvVars := map[string]string{
-				"REVERSEPROXY_DRY_RUN":            "true",                // Prefix for first field
-				"DEFAULT_BACKEND_REVERSEPROXY":   "backend.example.com", // Suffix for second field
-				"REQUEST_TIMEOUT":                "5000",                // Base for third field
+				"REVERSEPROXY_MODTEST_DRY_RUN":         "true",                // Prefix for first field
+				"MODTEST_DEFAULT_BACKEND_REVERSEPROXY": "backend.example.com", // Suffix for second field
+				"MODTEST_REQUEST_TIMEOUT":              "5000",                // Base for third field
 			}
 
 			for key, value := range testEnvVars {
@@ -196,14 +197,14 @@ func TestModuleAwareEnvironmentVariableSearching(t *testing.T) {
 
 	t.Run("httpserver_module_env_var_priority", func(t *testing.T) {
 		type HTTPServerConfig struct {
-			Host string `env:"HOST"`
-			Port int    `env:"PORT"`
+			Host string `env:"MODTEST_HOST"`
+			Port int    `env:"MODTEST_PORT"`
 		}
 
-		// Clear all relevant environment variables
+		// Clear all relevant environment variables (using unique test prefix)
 		envVars := []string{
-			"HOST", "HTTPSERVER_HOST", "HOST_HTTPSERVER",
-			"PORT", "HTTPSERVER_PORT", "PORT_HTTPSERVER",
+			"MODTEST_HOST", "HTTPSERVER_MODTEST_HOST", "MODTEST_HOST_HTTPSERVER",
+			"MODTEST_PORT", "HTTPSERVER_MODTEST_PORT", "MODTEST_PORT_HTTPSERVER",
 		}
 		for _, env := range envVars {
 			os.Unsetenv(env)
@@ -212,11 +213,11 @@ func TestModuleAwareEnvironmentVariableSearching(t *testing.T) {
 		t.Run("module_prefix_for_httpserver", func(t *testing.T) {
 			// Set up environment variables
 			testEnvVars := map[string]string{
-				"HTTPSERVER_HOST": "api.example.com", // Should win (highest priority)
-				"HOST_HTTPSERVER": "alt.example.com", // Lower priority
-				"HOST":            "localhost",       // Lowest priority
-				"HTTPSERVER_PORT": "9090",            // Should win (highest priority)
-				"PORT":            "8080",            // Lowest priority
+				"HTTPSERVER_MODTEST_HOST": "api.example.com", // Should win (highest priority)
+				"MODTEST_HOST_HTTPSERVER": "alt.example.com", // Lower priority
+				"MODTEST_HOST":            "localhost",       // Lowest priority
+				"HTTPSERVER_MODTEST_PORT": "9090",            // Should win (highest priority)
+				"MODTEST_PORT":            "8080",            // Lowest priority
 			}
 
 			for key, value := range testEnvVars {
@@ -253,19 +254,19 @@ func TestModuleAwareEnvironmentVariableSearching(t *testing.T) {
 
 	t.Run("backward_compatibility", func(t *testing.T) {
 		type SimpleConfig struct {
-			Value string `env:"TEST_VALUE"`
+			Value string `env:"MODTEST_SIMPLE_VALUE"`
 		}
 
-		// Clear environment variables
-		envVars := []string{"TEST_VALUE", "TESTMODULE_TEST_VALUE", "TEST_VALUE_TESTMODULE"}
+		// Clear environment variables (using unique test prefix)
+		envVars := []string{"MODTEST_SIMPLE_VALUE", "TESTMODULE_MODTEST_SIMPLE_VALUE", "MODTEST_SIMPLE_VALUE_TESTMODULE"}
 		for _, env := range envVars {
 			os.Unsetenv(env)
 		}
 
 		// Set up only the base environment variable (old behavior)
-		err := os.Setenv("TEST_VALUE", "original_behavior")
+		err := os.Setenv("MODTEST_SIMPLE_VALUE", "original_behavior")
 		require.NoError(t, err)
-		defer os.Unsetenv("TEST_VALUE")
+		defer os.Unsetenv("MODTEST_SIMPLE_VALUE")
 
 		// Create application with a module that doesn't use module-aware config
 		app := createTestApplication(t)
@@ -306,7 +307,7 @@ func (m *mockModuleAwareConfigModule) Init(app Application) error {
 	// Get the config section to populate our local config reference
 	cfg, err := app.GetConfigSection(m.Name())
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get config section for module %s: %w", m.Name(), err)
 	}
 	m.config = cfg.GetConfig()
 	return nil

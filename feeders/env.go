@@ -91,12 +91,6 @@ func (f *EnvFeeder) FeedWithModuleContext(structure interface{}, moduleName stri
 	return err
 }
 
-// processStructFields processes all fields in a struct with optional verbose logging
-func (f *EnvFeeder) processStructFields(rv reflect.Value, prefix, parentPath string) error {
-	// Delegate to the module-aware version with empty module name for backward compatibility
-	return f.processStructFieldsWithModule(rv, prefix, parentPath, "")
-}
-
 // processStructFieldsWithModule processes all fields in a struct with module awareness
 func (f *EnvFeeder) processStructFieldsWithModule(rv reflect.Value, prefix, parentPath, moduleName string) error {
 	structType := rv.Type()
@@ -131,12 +125,6 @@ func (f *EnvFeeder) processStructFieldsWithModule(rv reflect.Value, prefix, pare
 		}
 	}
 	return nil
-}
-
-// processField handles a single struct field with optional verbose logging
-func (f *EnvFeeder) processField(field reflect.Value, fieldType *reflect.StructField, prefix, fieldPath string) error {
-	// Delegate to the module-aware version with empty module name for backward compatibility
-	return f.processFieldWithModule(field, fieldType, prefix, fieldPath, "")
 }
 
 // processFieldWithModule handles a single struct field with module awareness
@@ -181,12 +169,6 @@ func (f *EnvFeeder) processFieldWithModule(field reflect.Value, fieldType *refle
 	}
 
 	return nil
-}
-
-// setFieldFromEnv sets a field value from an environment variable with optional verbose logging and field tracking
-func (f *EnvFeeder) setFieldFromEnv(field reflect.Value, envTag, prefix, fieldName, fieldPath string) error {
-	// Delegate to module-aware version with empty module name for backward compatibility
-	return f.setFieldFromEnvWithModule(field, envTag, prefix, fieldName, fieldPath, "")
 }
 
 // setFieldFromEnvWithModule sets a field value from an environment variable with module-aware searching
@@ -286,10 +268,10 @@ func (f *EnvFeeder) buildSearchKeys(envName, moduleName string) []string {
 	// If we have a module name, build module-aware search keys
 	if moduleName != "" && strings.TrimSpace(moduleName) != "" {
 		moduleUpper := strings.ToUpper(strings.TrimSpace(moduleName))
-		
+
 		// 1. MODULE_ENV_VAR (prefix)
 		searchKeys = append(searchKeys, moduleUpper+"_"+envName)
-		
+
 		// 2. ENV_VAR_MODULE (suffix)
 		searchKeys = append(searchKeys, envName+"_"+moduleUpper)
 	}
@@ -298,12 +280,6 @@ func (f *EnvFeeder) buildSearchKeys(envName, moduleName string) []string {
 	searchKeys = append(searchKeys, envName)
 
 	return searchKeys
-}
-
-// setPointerFieldFromEnv sets a pointer field value from an environment variable
-func (f *EnvFeeder) setPointerFieldFromEnv(field reflect.Value, envTag, prefix, fieldName, fieldPath string) error {
-	// Delegate to module-aware version with empty module name for backward compatibility
-	return f.setPointerFieldFromEnvWithModule(field, envTag, prefix, fieldName, fieldPath, "")
 }
 
 // setPointerFieldFromEnvWithModule sets a pointer field value from an environment variable with module awareness

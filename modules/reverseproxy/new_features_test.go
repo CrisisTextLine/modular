@@ -35,7 +35,9 @@ func TestNewFeatures(t *testing.T) {
 
 		// Register tenant with override configuration
 		tenantService := modular.NewStandardTenantService(logger)
-		app.RegisterService("tenantService", tenantService)
+		if err := app.RegisterService("tenantService", tenantService); err != nil {
+			t.Fatalf("Failed to register tenant service: %v", err)
+		}
 
 		// Register tenant with specific config
 		tenantConfig := &ReverseProxyConfig{
@@ -417,7 +419,9 @@ func TestScenarioIntegration(t *testing.T) {
 
 	// Create tenant service and register tenant with overrides
 	tenantService := modular.NewStandardTenantService(logger)
-	app.RegisterService("tenantService", tenantService)
+	if err := app.RegisterService("tenantService", tenantService); err != nil {
+		t.Fatalf("Failed to register tenant service: %v", err)
+	}
 
 	// Register tenant with specific config (like sampleaff1 from scenarios)
 	tenantConfig := &ReverseProxyConfig{

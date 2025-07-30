@@ -38,21 +38,8 @@ func main() {
 		)),
 	)
 
-	// Create and register feature flag evaluator service
-	// Feature flags are now configured through the tenant-aware configuration system
-	// via config.yaml and tenant-specific configuration files
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	featureFlagEvaluator, err := reverseproxy.NewFileBasedFeatureFlagEvaluator(app, logger)
-	if err != nil {
-		app.Logger().Error("Failed to create feature flag evaluator", "error", err)
-		os.Exit(1)
-	}
-	
-	// Register the feature flag evaluator as a service
-	if err := app.RegisterService("featureFlagEvaluator", featureFlagEvaluator); err != nil {
-		app.Logger().Error("Failed to register feature flag evaluator service", "error", err)
-		os.Exit(1)
-	}
+	// Feature flag evaluator service will be automatically provided by the reverseproxy module
+	// when feature flags are enabled in configuration. No manual registration needed.
 
 	// Create tenant service for multi-tenancy support
 	tenantService := modular.NewStandardTenantService(app.Logger())

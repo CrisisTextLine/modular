@@ -160,7 +160,9 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 
 	// Register tenant service
 	tenantService := modular.NewStandardTenantService(logger)
-	app.RegisterService("tenantService", tenantService)
+	if err := app.RegisterService("tenantService", tenantService); err != nil {
+		t.Fatalf("Failed to register tenant service: %v", err)
+	}
 
 	// Register global configuration with default flags
 	globalConfig := &ReverseProxyConfig{

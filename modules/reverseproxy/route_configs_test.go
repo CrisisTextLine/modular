@@ -50,7 +50,7 @@ func testRouteConfigWithFlag(t *testing.T, flagEnabled bool, expectedResponse st
 			},
 		},
 	}
-	app.RegisterConfigSection("reverseproxy", NewStdConfigProvider(flagConfig))
+	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(flagConfig))
 
 	// Register tenant service for proper configuration management
 	tenantService := modular.NewStandardTenantService(logger)
@@ -92,7 +92,7 @@ func testRouteConfigWithFlag(t *testing.T, flagEnabled bool, expectedResponse st
 	}
 
 	// Replace config with our configured one (keep feature flags separate)
-	app.RegisterConfigSection("reverseproxy", NewStdConfigProvider(config))
+	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 	// Initialize with services
 	services := map[string]any{
@@ -185,7 +185,7 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 		},
 	}
 	if err := tenantService.RegisterTenant("ctl", map[string]modular.ConfigProvider{
-		"reverseproxy": NewStdConfigProvider(tenantConfig),
+		"reverseproxy": modular.NewStdConfigProvider(tenantConfig),
 	}); err != nil {
 		t.Fatalf("Failed to register tenant: %v", err)
 	}

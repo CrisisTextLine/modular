@@ -14,7 +14,7 @@ func TestBasicRouteConfigsFeatureFlagRouting(t *testing.T) {
 	t.Run("FeatureFlagDisabled_UsesAlternativeBackend", func(t *testing.T) {
 		testRouteConfigWithFlag(t, false, "alternative-backend-response")
 	})
-	
+
 	t.Run("FeatureFlagEnabled_UsesPrimaryBackend", func(t *testing.T) {
 		testRouteConfigWithFlag(t, true, "primary-backend-response")
 	})
@@ -40,7 +40,7 @@ func testRouteConfigWithFlag(t *testing.T, flagEnabled bool, expectedResponse st
 	// Create feature flag evaluator
 	app := NewMockTenantApplication()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	
+
 	// Register configuration for the feature flag evaluator
 	flagConfig := &ReverseProxyConfig{
 		FeatureFlags: FeatureFlagsConfig{
@@ -51,11 +51,13 @@ func testRouteConfigWithFlag(t *testing.T, flagEnabled bool, expectedResponse st
 		},
 	}
 	app.RegisterConfigSection("reverseproxy", NewStdConfigProvider(flagConfig))
-	
+
 	// Register tenant service for proper configuration management
 	tenantService := modular.NewStandardTenantService(logger)
-	app.RegisterService("tenantService", tenantService)
-	
+	if err := app.RegisterService("tenantService", tenantService); err != nil {
+		t.Fatalf("Failed to register tenant service: %v", err)
+	}
+
 	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
@@ -155,11 +157,11 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 	// Create feature flag evaluator with tenant-specific flags
 	app := NewMockTenantApplication()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	
+
 	// Register tenant service
 	tenantService := modular.NewStandardTenantService(logger)
 	app.RegisterService("tenantService", tenantService)
-	
+
 	// Register global configuration with default flags
 	globalConfig := &ReverseProxyConfig{
 		FeatureFlags: FeatureFlagsConfig{
@@ -170,7 +172,7 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 		},
 	}
 	app.RegisterConfigSection("reverseproxy", NewStdConfigProvider(globalConfig))
-	
+
 	// Register tenant "ctl" with overridden flag
 	tenantConfig := &ReverseProxyConfig{
 		FeatureFlags: FeatureFlagsConfig{
@@ -180,10 +182,12 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 			},
 		},
 	}
-	tenantService.RegisterTenant("ctl", map[string]modular.ConfigProvider{
+	if err := tenantService.RegisterTenant("ctl", map[string]modular.ConfigProvider{
 		"reverseproxy": NewStdConfigProvider(tenantConfig),
-	})
-	
+	}); err != nil {
+		t.Fatalf("Failed to register tenant: %v", err)
+	}
+
 	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)

@@ -39,22 +39,14 @@ func main() {
 	)
 
 	// Create and register feature flag evaluator service
-	featureFlagEvaluator := reverseproxy.NewFileBasedFeatureFlagEvaluator()
-	
-	// Configure feature flags - these would normally come from a file or external service
-	featureFlagEvaluator.SetFlag("beta-feature", false)         // Disabled globally
-	featureFlagEvaluator.SetFlag("new-backend", true)          // Enabled globally
-	featureFlagEvaluator.SetFlag("composite-route", true)      // Enabled globally
-	featureFlagEvaluator.SetFlag("premium-features", false)    // Premium features disabled globally
-	featureFlagEvaluator.SetFlag("enterprise-analytics", false) // Enterprise analytics disabled globally
-	featureFlagEvaluator.SetFlag("tenant-composite-route", true) // Tenant composite routes enabled
-	featureFlagEvaluator.SetFlag("enterprise-dashboard", true)  // Enterprise dashboard enabled
-	
-	// Set tenant-specific overrides
-	featureFlagEvaluator.SetTenantFlag("beta-tenant", "beta-feature", true)      // Enable for beta tenant
-	featureFlagEvaluator.SetTenantFlag("beta-tenant", "premium-features", true)  // Enable premium for beta tenant
-	featureFlagEvaluator.SetTenantFlag("enterprise-tenant", "beta-feature", true) // Enable for enterprise tenant
-	featureFlagEvaluator.SetTenantFlag("enterprise-tenant", "enterprise-analytics", true) // Enable analytics for enterprise
+	// Feature flags are now configured through the tenant-aware configuration system
+	// via config.yaml and tenant-specific configuration files
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	featureFlagEvaluator, err := reverseproxy.NewFileBasedFeatureFlagEvaluator(app, logger)
+	if err != nil {
+		app.Logger().Error("Failed to create feature flag evaluator", "error", err)
+		os.Exit(1)
+	}
 	
 	// Register the feature flag evaluator as a service
 	if err := app.RegisterService("featureFlagEvaluator", featureFlagEvaluator); err != nil {

@@ -1,4 +1,4 @@
-module github.com/CrisisTextLine/modular/examples/testing-scenarios
+module testing-scenarios
 
 go 1.24.2
 

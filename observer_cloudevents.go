@@ -8,6 +8,7 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/google/uuid"
 )
 
 // CloudEvent is an alias for the CloudEvents Event type for convenience
@@ -178,11 +179,15 @@ const (
 	CloudEventTypeApplicationFailed  = "com.modular.application.failed"
 )
 
-// generateEventID generates a unique identifier for CloudEvents.
-// This uses a simple timestamp-based approach for now but could be enhanced
-// with UUID generation or other schemes as needed.
+// generateEventID generates a unique identifier for CloudEvents using UUIDv7.
+// UUIDv7 includes timestamp information which provides time-ordered uniqueness.
 func generateEventID() string {
-	return time.Now().Format("20060102150405.000000")
+	id, err := uuid.NewV7()
+	if err != nil {
+		// Fallback to v4 if v7 fails for any reason
+		id = uuid.New()
+	}
+	return id.String()
 }
 
 // ValidateCloudEvent validates that a CloudEvent conforms to the specification.

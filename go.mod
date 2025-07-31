@@ -6,13 +6,13 @@ toolchain go1.24.2
 
 require (
 	github.com/BurntSushi/toml v1.5.0
+	github.com/cloudevents/sdk-go/v2 v2.16.1
 	github.com/golobby/cast v1.3.3
 	github.com/stretchr/testify v1.10.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/cloudevents/sdk-go/v2 v2.16.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

@@ -21,7 +21,7 @@ app, err := modular.NewApplication(
     modular.WithTenantAware(tenantLoader),
     modular.WithObserver(customEventObserver),
     modular.WithModules(
-        eventlogger.NewEventLoggerModule(),
+        eventlogger.NewModule(),
         &DemoModule{},
     ),
 )
@@ -47,11 +47,13 @@ go run main.go
 ## Expected Output
 
 The application will:
-1. Start with tenant resolution
-2. Emit lifecycle events (before/after init, start, stop)
-3. Log all events via the EventLogger module
-4. Display custom observer notifications
-5. Demonstrate module-to-module event communication
+1. Start with tenant resolution (demo-tenant-1, demo-tenant-2)
+2. Initialize and start the EventLogger module
+3. Emit lifecycle events (before/after init, start, stop) 
+4. Log all events via the EventLogger module (visible in console output)
+5. Display custom observer notifications with event details
+6. Demonstrate module-to-module event communication
+7. Show both functional observers and module observers working together
 
 ## Migration from Old API
 

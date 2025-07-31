@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/CrisisTextLine/modular/modules/eventlogger"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
@@ -31,6 +32,7 @@ func main() {
 		modular.WithTenantAware(tenantLoader),
 		modular.WithObserver(customEventObserver),
 		modular.WithModules(
+			eventlogger.NewModule(),
 			&DemoModule{},
 		),
 	)

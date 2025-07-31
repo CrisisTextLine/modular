@@ -69,6 +69,8 @@ type ReverseProxyModule struct {
 
 	// Feature flag evaluation
 	featureFlagEvaluator FeatureFlagEvaluator
+	// Track whether the evaluator was provided externally or created internally
+	featureFlagEvaluatorProvided bool
 }
 
 // Compile-time assertions to ensure interface compliance
@@ -404,6 +406,7 @@ func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 		if featureFlagSvc, exists := services["featureFlagEvaluator"]; exists {
 			if evaluator, ok := featureFlagSvc.(FeatureFlagEvaluator); ok {
 				m.featureFlagEvaluator = evaluator
+				m.featureFlagEvaluatorProvided = true
 				app.Logger().Info("Using feature flag evaluator from service")
 			} else {
 				app.Logger().Warn("featureFlagEvaluator service found but does not implement FeatureFlagEvaluator",
@@ -593,12 +596,14 @@ func (m *ReverseProxyModule) OnTenantRemoved(tenantID modular.TenantID) {
 }
 
 // ProvidesServices returns the services provided by this module.
-// This module can provide a featureFlagEvaluator service if configured to do so.
+// This module can provide a featureFlagEvaluator service if configured to do so,
+// but only if the evaluator wasn't provided externally.
 func (m *ReverseProxyModule) ProvidesServices() []modular.ServiceProvider {
 	var services []modular.ServiceProvider
 
-	// Only provide the feature flag evaluator service if we have one and it's enabled in config
-	if m.featureFlagEvaluator != nil && m.config != nil && m.config.FeatureFlags.Enabled {
+	// Only provide the feature flag evaluator service if we created it internally,
+	// not if it was provided externally
+	if m.featureFlagEvaluator != nil && m.config != nil && m.config.FeatureFlags.Enabled && !m.featureFlagEvaluatorProvided {
 		services = append(services, modular.ServiceProvider{
 			Name:     "featureFlagEvaluator",
 			Instance: m.featureFlagEvaluator,

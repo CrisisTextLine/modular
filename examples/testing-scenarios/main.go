@@ -93,15 +93,54 @@ func main() {
 	// Initialize testing scenarios
 	testApp.initializeScenarios()
 
-	// Note: featureFlagEvaluator service is now automatically registered by the reverseproxy module
-	// when feature flags are enabled in configuration. No manual registration needed.
-
 	// Create tenant service
 	tenantService := modular.NewStandardTenantService(app.Logger())
 	if err := app.RegisterService("tenantService", tenantService); err != nil {
 		app.Logger().Error("Failed to register tenant service", "error", err)
 		os.Exit(1)
 	}
+
+	// Create and register LaunchDarkly feature flag evaluator with fallback
+	// This demonstrates the LaunchDarkly integration with fallback to default evaluator
+	// when LaunchDarkly is misconfigured (no SDK key provided)
+	logger := app.Logger()
+	var slogLogger *slog.Logger
+	if l, ok := logger.(*slog.Logger); ok {
+		slogLogger = l
+	} else {
+		slogLogger = slog.Default()
+	}
+
+	// Create the default/fallback feature flag evaluator first
+	fallbackEvaluator, err := reverseproxy.NewFileBasedFeatureFlagEvaluator(app, slogLogger)
+	if err != nil {
+		app.Logger().Error("Failed to create fallback feature flag evaluator", "error", err)
+		os.Exit(1)
+	}
+
+	// Create LaunchDarkly config (intentionally misconfigured to trigger fallback)
+	ldConfig := LaunchDarklyConfig{
+		SDKKey:      "", // Intentionally empty to trigger fallback behavior
+		Environment: "local",
+		Timeout:     5 * time.Second,
+		Offline:     false,
+	}
+
+	// Create the LaunchDarkly evaluator with fallback
+	ldEvaluator, err := NewLaunchDarklyFeatureFlagEvaluator(ldConfig, fallbackEvaluator, slogLogger)
+	if err != nil {
+		app.Logger().Error("Failed to create LaunchDarkly feature flag evaluator", "error", err)
+		os.Exit(1)
+	}
+
+	// Register the LaunchDarkly evaluator as the primary feature flag service
+	// When the reverseproxy module looks for "featureFlagEvaluator" service, it will find this one
+	if err := app.RegisterService("featureFlagEvaluator", ldEvaluator); err != nil {
+		app.Logger().Error("Failed to register LaunchDarkly feature flag evaluator service", "error", err)
+		os.Exit(1)
+	}
+
+	app.Logger().Info("Registered LaunchDarkly feature flag evaluator with fallback (LaunchDarkly intentionally misconfigured for demonstration)")
 
 	// Register tenant config loader to load tenant configurations from files
 	tenantConfigLoader := modular.NewFileBasedTenantConfigLoader(modular.TenantConfigParams{

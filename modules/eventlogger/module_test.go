@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 func TestEventLoggerModule_Init(t *testing.T) {
@@ -53,11 +54,12 @@ func TestEventLoggerModule_ObserverInterface(t *testing.T) {
 	}
 
 	// Test OnEvent without initialization (should fail)
-	event := modular.ObserverEvent{
-		Type:   "test.event",
-		Source: "test",
-		Data:   "test data",
-	}
+	event := modular.NewCloudEvent(
+		"test.event",
+		"test", 
+		"test data",
+		nil,
+	)
 
 	err := module.OnEvent(context.Background(), event)
 	if err != ErrLoggerNotStarted {
@@ -248,7 +250,7 @@ func TestEventLoggerModule_EventProcessing(t *testing.T) {
 	module.outputs = outputs
 
 	// Initialize channels
-	module.eventChan = make(chan modular.ObserverEvent, testConfig.BufferSize)
+	module.eventChan = make(chan cloudevents.Event, testConfig.BufferSize)
 	module.stopChan = make(chan struct{})
 
 	// Start the module
@@ -259,12 +261,12 @@ func TestEventLoggerModule_EventProcessing(t *testing.T) {
 	}
 
 	// Test event logging
-	testEvent := modular.ObserverEvent{
-		Type:      "test.event",
-		Source:    "test",
-		Data:      "test data",
-		Timestamp: time.Now(),
-	}
+	testEvent := modular.NewCloudEvent(
+		"test.event",
+		"test", 
+		"test data",
+		nil,
+	)
 
 	err = module.OnEvent(ctx, testEvent)
 	if err != nil {
@@ -294,28 +296,22 @@ func TestEventLoggerModule_EventFiltering(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		event    modular.ObserverEvent
+		event    cloudevents.Event
 		expected bool
 	}{
 		{
-			name: "filtered event",
-			event: modular.ObserverEvent{
-				Type: "module.registered",
-			},
+			name:     "filtered event",
+			event:    modular.NewCloudEvent("module.registered", "test", nil, nil),
 			expected: true,
 		},
 		{
-			name: "unfiltered event",
-			event: modular.ObserverEvent{
-				Type: "unfiltered.event",
-			},
+			name:     "unfiltered event", 
+			event:    modular.NewCloudEvent("unfiltered.event", "test", nil, nil),
 			expected: false,
 		},
 		{
-			name: "error level event",
-			event: modular.ObserverEvent{
-				Type: "application.failed",
-			},
+			name:     "error level event",
+			event:    modular.NewCloudEvent("application.failed", "test", nil, nil),
 			expected: false, // Filtered out by event type filter
 		},
 	}
@@ -361,7 +357,7 @@ func TestEventLoggerModule_LogLevels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			event := modular.ObserverEvent{Type: tt.eventType}
+			event := modular.NewCloudEvent(tt.eventType, "test", nil, nil)
 			result := module.shouldLogEvent(event)
 			if result != tt.expected {
 				t.Errorf("shouldLogEvent() = %v, expected %v for event type %s", result, tt.expected, tt.eventType)

@@ -79,10 +79,10 @@ func TestFunctionalObserver(t *testing.T) {
 	}
 }
 
-var testError = errors.New("test error")
+var errTest = errors.New("test error")
 
 func TestFunctionalObserverWithError(t *testing.T) {
-	expectedErr := testError
+	expectedErr := errTest
 
 	handler := func(ctx context.Context, event cloudevents.Event) error {
 		return expectedErr

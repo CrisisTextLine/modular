@@ -124,8 +124,8 @@ func main() {
 			"loginTime": time.Now(),
 		},
 		map[string]interface{}{
-			"source_ip": "192.168.1.1",
-			"user_agent": "test-browser",
+			"sourceip": "192.168.1.1",
+			"useragent": "test-browser",
 		},
 	)
 	

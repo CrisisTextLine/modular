@@ -10,7 +10,7 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
-var observerError = errors.New("observer error")
+var errObserver = errors.New("observer error")
 
 func TestObservableApplication_RegisterObserver(t *testing.T) {
 	app := NewObservableApplication(NewStdConfigProvider(&struct{}{}), &TestObserverLogger{})
@@ -267,7 +267,7 @@ func TestObservableApplication_ObserverErrorHandling(t *testing.T) {
 
 	// Create an observer that always errors
 	errorObserver := NewFunctionalObserver("error-observer", func(ctx context.Context, event cloudevents.Event) error {
-		return observerError
+		return errObserver
 	})
 
 	// Create a normal observer

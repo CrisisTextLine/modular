@@ -27,14 +27,12 @@ func NewCloudEvent(eventType, source string, data interface{}, metadata map[stri
 	
 	// Set data if provided
 	if data != nil {
-		event.SetData(cloudevents.ApplicationJSON, data)
+		_ = event.SetData(cloudevents.ApplicationJSON, data)
 	}
 	
 	// Set extensions for metadata
-	if metadata != nil {
-		for key, value := range metadata {
-			event.SetExtension(key, value)
-		}
+	for key, value := range metadata {
+		event.SetExtension(key, value)
 	}
 	
 	return event

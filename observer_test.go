@@ -5,36 +5,46 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
-func TestObserverEvent(t *testing.T) {
-	event := ObserverEvent{
-		Type:      "test.event",
-		Source:    "test.source",
-		Data:      "test data",
-		Metadata:  map[string]interface{}{"key": "value"},
-		Timestamp: time.Now(),
-	}
+func TestCloudEvent(t *testing.T) {
+	metadata := map[string]interface{}{"key": "value"}
+	event := NewCloudEvent(
+		"test.event",
+		"test.source",
+		"test data",
+		metadata,
+	)
 
-	if event.Type != "test.event" {
-		t.Errorf("Expected Type to be 'test.event', got %s", event.Type)
+	if event.Type() != "test.event" {
+		t.Errorf("Expected Type to be 'test.event', got %s", event.Type())
 	}
-	if event.Source != "test.source" {
-		t.Errorf("Expected Source to be 'test.source', got %s", event.Source)
+	if event.Source() != "test.source" {
+		t.Errorf("Expected Source to be 'test.source', got %s", event.Source())
 	}
-	if event.Data != "test data" {
-		t.Errorf("Expected Data to be 'test data', got %v", event.Data)
+	
+	// Check data
+	var data string
+	if err := event.DataAs(&data); err != nil {
+		t.Errorf("Failed to extract data: %v", err)
 	}
-	if event.Metadata["key"] != "value" {
-		t.Errorf("Expected Metadata['key'] to be 'value', got %v", event.Metadata["key"])
+	if data != "test data" {
+		t.Errorf("Expected Data to be 'test data', got %v", data)
+	}
+	
+	// Check extension
+	if val, ok := event.Extensions()["key"]; !ok || val != "value" {
+		t.Errorf("Expected Extension['key'] to be 'value', got %v", val)
 	}
 }
 
 func TestFunctionalObserver(t *testing.T) {
 	called := false
-	var receivedEvent ObserverEvent
+	var receivedEvent cloudevents.Event
 
-	handler := func(ctx context.Context, event ObserverEvent) error {
+	handler := func(ctx context.Context, event cloudevents.Event) error {
 		called = true
 		receivedEvent = event
 		return nil
@@ -48,12 +58,12 @@ func TestFunctionalObserver(t *testing.T) {
 	}
 
 	// Test OnEvent
-	testEvent := ObserverEvent{
-		Type:      "test.event",
-		Source:    "test",
-		Data:      "test data",
-		Timestamp: time.Now(),
-	}
+	testEvent := NewCloudEvent(
+		"test.event",
+		"test",
+		"test data",
+		nil,
+	)
 
 	err := observer.OnEvent(context.Background(), testEvent)
 	if err != nil {
@@ -64,25 +74,26 @@ func TestFunctionalObserver(t *testing.T) {
 		t.Error("Expected handler to be called")
 	}
 
-	if receivedEvent.Type != testEvent.Type {
-		t.Errorf("Expected received event type to be %s, got %s", testEvent.Type, receivedEvent.Type)
+	if receivedEvent.Type() != testEvent.Type() {
+		t.Errorf("Expected received event type to be %s, got %s", testEvent.Type(), receivedEvent.Type())
 	}
 }
 
 func TestFunctionalObserverWithError(t *testing.T) {
 	expectedErr := errors.New("test error")
 
-	handler := func(ctx context.Context, event ObserverEvent) error {
+	handler := func(ctx context.Context, event cloudevents.Event) error {
 		return expectedErr
 	}
 
 	observer := NewFunctionalObserver("test-observer", handler)
 
-	testEvent := ObserverEvent{
-		Type:   "test.event",
-		Source: "test",
-		Data:   "test data",
-	}
+	testEvent := NewCloudEvent(
+		"test.event",
+		"test",
+		"test data",
+		nil,
+	)
 
 	err := observer.OnEvent(context.Background(), testEvent)
 	if err != expectedErr {
@@ -91,22 +102,22 @@ func TestFunctionalObserverWithError(t *testing.T) {
 }
 
 func TestEventTypeConstants(t *testing.T) {
-	// Test that our event type constants are properly defined
+	// Test that our event type constants are properly defined with reverse domain notation
 	expectedEventTypes := map[string]string{
-		"EventTypeModuleRegistered":    "module.registered",
-		"EventTypeModuleInitialized":   "module.initialized",
-		"EventTypeModuleStarted":       "module.started",
-		"EventTypeModuleStopped":       "module.stopped",
-		"EventTypeModuleFailed":        "module.failed",
-		"EventTypeServiceRegistered":   "service.registered",
-		"EventTypeServiceUnregistered": "service.unregistered",
-		"EventTypeServiceRequested":    "service.requested",
-		"EventTypeConfigLoaded":        "config.loaded",
-		"EventTypeConfigValidated":     "config.validated",
-		"EventTypeConfigChanged":       "config.changed",
-		"EventTypeApplicationStarted":  "application.started",
-		"EventTypeApplicationStopped":  "application.stopped",
-		"EventTypeApplicationFailed":   "application.failed",
+		"EventTypeModuleRegistered":    "com.modular.module.registered",
+		"EventTypeModuleInitialized":   "com.modular.module.initialized",
+		"EventTypeModuleStarted":       "com.modular.module.started",
+		"EventTypeModuleStopped":       "com.modular.module.stopped",
+		"EventTypeModuleFailed":        "com.modular.module.failed",
+		"EventTypeServiceRegistered":   "com.modular.service.registered",
+		"EventTypeServiceUnregistered": "com.modular.service.unregistered",
+		"EventTypeServiceRequested":    "com.modular.service.requested",
+		"EventTypeConfigLoaded":        "com.modular.config.loaded",
+		"EventTypeConfigValidated":     "com.modular.config.validated",
+		"EventTypeConfigChanged":       "com.modular.config.changed",
+		"EventTypeApplicationStarted":  "com.modular.application.started",
+		"EventTypeApplicationStopped":  "com.modular.application.stopped",
+		"EventTypeApplicationFailed":   "com.modular.application.failed",
 	}
 
 	actualEventTypes := map[string]string{
@@ -138,7 +149,7 @@ func TestEventTypeConstants(t *testing.T) {
 // Mock implementation for testing Subject interface
 type mockSubject struct {
 	observers map[string]*mockObserverRegistration
-	events    []ObserverEvent
+	events    []cloudevents.Event
 }
 
 type mockObserverRegistration struct {
@@ -150,7 +161,7 @@ type mockObserverRegistration struct {
 func newMockSubject() *mockSubject {
 	return &mockSubject{
 		observers: make(map[string]*mockObserverRegistration),
-		events:    make([]ObserverEvent, 0),
+		events:    make([]cloudevents.Event, 0),
 	}
 }
 
@@ -168,19 +179,19 @@ func (m *mockSubject) UnregisterObserver(observer Observer) error {
 	return nil
 }
 
-func (m *mockSubject) NotifyObservers(ctx context.Context, event ObserverEvent) error {
+func (m *mockSubject) NotifyObservers(ctx context.Context, event cloudevents.Event) error {
 	m.events = append(m.events, event)
 
 	for _, registration := range m.observers {
 		// Check if observer is interested in this event type
 		if len(registration.eventTypes) == 0 {
 			// No filter, observer gets all events
-			registration.observer.OnEvent(ctx, event)
+			_ = registration.observer.OnEvent(ctx, event)
 		} else {
 			// Check if event type matches observer's interests
 			for _, eventType := range registration.eventTypes {
-				if eventType == event.Type {
-					registration.observer.OnEvent(ctx, event)
+				if eventType == event.Type() {
+					_ = registration.observer.OnEvent(ctx, event)
 					break
 				}
 			}
@@ -205,14 +216,14 @@ func TestSubjectObserverInteraction(t *testing.T) {
 	subject := newMockSubject()
 
 	// Create observers
-	events1 := make([]ObserverEvent, 0)
-	observer1 := NewFunctionalObserver("observer1", func(ctx context.Context, event ObserverEvent) error {
+	events1 := make([]cloudevents.Event, 0)
+	observer1 := NewFunctionalObserver("observer1", func(ctx context.Context, event cloudevents.Event) error {
 		events1 = append(events1, event)
 		return nil
 	})
 
-	events2 := make([]ObserverEvent, 0)
-	observer2 := NewFunctionalObserver("observer2", func(ctx context.Context, event ObserverEvent) error {
+	events2 := make([]cloudevents.Event, 0)
+	observer2 := NewFunctionalObserver("observer2", func(ctx context.Context, event cloudevents.Event) error {
 		events2 = append(events2, event)
 		return nil
 	})
@@ -229,22 +240,24 @@ func TestSubjectObserverInteraction(t *testing.T) {
 	}
 
 	// Emit a general event
-	generalEvent := ObserverEvent{
-		Type:   "test.general",
-		Source: "test",
-		Data:   "general data",
-	}
+	generalEvent := NewCloudEvent(
+		"test.general",
+		"test",
+		"general data",
+		nil,
+	)
 	err = subject.NotifyObservers(context.Background(), generalEvent)
 	if err != nil {
 		t.Fatalf("Failed to notify observers: %v", err)
 	}
 
 	// Emit a specific event
-	specificEvent := ObserverEvent{
-		Type:   "test.specific",
-		Source: "test",
-		Data:   "specific data",
-	}
+	specificEvent := NewCloudEvent(
+		"test.specific",
+		"test",
+		"specific data",
+		nil,
+	)
 	err = subject.NotifyObservers(context.Background(), specificEvent)
 	if err != nil {
 		t.Fatalf("Failed to notify observers: %v", err)
@@ -259,8 +272,8 @@ func TestSubjectObserverInteraction(t *testing.T) {
 	if len(events2) != 1 {
 		t.Errorf("Expected observer2 to receive 1 event, got %d", len(events2))
 	}
-	if len(events2) > 0 && events2[0].Type != "test.specific" {
-		t.Errorf("Expected observer2 to receive 'test.specific' event, got %s", events2[0].Type)
+	if len(events2) > 0 && events2[0].Type() != "test.specific" {
+		t.Errorf("Expected observer2 to receive 'test.specific' event, got %s", events2[0].Type())
 	}
 
 	// Test GetObservers

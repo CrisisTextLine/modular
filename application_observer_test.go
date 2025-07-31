@@ -6,15 +6,17 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 func TestObservableApplication_RegisterObserver(t *testing.T) {
 	app := NewObservableApplication(NewStdConfigProvider(&struct{}{}), &TestObserverLogger{})
 
 	// Create a test observer
-	events := make([]ObserverEvent, 0)
+	events := make([]cloudevents.Event, 0)
 	var mu sync.Mutex
-	observer := NewFunctionalObserver("test-observer", func(ctx context.Context, event ObserverEvent) error {
+	observer := NewFunctionalObserver("test-observer", func(ctx context.Context, event cloudevents.Event) error {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
@@ -56,7 +58,7 @@ func TestObservableApplication_RegisterObserver(t *testing.T) {
 func TestObservableApplication_UnregisterObserver(t *testing.T) {
 	app := NewObservableApplication(NewStdConfigProvider(&struct{}{}), &TestObserverLogger{})
 
-	observer := NewFunctionalObserver("test-observer", func(ctx context.Context, event ObserverEvent) error {
+	observer := NewFunctionalObserver("test-observer", func(ctx context.Context, event cloudevents.Event) error {
 		return nil
 	})
 
@@ -92,18 +94,18 @@ func TestObservableApplication_NotifyObservers(t *testing.T) {
 	app := NewObservableApplication(NewStdConfigProvider(&struct{}{}), &TestObserverLogger{})
 
 	// Create observers with different event type filters
-	events1 := make([]ObserverEvent, 0)
+	events1 := make([]cloudevents.Event, 0)
 	var mu1 sync.Mutex
-	observer1 := NewFunctionalObserver("observer1", func(ctx context.Context, event ObserverEvent) error {
+	observer1 := NewFunctionalObserver("observer1", func(ctx context.Context, event cloudevents.Event) error {
 		mu1.Lock()
 		defer mu1.Unlock()
 		events1 = append(events1, event)
 		return nil
 	})
 
-	events2 := make([]ObserverEvent, 0)
+	events2 := make([]cloudevents.Event, 0)
 	var mu2 sync.Mutex
-	observer2 := NewFunctionalObserver("observer2", func(ctx context.Context, event ObserverEvent) error {
+	observer2 := NewFunctionalObserver("observer2", func(ctx context.Context, event cloudevents.Event) error {
 		mu2.Lock()
 		defer mu2.Unlock()
 		events2 = append(events2, event)
@@ -122,17 +124,19 @@ func TestObservableApplication_NotifyObservers(t *testing.T) {
 	}
 
 	// Emit different types of events
-	moduleEvent := ObserverEvent{
-		Type:   EventTypeModuleRegistered,
-		Source: "test",
-		Data:   "module data",
-	}
+	moduleEvent := NewCloudEvent(
+		EventTypeModuleRegistered,
+		"test",
+		"module data",
+		nil,
+	)
 
-	serviceEvent := ObserverEvent{
-		Type:   EventTypeServiceRegistered,
-		Source: "test",
-		Data:   "service data",
-	}
+	serviceEvent := NewCloudEvent(
+		EventTypeServiceRegistered,
+		"test",
+		"service data",
+		nil,
+	)
 
 	err = app.NotifyObservers(context.Background(), moduleEvent)
 	if err != nil {
@@ -159,8 +163,8 @@ func TestObservableApplication_NotifyObservers(t *testing.T) {
 	if len(events2) != 1 {
 		t.Errorf("Expected observer2 to receive 1 event, got %d", len(events2))
 	}
-	if len(events2) > 0 && events2[0].Type != EventTypeModuleRegistered {
-		t.Errorf("Expected observer2 to receive module event, got %s", events2[0].Type)
+	if len(events2) > 0 && events2[0].Type() != EventTypeModuleRegistered {
+		t.Errorf("Expected observer2 to receive module event, got %s", events2[0].Type())
 	}
 	mu2.Unlock()
 }
@@ -169,9 +173,9 @@ func TestObservableApplication_ModuleRegistrationEvents(t *testing.T) {
 	app := NewObservableApplication(NewStdConfigProvider(&struct{}{}), &TestObserverLogger{})
 
 	// Register observer for module events
-	events := make([]ObserverEvent, 0)
+	events := make([]cloudevents.Event, 0)
 	var mu sync.Mutex
-	observer := NewFunctionalObserver("test-observer", func(ctx context.Context, event ObserverEvent) error {
+	observer := NewFunctionalObserver("test-observer", func(ctx context.Context, event cloudevents.Event) error {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
@@ -198,11 +202,11 @@ func TestObservableApplication_ModuleRegistrationEvents(t *testing.T) {
 
 	if len(events) > 0 {
 		event := events[0]
-		if event.Type != EventTypeModuleRegistered {
-			t.Errorf("Expected event type %s, got %s", EventTypeModuleRegistered, event.Type)
+		if event.Type() != EventTypeModuleRegistered {
+			t.Errorf("Expected event type %s, got %s", EventTypeModuleRegistered, event.Type())
 		}
-		if event.Source != "application" {
-			t.Errorf("Expected event source 'application', got %s", event.Source)
+		if event.Source() != "application" {
+			t.Errorf("Expected event source 'application', got %s", event.Source())
 		}
 	}
 	mu.Unlock()
@@ -212,9 +216,9 @@ func TestObservableApplication_ServiceRegistrationEvents(t *testing.T) {
 	app := NewObservableApplication(NewStdConfigProvider(&struct{}{}), &TestObserverLogger{})
 
 	// Register observer for service events
-	events := make([]ObserverEvent, 0)
+	events := make([]cloudevents.Event, 0)
 	var mu sync.Mutex
-	observer := NewFunctionalObserver("test-observer", func(ctx context.Context, event ObserverEvent) error {
+	observer := NewFunctionalObserver("test-observer", func(ctx context.Context, event cloudevents.Event) error {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
@@ -244,11 +248,11 @@ func TestObservableApplication_ServiceRegistrationEvents(t *testing.T) {
 
 	if len(events) > 0 {
 		event := events[0]
-		if event.Type != EventTypeServiceRegistered {
-			t.Errorf("Expected event type %s, got %s", EventTypeServiceRegistered, event.Type)
+		if event.Type() != EventTypeServiceRegistered {
+			t.Errorf("Expected event type %s, got %s", EventTypeServiceRegistered, event.Type())
 		}
-		if event.Source != "application" {
-			t.Errorf("Expected event source 'application', got %s", event.Source)
+		if event.Source() != "application" {
+			t.Errorf("Expected event source 'application', got %s", event.Source())
 		}
 	}
 	mu.Unlock()
@@ -260,14 +264,14 @@ func TestObservableApplication_ObserverErrorHandling(t *testing.T) {
 	app := NewObservableApplication(NewStdConfigProvider(&struct{}{}), logger)
 
 	// Create an observer that always errors
-	errorObserver := NewFunctionalObserver("error-observer", func(ctx context.Context, event ObserverEvent) error {
+	errorObserver := NewFunctionalObserver("error-observer", func(ctx context.Context, event cloudevents.Event) error {
 		return errors.New("observer error")
 	})
 
 	// Create a normal observer
-	events := make([]ObserverEvent, 0)
+	events := make([]cloudevents.Event, 0)
 	var mu sync.Mutex
-	normalObserver := NewFunctionalObserver("normal-observer", func(ctx context.Context, event ObserverEvent) error {
+	normalObserver := NewFunctionalObserver("normal-observer", func(ctx context.Context, event cloudevents.Event) error {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
@@ -286,11 +290,12 @@ func TestObservableApplication_ObserverErrorHandling(t *testing.T) {
 	}
 
 	// Emit an event
-	testEvent := ObserverEvent{
-		Type:   "test.event",
-		Source: "test",
-		Data:   "test data",
-	}
+	testEvent := NewCloudEvent(
+		"test.event",
+		"test",
+		"test data",
+		nil,
+	)
 
 	err = app.NotifyObservers(context.Background(), testEvent)
 	if err != nil {

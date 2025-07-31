@@ -2,6 +2,7 @@ package modular
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -124,7 +125,7 @@ func TestNewApplication_MissingLogger(t *testing.T) {
 		t.Error("Expected error when logger is not provided")
 	}
 
-	if err != ErrLoggerNotSet {
+	if !errors.Is(err, ErrLoggerNotSet) {
 		t.Errorf("Expected ErrLoggerNotSet, got %v", err)
 	}
 }

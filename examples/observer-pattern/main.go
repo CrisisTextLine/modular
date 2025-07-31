@@ -60,6 +60,10 @@ func main() {
 	app.RegisterModule(NewUserModule())
 	app.RegisterModule(NewNotificationModule())
 	app.RegisterModule(NewAuditModule())
+	
+	// Register CloudEvents demo module
+	fmt.Println("\n☁️  Registering CloudEvents demo module...")
+	app.RegisterModule(NewCloudEventsModule())
 
 	// Register demo services
 	fmt.Println("\n🔧 Registering demo services...")
@@ -107,6 +111,27 @@ func main() {
 		fmt.Println("✅ Test event emitted successfully!")
 	}
 	
+	// Demonstrate CloudEvents
+	fmt.Println("\n☁️  Testing CloudEvents emission...")
+	testCloudEvent := modular.NewCloudEvent(
+		"com.example.user.created",
+		"test-source",
+		map[string]interface{}{
+			"userID": "cloud-user",
+			"email":  "cloud@example.com",
+		},
+		map[string]interface{}{
+			"test": "true",
+		},
+	)
+	
+	// ObservableApplication implements CloudEventSubject interface
+	if err := app.NotifyCloudEventObservers(context.Background(), testCloudEvent); err != nil {
+		fmt.Printf("❌ Failed to emit CloudEvent: %v\n", err)
+	} else {
+		fmt.Println("✅ CloudEvent emitted successfully!")
+	}
+	
 	// Wait a moment for async processing
 	time.Sleep(200 * time.Millisecond)
 
@@ -130,10 +155,11 @@ func main() {
 
 // AppConfig demonstrates configuration with observer pattern settings
 type AppConfig struct {
-	AppName     string                           `yaml:"appName" default:"Observer Pattern Demo" desc:"Application name"`
-	Environment string                           `yaml:"environment" default:"demo" desc:"Environment (dev, test, prod, demo)"`
-	EventLogger eventlogger.EventLoggerConfig   `yaml:"eventlogger" desc:"Event logger configuration"`
-	UserModule  UserModuleConfig                 `yaml:"userModule" desc:"User module configuration"`
+	AppName        string                           `yaml:"appName" default:"Observer Pattern Demo" desc:"Application name"`
+	Environment    string                           `yaml:"environment" default:"demo" desc:"Environment (dev, test, prod, demo)"`
+	EventLogger    eventlogger.EventLoggerConfig   `yaml:"eventlogger" desc:"Event logger configuration"`
+	UserModule     UserModuleConfig                 `yaml:"userModule" desc:"User module configuration"`
+	CloudEventsDemo CloudEventsConfig               `yaml:"cloudevents-demo" desc:"CloudEvents demo configuration"`
 }
 
 // Validate implements the ConfigValidator interface

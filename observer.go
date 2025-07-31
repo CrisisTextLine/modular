@@ -6,6 +6,8 @@ package modular
 import (
 	"context"
 	"time"
+
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // ObserverEvent represents an event in the Observer pattern.
@@ -110,6 +112,7 @@ const (
 // ObservableModule is an optional interface that modules can implement
 // to participate in the observer pattern. Modules implementing this interface
 // can emit their own events and register observers for events they're interested in.
+// Supports both traditional ObserverEvents and CloudEvents.
 type ObservableModule interface {
 	Module
 
@@ -118,9 +121,13 @@ type ObservableModule interface {
 	// The subject parameter is typically the application itself.
 	RegisterObservers(subject Subject) error
 
-	// EmitEvent allows modules to emit their own events.
+	// EmitEvent allows modules to emit their own traditional ObserverEvents.
 	// This should typically delegate to the application's NotifyObservers method.
 	EmitEvent(ctx context.Context, event ObserverEvent) error
+
+	// EmitCloudEvent allows modules to emit CloudEvents.
+	// This should typically delegate to the application's NotifyCloudEventObservers method.
+	EmitCloudEvent(ctx context.Context, event cloudevents.Event) error
 }
 
 // FunctionalObserver provides a simple way to create observers using functions.

@@ -116,6 +116,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // ModuleName is the unique identifier for the eventlogger module.
@@ -125,18 +126,20 @@ const ModuleName = "eventlogger"
 const ServiceName = "eventlogger.observer"
 
 // EventLoggerModule provides structured logging for Observer pattern events.
-// It implements the Observer interface to receive events and log them to
-// configured output targets.
+// It implements both Observer and CloudEventObserver interfaces to receive events
+// and log them to configured output targets. Supports both traditional ObserverEvents
+// and CloudEvents for standardized event handling.
 type EventLoggerModule struct {
-	name      string
-	config    *EventLoggerConfig
-	logger    modular.Logger
-	outputs   []OutputTarget
-	eventChan chan modular.ObserverEvent
-	stopChan  chan struct{}
-	wg        sync.WaitGroup
-	started   bool
-	mutex     sync.RWMutex
+	name           string
+	config         *EventLoggerConfig
+	logger         modular.Logger
+	outputs        []OutputTarget
+	eventChan      chan modular.ObserverEvent
+	cloudEventChan chan cloudevents.Event
+	stopChan       chan struct{}
+	wg             sync.WaitGroup
+	started        bool
+	mutex          sync.RWMutex
 }
 
 // NewModule creates a new instance of the event logger module.
@@ -208,6 +211,7 @@ func (m *EventLoggerModule) Init(app modular.Application) error {
 
 	// Initialize channels
 	m.eventChan = make(chan modular.ObserverEvent, m.config.BufferSize)
+	m.cloudEventChan = make(chan cloudevents.Event, m.config.BufferSize)
 	m.stopChan = make(chan struct{})
 
 	m.logger.Info("Event logger module initialized", "targets", len(m.outputs))
@@ -330,6 +334,27 @@ func (m *EventLoggerModule) EmitEvent(ctx context.Context, event modular.Observe
 	return fmt.Errorf("event logger module does not emit events")
 }
 
+// OnCloudEvent implements the CloudEventObserver interface to receive and log CloudEvents.
+func (m *EventLoggerModule) OnCloudEvent(ctx context.Context, event cloudevents.Event) error {
+	m.mutex.RLock()
+	started := m.started
+	m.mutex.RUnlock()
+
+	if !started {
+		return ErrLoggerNotStarted
+	}
+
+	// Try to send CloudEvent to processing channel
+	select {
+	case m.cloudEventChan <- event:
+		return nil
+	default:
+		// Buffer is full, drop event and log warning
+		m.logger.Warn("CloudEvent buffer full, dropping event", "eventType", event.Type())
+		return ErrEventBufferFull
+	}
+}
+
 // OnEvent implements the Observer interface to receive and log events.
 func (m *EventLoggerModule) OnEvent(ctx context.Context, event modular.ObserverEvent) error {
 	m.mutex.RLock()
@@ -356,7 +381,7 @@ func (m *EventLoggerModule) ObserverID() string {
 	return ModuleName
 }
 
-// processEvents processes events from the event channel.
+// processEvents processes events from both event channels.
 func (m *EventLoggerModule) processEvents() {
 	defer m.wg.Done()
 
@@ -369,6 +394,9 @@ func (m *EventLoggerModule) processEvents() {
 		case event := <-m.eventChan:
 			m.logEvent(event)
 
+		case cloudEvent := <-m.cloudEventChan:
+			m.logCloudEvent(cloudEvent)
+
 		case <-flushTicker.C:
 			m.flushOutputs()
 
@@ -378,11 +406,51 @@ func (m *EventLoggerModule) processEvents() {
 				select {
 				case event := <-m.eventChan:
 					m.logEvent(event)
+				case cloudEvent := <-m.cloudEventChan:
+					m.logCloudEvent(cloudEvent)
 				default:
 					m.flushOutputs()
 					return
 				}
 			}
+		}
+	}
+}
+
+// logCloudEvent logs a CloudEvent to all configured output targets.
+func (m *EventLoggerModule) logCloudEvent(event cloudevents.Event) {
+	// Convert CloudEvent to ObserverEvent for existing logging logic
+	observerEvent := modular.FromCloudEvent(event)
+	
+	// Check if event should be logged based on level and filters
+	if !m.shouldLogEvent(observerEvent) {
+		return
+	}
+
+	// Create log entry with CloudEvent specific formatting
+	entry := &LogEntry{
+		Timestamp: event.Time(),
+		Level:     m.getEventLevel(observerEvent),
+		Type:      event.Type(),
+		Source:    event.Source(),
+		Data:      observerEvent.Data,
+		Metadata:  observerEvent.Metadata,
+	}
+
+	// Add CloudEvent specific metadata
+	if entry.Metadata == nil {
+		entry.Metadata = make(map[string]interface{})
+	}
+	entry.Metadata["cloudevent_id"] = event.ID()
+	entry.Metadata["cloudevent_specversion"] = event.SpecVersion()
+	if event.Subject() != "" {
+		entry.Metadata["cloudevent_subject"] = event.Subject()
+	}
+
+	// Send to all output targets
+	for _, output := range m.outputs {
+		if err := output.WriteEvent(entry); err != nil {
+			m.logger.Error("Failed to write CloudEvent to output target", "error", err, "eventType", event.Type())
 		}
 	}
 }

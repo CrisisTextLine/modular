@@ -85,21 +85,21 @@ type ObserverInfo struct {
 // These provide a standardized vocabulary for events emitted by the core framework.
 const (
 	// Module lifecycle events
-	EventTypeModuleRegistered   = "module.registered"
-	EventTypeModuleInitialized  = "module.initialized"
-	EventTypeModuleStarted      = "module.started"
-	EventTypeModuleStopped      = "module.stopped"
-	EventTypeModuleFailed       = "module.failed"
+	EventTypeModuleRegistered  = "module.registered"
+	EventTypeModuleInitialized = "module.initialized"
+	EventTypeModuleStarted     = "module.started"
+	EventTypeModuleStopped     = "module.stopped"
+	EventTypeModuleFailed      = "module.failed"
 
-	// Service lifecycle events  
+	// Service lifecycle events
 	EventTypeServiceRegistered   = "service.registered"
 	EventTypeServiceUnregistered = "service.unregistered"
 	EventTypeServiceRequested    = "service.requested"
 
 	// Configuration events
-	EventTypeConfigLoaded       = "config.loaded"
-	EventTypeConfigValidated    = "config.validated"
-	EventTypeConfigChanged      = "config.changed"
+	EventTypeConfigLoaded    = "config.loaded"
+	EventTypeConfigValidated = "config.validated"
+	EventTypeConfigChanged   = "config.changed"
 
 	// Application lifecycle events
 	EventTypeApplicationStarted = "application.started"

@@ -253,7 +253,7 @@ func getTypeName(v interface{}) string {
 	if v == nil {
 		return "nil"
 	}
-	
+
 	// Use reflection to get the type name
 	// This is a simplified version that gets the basic type name
 	switch v := v.(type) {

@@ -71,7 +71,7 @@ func TestFunctionalObserver(t *testing.T) {
 
 func TestFunctionalObserverWithError(t *testing.T) {
 	expectedErr := errors.New("test error")
-	
+
 	handler := func(ctx context.Context, event ObserverEvent) error {
 		return expectedErr
 	}
@@ -94,7 +94,7 @@ func TestEventTypeConstants(t *testing.T) {
 	// Test that our event type constants are properly defined
 	expectedEventTypes := map[string]string{
 		"EventTypeModuleRegistered":    "module.registered",
-		"EventTypeModuleInitialized":   "module.initialized", 
+		"EventTypeModuleInitialized":   "module.initialized",
 		"EventTypeModuleStarted":       "module.started",
 		"EventTypeModuleStopped":       "module.stopped",
 		"EventTypeModuleFailed":        "module.failed",
@@ -170,7 +170,7 @@ func (m *mockSubject) UnregisterObserver(observer Observer) error {
 
 func (m *mockSubject) NotifyObservers(ctx context.Context, event ObserverEvent) error {
 	m.events = append(m.events, event)
-	
+
 	for _, registration := range m.observers {
 		// Check if observer is interested in this event type
 		if len(registration.eventTypes) == 0 {
@@ -203,7 +203,7 @@ func (m *mockSubject) GetObservers() []ObserverInfo {
 
 func TestSubjectObserverInteraction(t *testing.T) {
 	subject := newMockSubject()
-	
+
 	// Create observers
 	events1 := make([]ObserverEvent, 0)
 	observer1 := NewFunctionalObserver("observer1", func(ctx context.Context, event ObserverEvent) error {

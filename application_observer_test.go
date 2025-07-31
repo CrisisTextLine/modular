@@ -195,7 +195,7 @@ func TestObservableApplication_ModuleRegistrationEvents(t *testing.T) {
 	if len(events) != 1 {
 		t.Errorf("Expected 1 module registration event, got %d", len(events))
 	}
-	
+
 	if len(events) > 0 {
 		event := events[0]
 		if event.Type != EventTypeModuleRegistered {
@@ -241,7 +241,7 @@ func TestObservableApplication_ServiceRegistrationEvents(t *testing.T) {
 	if len(events) != 1 {
 		t.Errorf("Expected 1 service registration event, got %d", len(events))
 	}
-	
+
 	if len(events) > 0 {
 		event := events[0]
 		if event.Type != EventTypeServiceRegistered {
@@ -313,7 +313,7 @@ type TestObserverModule struct {
 	name string
 }
 
-func (m *TestObserverModule) Name() string { return m.name }
+func (m *TestObserverModule) Name() string               { return m.name }
 func (m *TestObserverModule) Init(app Application) error { return nil }
 
 type TestObserverLogger struct {

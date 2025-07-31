@@ -909,7 +909,7 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 				http.NotFound(w, r)
 				return
 			}
-			
+
 			// Use the default backend proxy handler
 			backendHandler := m.createBackendProxyHandler(m.defaultBackend)
 			backendHandler(w, r)
@@ -932,7 +932,7 @@ func (m *ReverseProxyModule) shouldExcludeFromProxy(path string) bool {
 	if path == "/health" || path == "/health/" {
 		return true
 	}
-	
+
 	// Metrics endpoints
 	if m.config != nil && m.config.MetricsEndpoint != "" {
 		metricsEndpoint := m.config.MetricsEndpoint
@@ -944,12 +944,12 @@ func (m *ReverseProxyModule) shouldExcludeFromProxy(path string) bool {
 			return true
 		}
 	}
-	
+
 	// Debug endpoints (if they are configured)
 	if strings.HasPrefix(path, "/debug/") {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -999,7 +999,7 @@ func (m *ReverseProxyModule) registerTenantAwareRoutes() error {
 				http.NotFound(w, r)
 				return
 			}
-			
+
 			// Use the tenant-aware handler
 			tenantHandler := m.createTenantAwareCatchAllHandler()
 			tenantHandler(w, r)

@@ -12,12 +12,12 @@ import (
 // TestHealthEndpointNotProxied tests that health endpoints are not proxied to backends
 func TestHealthEndpointNotProxied(t *testing.T) {
 	tests := []struct {
-		name               string
-		path               string
-		config             *ReverseProxyConfig
-		expectNotFound     bool
-		expectProxied      bool
-		description        string
+		name           string
+		path           string
+		config         *ReverseProxyConfig
+		expectNotFound bool
+		expectProxied  bool
+		description    string
 	}{
 		{
 			name: "HealthEndpointNotProxied",
@@ -39,7 +39,7 @@ func TestHealthEndpointNotProxied(t *testing.T) {
 				BackendServices: map[string]string{
 					"test": "http://test:8080",
 				},
-				DefaultBackend:   "test",
+				DefaultBackend:  "test",
 				MetricsEndpoint: "/metrics/reverseproxy",
 			},
 			expectNotFound: true,
@@ -53,7 +53,7 @@ func TestHealthEndpointNotProxied(t *testing.T) {
 				BackendServices: map[string]string{
 					"test": "http://test:8080",
 				},
-				DefaultBackend:   "test",
+				DefaultBackend:  "test",
 				MetricsEndpoint: "/metrics/reverseproxy",
 			},
 			expectNotFound: true,
@@ -130,7 +130,7 @@ func TestHealthEndpointNotProxied(t *testing.T) {
 			for backendID, proxy := range module.backendProxies {
 				t.Logf("  - %s: %v", backendID, proxy != nil)
 			}
-			
+
 			// Debug: Check default backend
 			t.Logf("Default backend: %s", module.defaultBackend)
 
@@ -167,7 +167,7 @@ func TestHealthEndpointNotProxied(t *testing.T) {
 				}
 				t.Logf("SUCCESS: %s - %s", tt.name, tt.description)
 			} else if tt.expectProxied {
-				// For proxied requests, we expect either a proxy error (connection refused) 
+				// For proxied requests, we expect either a proxy error (connection refused)
 				// or a successful proxy attempt (not 404)
 				if w.Code == http.StatusNotFound {
 					t.Errorf("Expected path %s to be proxied (not 404), got %d", tt.path, w.Code)
@@ -277,10 +277,10 @@ func TestTenantAwareHealthEndpointHandling(t *testing.T) {
 			"primary":   "http://primary:8080",
 			"secondary": "http://secondary:8080",
 		},
-		DefaultBackend:   "primary",
-		TenantIDHeader:   "X-Tenant-ID",
-		RequireTenantID:  false,
-		MetricsEndpoint:  "/metrics/reverseproxy",
+		DefaultBackend:  "primary",
+		TenantIDHeader:  "X-Tenant-ID",
+		RequireTenantID: false,
+		MetricsEndpoint: "/metrics/reverseproxy",
 	}
 
 	// Register the configuration with the application

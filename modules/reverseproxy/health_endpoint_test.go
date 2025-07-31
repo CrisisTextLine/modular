@@ -303,6 +303,11 @@ func TestTenantAwareHealthEndpointHandling(t *testing.T) {
 	// Set the app reference
 	module.app = app
 
+	// Initialize the module to set up backend proxies
+	if err := module.Init(app); err != nil {
+		t.Fatalf("Failed to initialize module: %v", err)
+	}
+
 	// Add a tenant manually for testing
 	tenantConfig := &ReverseProxyConfig{
 		BackendServices: map[string]string{

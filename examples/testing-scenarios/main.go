@@ -101,49 +101,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create and register LaunchDarkly feature flag evaluator with fallback
-	// This demonstrates the LaunchDarkly integration with fallback to default evaluator
-	// when LaunchDarkly is misconfigured (no SDK key provided)
-	logger := app.Logger()
-	var slogLogger *slog.Logger
-	if l, ok := logger.(*slog.Logger); ok {
-		slogLogger = l
-	} else {
-		slogLogger = slog.Default()
-	}
-
-	// Create the default/fallback feature flag evaluator first
-	fallbackEvaluator, err := reverseproxy.NewFileBasedFeatureFlagEvaluator(app, slogLogger)
-	if err != nil {
-		app.Logger().Error("Failed to create fallback feature flag evaluator", "error", err)
-		os.Exit(1)
-	}
-
-	// Create LaunchDarkly config (intentionally misconfigured to trigger fallback)
-	ldConfig := LaunchDarklyConfig{
-		SDKKey:      "", // Intentionally empty to trigger fallback behavior
-		Environment: "local",
-		Timeout:     5 * time.Second,
-		Offline:     false,
-	}
-
-	// Create the LaunchDarkly evaluator with fallback
-	ldEvaluator, err := NewLaunchDarklyFeatureFlagEvaluator(ldConfig, fallbackEvaluator, slogLogger)
-	if err != nil {
-		app.Logger().Error("Failed to create LaunchDarkly feature flag evaluator", "error", err)
-		os.Exit(1)
-	}
-
-	// Register the LaunchDarkly evaluator as the primary feature flag service
-	// When the reverseproxy module looks for "featureFlagEvaluator" service, it will find this one
-	// NOTE: Temporarily disabled to avoid service name conflict - the module will create its own evaluator
-	// if err := app.RegisterService("featureFlagEvaluator", ldEvaluator); err != nil {
-	// 	app.Logger().Error("Failed to register LaunchDarkly feature flag evaluator service", "error", err)
-	// 	os.Exit(1)
-	// }
-
-	app.Logger().Info("Created LaunchDarkly feature flag evaluator with fallback (will be used by reverseproxy module internally)")
-	_ = ldEvaluator // Suppress unused variable warning
+	// Feature flag evaluation is handled automatically by the reverseproxy module.
+	// The module will create its own file-based feature flag evaluator when feature flags are enabled.
+	// 
+	// For external feature flag services (like LaunchDarkly), create a separate module that:
+	// 1. Implements the FeatureFlagEvaluator interface
+	// 2. Provides a "featureFlagEvaluator" service  
+	// 3. Gets automatically discovered by the reverseproxy module via interface matching
+	//
+	// This demonstrates proper modular service dependency injection instead of manual service creation.
 
 	// Register tenant config loader to load tenant configurations from files
 	tenantConfigLoader := modular.NewFileBasedTenantConfigLoader(modular.TenantConfigParams{

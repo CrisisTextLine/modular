@@ -317,6 +317,7 @@ func TestObservableApplicationLifecycleCloudEvents(t *testing.T) {
 		},
 	)
 
+	// Register observer BEFORE registering modules to catch all events
 	err := app.RegisterObserver(observer)
 	require.NoError(t, err)
 
@@ -339,7 +340,7 @@ func TestObservableApplicationLifecycleCloudEvents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Give time for async events
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
 	// Should have received multiple CloudEvents
 	assert.GreaterOrEqual(t, len(allEvents), 6) // module, service, init start, init complete, start, stop

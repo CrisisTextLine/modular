@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // NotificationModule demonstrates an observer that reacts to user events
@@ -82,19 +83,19 @@ func (m *NotificationModule) RegisterObservers(subject modular.Subject) error {
 }
 
 // EmitEvent allows the module to emit events (not used in this example)
-func (m *NotificationModule) EmitEvent(ctx context.Context, event modular.ObserverEvent) error {
+func (m *NotificationModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 	return fmt.Errorf("notification module does not emit events")
 }
 
 // OnEvent implements Observer interface to handle user events
-func (m *NotificationModule) OnEvent(ctx context.Context, event modular.ObserverEvent) error {
-	switch event.Type {
-	case "user.created":
+func (m *NotificationModule) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	switch event.Type() {
+	case "com.example.user.created":
 		return m.handleUserCreated(ctx, event)
-	case "user.login":
+	case "com.example.user.login":
 		return m.handleUserLogin(ctx, event)
 	default:
-		m.logger.Debug("Notification module received unhandled event", "type", event.Type)
+		m.logger.Debug("Notification module received unhandled event", "type", event.Type())
 	}
 	return nil
 }
@@ -104,10 +105,10 @@ func (m *NotificationModule) ObserverID() string {
 	return m.name
 }
 
-func (m *NotificationModule) handleUserCreated(ctx context.Context, event modular.ObserverEvent) error {
-	data, ok := event.Data.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid event data for user.created")
+func (m *NotificationModule) handleUserCreated(ctx context.Context, event cloudevents.Event) error {
+	var data map[string]interface{}
+	if err := event.DataAs(&data); err != nil {
+		return fmt.Errorf("invalid event data for user.created: %w", err)
 	}
 	
 	userID, _ := data["userID"].(string)
@@ -126,10 +127,10 @@ func (m *NotificationModule) handleUserCreated(ctx context.Context, event modula
 	return nil
 }
 
-func (m *NotificationModule) handleUserLogin(ctx context.Context, event modular.ObserverEvent) error {
-	data, ok := event.Data.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid event data for user.login")
+func (m *NotificationModule) handleUserLogin(ctx context.Context, event cloudevents.Event) error {
+	var data map[string]interface{}
+	if err := event.DataAs(&data); err != nil {
+		return fmt.Errorf("invalid event data for user.login: %w", err)
 	}
 	
 	userID, _ := data["userID"].(string)

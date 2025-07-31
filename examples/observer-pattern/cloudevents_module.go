@@ -135,23 +135,22 @@ func (m *CloudEventsModule) emitDemoCloudEvent(ctx context.Context, config *Clou
 	event.SetSubject("demo-heartbeat")
 
 	// Emit the CloudEvent
-	if err := observableApp.NotifyCloudEventObservers(ctx, event); err != nil {
+	if err := observableApp.NotifyObservers(ctx, event); err != nil {
 		m.logger.Error("Failed to emit CloudEvent", "error", err)
 	} else {
 		m.logger.Debug("CloudEvent emitted", "id", event.ID(), "type", event.Type())
 	}
 
-	// Also emit a traditional ObserverEvent for comparison
-	observerEvent := modular.ObserverEvent{
-		Type:      "demo.traditional.heartbeat",
-		Source:    "cloudevents-demo",
-		Data:      map[string]interface{}{"counter": counter, "traditional": true},
-		Metadata:  map[string]interface{}{"demo": "true"},
-		Timestamp: time.Now(),
-	}
+	// Emit another CloudEvent for comparison
+	heartbeatEvent := modular.NewCloudEvent(
+		"com.example.demo.heartbeat",
+		"cloudevents-demo",
+		map[string]interface{}{"counter": counter, "demo": true},
+		map[string]interface{}{"demo_type": "heartbeat"},
+	)
 
-	if err := observableApp.NotifyObservers(ctx, observerEvent); err != nil {
-		m.logger.Error("Failed to emit traditional event", "error", err)
+	if err := observableApp.NotifyObservers(ctx, heartbeatEvent); err != nil {
+		m.logger.Error("Failed to emit heartbeat event", "error", err)
 	}
 }
 
@@ -161,35 +160,18 @@ func (m *CloudEventsModule) RegisterObservers(subject modular.Subject) error {
 	return subject.RegisterObserver(m)
 }
 
-// EmitEvent implements ObservableModule for traditional events.
-func (m *CloudEventsModule) EmitEvent(ctx context.Context, event modular.ObserverEvent) error {
+// EmitEvent implements ObservableModule for CloudEvents.
+func (m *CloudEventsModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 	if observableApp, ok := m.app.(*modular.ObservableApplication); ok {
 		return observableApp.NotifyObservers(ctx, event)
-	}
-	return fmt.Errorf("application does not support traditional events")
-}
-
-// EmitCloudEvent implements ObservableModule for CloudEvents.
-func (m *CloudEventsModule) EmitCloudEvent(ctx context.Context, event cloudevents.Event) error {
-	if observableApp, ok := m.app.(*modular.ObservableApplication); ok {
-		return observableApp.NotifyCloudEventObservers(ctx, event)
 	}
 	return fmt.Errorf("application does not support CloudEvents")
 }
 
-// OnEvent implements Observer interface to receive traditional events.
-func (m *CloudEventsModule) OnEvent(ctx context.Context, event modular.ObserverEvent) error {
+// OnEvent implements Observer interface to receive CloudEvents.
+func (m *CloudEventsModule) OnEvent(ctx context.Context, event cloudevents.Event) error {
 	// Only log certain events to avoid noise
-	if event.Type == modular.EventTypeApplicationStarted || event.Type == modular.EventTypeApplicationStopped {
-		m.logger.Info("Received traditional event", "type", event.Type, "source", event.Source)
-	}
-	return nil
-}
-
-// OnCloudEvent implements CloudEventObserver interface to receive CloudEvents.
-func (m *CloudEventsModule) OnCloudEvent(ctx context.Context, event cloudevents.Event) error {
-	// Only log certain events to avoid noise
-	if event.Type() == modular.CloudEventTypeApplicationStarted || event.Type() == modular.CloudEventTypeApplicationStopped {
+	if event.Type() == modular.EventTypeApplicationStarted || event.Type() == modular.EventTypeApplicationStopped {
 		m.logger.Info("Received CloudEvent", "type", event.Type(), "source", event.Source(), "id", event.ID())
 	}
 	return nil

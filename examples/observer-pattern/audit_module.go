@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // AuditModule demonstrates an observer that logs all events for compliance
@@ -78,19 +79,33 @@ func (m *AuditModule) RegisterObservers(subject modular.Subject) error {
 }
 
 // EmitEvent allows the module to emit events (not used in this example)
-func (m *AuditModule) EmitEvent(ctx context.Context, event modular.ObserverEvent) error {
+func (m *AuditModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 	return fmt.Errorf("audit module does not emit events")
 }
 
 // OnEvent implements Observer interface to audit all events
-func (m *AuditModule) OnEvent(ctx context.Context, event modular.ObserverEvent) error {
+func (m *AuditModule) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	// Extract data from CloudEvent
+	var data interface{}
+	if event.Data() != nil {
+		if err := event.DataAs(&data); err != nil {
+			data = event.Data()
+		}
+	}
+
+	// Extract metadata from CloudEvent extensions
+	metadata := make(map[string]interface{})
+	for key, value := range event.Extensions() {
+		metadata[key] = value
+	}
+
 	// Create audit entry
 	entry := AuditEntry{
-		Timestamp: event.Timestamp,
-		EventType: event.Type,
-		Source:    event.Source,
-		Data:      event.Data,
-		Metadata:  event.Metadata,
+		Timestamp: event.Time(),
+		EventType: event.Type(),
+		Source:    event.Source(),
+		Data:      data,
+		Metadata:  metadata,
 	}
 	
 	// Store in memory (in real app, would persist to database/file)
@@ -98,18 +113,18 @@ func (m *AuditModule) OnEvent(ctx context.Context, event modular.ObserverEvent) 
 	
 	// Log the audit entry
 	m.logger.Info("📋 AUDIT", 
-		"eventType", event.Type,
-		"source", event.Source,
-		"timestamp", event.Timestamp.Format(time.RFC3339),
+		"eventType", event.Type(),
+		"source", event.Source(),
+		"timestamp", event.Time().Format(time.RFC3339),
 		"totalEvents", len(m.events),
 	)
 	
 	// Special handling for certain event types
-	switch event.Type {
+	switch event.Type() {
 	case "user.created", "user.login":
-		fmt.Printf("🛡️  SECURITY AUDIT: %s event from %s\n", event.Type, event.Source)
+		fmt.Printf("🛡️  SECURITY AUDIT: %s event from %s\n", event.Type(), event.Source())
 	case modular.EventTypeApplicationFailed, modular.EventTypeModuleFailed:
-		fmt.Printf("⚠️  ERROR AUDIT: %s event - investigation required\n", event.Type)
+		fmt.Printf("⚠️  ERROR AUDIT: %s event - investigation required\n", event.Type())
 	}
 	
 	return nil

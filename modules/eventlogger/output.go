@@ -37,7 +37,7 @@ func NewOutputTarget(config OutputTargetConfig, logger modular.Logger) (OutputTa
 	case "syslog":
 		return NewSyslogTarget(config, logger)
 	default:
-		return nil, fmt.Errorf("unknown output target type: %s", config.Type)
+		return nil, fmt.Errorf("%w: %s", ErrUnknownOutputTargetType, config.Type)
 	}
 }
 
@@ -95,7 +95,10 @@ func (c *ConsoleTarget) WriteEvent(entry *LogEntry) error {
 	}
 
 	_, err = fmt.Fprintln(c.writer, output)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to write to console: %w", err)
+	}
+	return nil
 }
 
 // Flush flushes console output (no-op for console).
@@ -107,7 +110,7 @@ func (c *ConsoleTarget) Flush() error {
 func (c *ConsoleTarget) formatJSON(entry *LogEntry) (string, error) {
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal log entry to JSON: %w", err)
 	}
 	return string(data), nil
 }
@@ -235,7 +238,7 @@ func (f *FileTarget) Stop(ctx context.Context) error {
 // WriteEvent writes a log entry to file.
 func (f *FileTarget) WriteEvent(entry *LogEntry) error {
 	if f.file == nil {
-		return fmt.Errorf("file not open")
+		return ErrFileNotOpen
 	}
 
 	// Check log level
@@ -262,13 +265,18 @@ func (f *FileTarget) WriteEvent(entry *LogEntry) error {
 	}
 
 	_, err = fmt.Fprintln(f.file, output)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to write to file: %w", err)
+	}
+	return nil
 }
 
 // Flush flushes file output.
 func (f *FileTarget) Flush() error {
 	if f.file != nil {
-		return f.file.Sync()
+		if err := f.file.Sync(); err != nil {
+			return fmt.Errorf("failed to sync file: %w", err)
+		}
 	}
 	return nil
 }
@@ -277,7 +285,7 @@ func (f *FileTarget) Flush() error {
 func (f *FileTarget) formatJSON(entry *LogEntry) (string, error) {
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal log entry to JSON: %w", err)
 	}
 	return string(data), nil
 }
@@ -398,7 +406,7 @@ func (s *SyslogTarget) Stop(ctx context.Context) error {
 // WriteEvent writes a log entry to syslog.
 func (s *SyslogTarget) WriteEvent(entry *LogEntry) error {
 	if s.writer == nil {
-		return fmt.Errorf("syslog writer not initialized")
+		return ErrSyslogWriterNotInit
 	}
 
 	// Check log level
@@ -412,16 +420,27 @@ func (s *SyslogTarget) WriteEvent(entry *LogEntry) error {
 	// Write to syslog based on level
 	switch entry.Level {
 	case "DEBUG":
-		return s.writer.Debug(message)
+		if err := s.writer.Debug(message); err != nil {
+			return fmt.Errorf("failed to write debug message to syslog: %w", err)
+		}
 	case "INFO":
-		return s.writer.Info(message)
+		if err := s.writer.Info(message); err != nil {
+			return fmt.Errorf("failed to write info message to syslog: %w", err)
+		}
 	case "WARN":
-		return s.writer.Warning(message)
+		if err := s.writer.Warning(message); err != nil {
+			return fmt.Errorf("failed to write warning message to syslog: %w", err)
+		}
 	case "ERROR":
-		return s.writer.Err(message)
+		if err := s.writer.Err(message); err != nil {
+			return fmt.Errorf("failed to write error message to syslog: %w", err)
+		}
 	default:
-		return s.writer.Info(message)
+		if err := s.writer.Info(message); err != nil {
+			return fmt.Errorf("failed to write default message to syslog: %w", err)
+		}
 	}
+	return nil
 }
 
 // Flush flushes syslog output (no-op for syslog).

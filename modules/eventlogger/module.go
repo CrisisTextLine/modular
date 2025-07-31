@@ -87,12 +87,15 @@
 // The module supports different output formats:
 //
 // **Text Format**: Human-readable format
+//
 //	2024-01-15 10:30:15 INFO [module.registered] Module 'auth' registered (type=AuthModule)
 //
 // **JSON Format**: Machine-readable JSON
+//
 //	{"timestamp":"2024-01-15T10:30:15Z","level":"INFO","type":"module.registered","source":"application","data":{"moduleName":"auth","moduleType":"AuthModule"}}
 //
 // **Structured Format**: Detailed structured format
+//
 //	[2024-01-15 10:30:15] INFO module.registered
 //	  Source: application
 //	  Data:
@@ -329,7 +332,7 @@ func (m *EventLoggerModule) RegisterObservers(subject modular.Subject) error {
 
 // EmitEvent allows the module to emit its own events (not implemented for logger).
 func (m *EventLoggerModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
-	return fmt.Errorf("event logger module does not emit events")
+	return ErrLoggerDoesNotEmitEvents
 }
 
 // OnEvent implements the Observer interface to receive and log CloudEvents.

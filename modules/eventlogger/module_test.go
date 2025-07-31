@@ -2,6 +2,7 @@ package eventlogger
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ func TestEventLoggerModule_Init(t *testing.T) {
 	// Create mock application
 	app := &MockApplication{
 		configSections: make(map[string]modular.ConfigProvider),
-		logger:        &MockLogger{},
+		logger:         &MockLogger{},
 	}
 
 	// Create module
@@ -56,13 +57,13 @@ func TestEventLoggerModule_ObserverInterface(t *testing.T) {
 	// Test OnEvent without initialization (should fail)
 	event := modular.NewCloudEvent(
 		"test.event",
-		"test", 
+		"test",
 		"test data",
 		nil,
 	)
 
 	err := module.OnEvent(context.Background(), event)
-	if err != ErrLoggerNotStarted {
+	if !errors.Is(err, ErrLoggerNotStarted) {
 		t.Errorf("Expected ErrLoggerNotStarted, got %v", err)
 	}
 }
@@ -209,12 +210,12 @@ func TestEventLoggerModule_EventProcessing(t *testing.T) {
 	// Create mock application with test config
 	app := &MockApplication{
 		configSections: make(map[string]modular.ConfigProvider),
-		logger:        &MockLogger{},
+		logger:         &MockLogger{},
 	}
 
 	// Create module with test configuration
 	module := NewModule().(*EventLoggerModule)
-	
+
 	// Set up test config manually for this test
 	testConfig := &EventLoggerConfig{
 		Enabled:       true,
@@ -234,7 +235,7 @@ func TestEventLoggerModule_EventProcessing(t *testing.T) {
 			},
 		},
 	}
-	
+
 	module.config = testConfig
 	module.logger = app.logger
 
@@ -263,7 +264,7 @@ func TestEventLoggerModule_EventProcessing(t *testing.T) {
 	// Test event logging
 	testEvent := modular.NewCloudEvent(
 		"test.event",
-		"test", 
+		"test",
 		"test data",
 		nil,
 	)
@@ -305,7 +306,7 @@ func TestEventLoggerModule_EventFiltering(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "unfiltered event", 
+			name:     "unfiltered event",
 			event:    modular.NewCloudEvent("unfiltered.event", "test", nil, nil),
 			expected: false,
 		},
@@ -386,17 +387,17 @@ func (m *MockApplication) GetConfigSection(section string) (modular.ConfigProvid
 	return nil, modular.ErrConfigSectionNotFound
 }
 func (m *MockApplication) RegisterService(name string, service any) error { return nil }
-func (m *MockApplication) ConfigSections() map[string]modular.ConfigProvider { 
-	return m.configSections 
+func (m *MockApplication) ConfigSections() map[string]modular.ConfigProvider {
+	return m.configSections
 }
-func (m *MockApplication) GetService(name string, target any) error       { return nil }
-func (m *MockApplication) IsVerboseConfig() bool                          { return false }
-func (m *MockApplication) SetVerboseConfig(bool)                          {}
-func (m *MockApplication) SetLogger(modular.Logger)                       {}
-func (m *MockApplication) Init() error                                     { return nil }
-func (m *MockApplication) Start() error                                    { return nil }
-func (m *MockApplication) Stop() error                                     { return nil }
-func (m *MockApplication) Run() error                                      { return nil }
+func (m *MockApplication) GetService(name string, target any) error { return nil }
+func (m *MockApplication) IsVerboseConfig() bool                    { return false }
+func (m *MockApplication) SetVerboseConfig(bool)                    {}
+func (m *MockApplication) SetLogger(modular.Logger)                 {}
+func (m *MockApplication) Init() error                              { return nil }
+func (m *MockApplication) Start() error                             { return nil }
+func (m *MockApplication) Stop() error                              { return nil }
+func (m *MockApplication) Run() error                               { return nil }
 
 type MockLogger struct {
 	entries []MockLogEntry

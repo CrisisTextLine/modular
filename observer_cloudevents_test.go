@@ -74,7 +74,7 @@ func (m *mockModule) Init(app Application) error {
 func TestNewCloudEvent(t *testing.T) {
 	data := map[string]interface{}{"test": "data"}
 	metadata := map[string]interface{}{"key": "value"}
-	
+
 	event := NewCloudEvent("test.event", "test.source", data, metadata)
 
 	assert.Equal(t, "test.event", event.Type())
@@ -82,13 +82,13 @@ func TestNewCloudEvent(t *testing.T) {
 	assert.Equal(t, cloudevents.VersionV1, event.SpecVersion())
 	assert.NotEmpty(t, event.ID())
 	assert.False(t, event.Time().IsZero())
-	
+
 	// Check data
 	var eventData map[string]interface{}
 	err := event.DataAs(&eventData)
 	require.NoError(t, err)
 	assert.Equal(t, "data", eventData["test"])
-	
+
 	// Check extensions
 	extensions := event.Extensions()
 	assert.Equal(t, "value", extensions["key"])
@@ -98,12 +98,12 @@ func TestValidateCloudEvent(t *testing.T) {
 	// Valid event
 	validEvent := NewCloudEvent("test.event", "test.source", nil, nil)
 	err := ValidateCloudEvent(validEvent)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Invalid event - missing required fields
 	invalidEvent := cloudevents.NewEvent()
 	err = ValidateCloudEvent(invalidEvent)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 func TestObservableApplicationCloudEvents(t *testing.T) {
@@ -146,7 +146,7 @@ func TestObservableApplicationLifecycleCloudEvents(t *testing.T) {
 	// Track all events
 	allEvents := []cloudevents.Event{}
 	var mu sync.Mutex
-	
+
 	observer := NewFunctionalObserver("lifecycle-observer", func(ctx context.Context, event cloudevents.Event) error {
 		mu.Lock()
 		defer mu.Unlock()

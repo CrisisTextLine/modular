@@ -4,6 +4,7 @@
 package modular
 
 import (
+	"fmt"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -17,24 +18,24 @@ type CloudEvent = cloudevents.Event
 // This is a convenience function for creating properly formatted CloudEvents.
 func NewCloudEvent(eventType, source string, data interface{}, metadata map[string]interface{}) cloudevents.Event {
 	event := cloudevents.NewEvent()
-	
+
 	// Set required attributes
 	event.SetID(generateEventID())
 	event.SetSource(source)
 	event.SetType(eventType)
 	event.SetTime(time.Now())
 	event.SetSpecVersion(cloudevents.VersionV1)
-	
+
 	// Set data if provided
 	if data != nil {
 		_ = event.SetData(cloudevents.ApplicationJSON, data)
 	}
-	
+
 	// Set extensions for metadata
 	for key, value := range metadata {
 		event.SetExtension(key, value)
 	}
-	
+
 	return event
 }
 
@@ -54,9 +55,9 @@ func generateEventID() string {
 func ValidateCloudEvent(event cloudevents.Event) error {
 	// Use the CloudEvent SDK's built-in validation
 	if err := event.Validate(); err != nil {
-		return err
+		return fmt.Errorf("CloudEvent validation failed: %w", err)
 	}
-	
+
 	// Additional validation could be added here for application-specific requirements
 	return nil
 }

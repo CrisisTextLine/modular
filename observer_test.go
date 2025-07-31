@@ -24,7 +24,7 @@ func TestCloudEvent(t *testing.T) {
 	if event.Source() != "test.source" {
 		t.Errorf("Expected Source to be 'test.source', got %s", event.Source())
 	}
-	
+
 	// Check data
 	var data string
 	if err := event.DataAs(&data); err != nil {
@@ -33,7 +33,7 @@ func TestCloudEvent(t *testing.T) {
 	if data != "test data" {
 		t.Errorf("Expected Data to be 'test data', got %v", data)
 	}
-	
+
 	// Check extension
 	if val, ok := event.Extensions()["key"]; !ok || val != "value" {
 		t.Errorf("Expected Extension['key'] to be 'value', got %v", val)
@@ -79,8 +79,10 @@ func TestFunctionalObserver(t *testing.T) {
 	}
 }
 
+var testError = errors.New("test error")
+
 func TestFunctionalObserverWithError(t *testing.T) {
-	expectedErr := errors.New("test error")
+	expectedErr := testError
 
 	handler := func(ctx context.Context, event cloudevents.Event) error {
 		return expectedErr
@@ -96,7 +98,7 @@ func TestFunctionalObserverWithError(t *testing.T) {
 	)
 
 	err := observer.OnEvent(context.Background(), testEvent)
-	if err != expectedErr {
+	if !errors.Is(err, expectedErr) {
 		t.Errorf("Expected error %v, got %v", expectedErr, err)
 	}
 }

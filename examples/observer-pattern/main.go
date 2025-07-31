@@ -92,18 +92,20 @@ func main() {
 	// Let's trigger events directly through the app instead
 	
 	// First, let's test that the module received the subject reference
-	fmt.Println("📋 Testing event emission capabilities...")
+	fmt.Println("📋 Testing CloudEvent emission capabilities...")
 	
-	// Create a test event directly through the application
-	testEvent := modular.ObserverEvent{
-		Type:   "user.created",
-		Source: "test",
-		Data: map[string]interface{}{
+	// Create a test CloudEvent directly through the application
+	testEvent := modular.NewCloudEvent(
+		"com.example.user.created",
+		"test-source",
+		map[string]interface{}{
 			"userID": "test-user",
 			"email":  "test@example.com",
 		},
-		Timestamp: time.Now(),
-	}
+		map[string]interface{}{
+			"test": "true",
+		},
+	)
 	
 	if err := app.NotifyObservers(context.Background(), testEvent); err != nil {
 		fmt.Printf("❌ Failed to emit test event: %v\n", err)
@@ -111,22 +113,23 @@ func main() {
 		fmt.Println("✅ Test event emitted successfully!")
 	}
 	
-	// Demonstrate CloudEvents
-	fmt.Println("\n☁️  Testing CloudEvents emission...")
+	// Demonstrate more CloudEvents
+	fmt.Println("\n☁️  Testing additional CloudEvents emission...")
 	testCloudEvent := modular.NewCloudEvent(
-		"com.example.user.created",
-		"test-source",
+		"com.example.user.login",
+		"authentication-service",
 		map[string]interface{}{
 			"userID": "cloud-user",
 			"email":  "cloud@example.com",
+			"loginTime": time.Now(),
 		},
 		map[string]interface{}{
-			"test": "true",
+			"source_ip": "192.168.1.1",
+			"user_agent": "test-browser",
 		},
 	)
 	
-	// ObservableApplication implements CloudEventSubject interface
-	if err := app.NotifyCloudEventObservers(context.Background(), testCloudEvent); err != nil {
+	if err := app.NotifyObservers(context.Background(), testCloudEvent); err != nil {
 		fmt.Printf("❌ Failed to emit CloudEvent: %v\n", err)
 	} else {
 		fmt.Println("✅ CloudEvent emitted successfully!")

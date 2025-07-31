@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // UserModuleConfig configures the user module
@@ -126,7 +127,7 @@ func (m *UserModule) RegisterObservers(subject modular.Subject) error {
 }
 
 // EmitEvent allows the module to emit events
-func (m *UserModule) EmitEvent(ctx context.Context, event modular.ObserverEvent) error {
+func (m *UserModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 	if m.subject != nil {
 		return m.subject.NotifyObservers(ctx, event)
 	}
@@ -134,8 +135,8 @@ func (m *UserModule) EmitEvent(ctx context.Context, event modular.ObserverEvent)
 }
 
 // OnEvent implements Observer interface to receive events
-func (m *UserModule) OnEvent(ctx context.Context, event modular.ObserverEvent) error {
-	switch event.Type {
+func (m *UserModule) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	switch event.Type() {
 	case modular.EventTypeApplicationStarted:
 		m.logger.Info("🎉 User module received application started event")
 		// Initialize user data or perform startup tasks
@@ -145,9 +146,11 @@ func (m *UserModule) OnEvent(ctx context.Context, event modular.ObserverEvent) e
 		// Cleanup tasks
 		
 	case modular.EventTypeServiceRegistered:
-		if data, ok := event.Data.(map[string]interface{}); ok {
-			serviceName, _ := data["serviceName"].(string)
-			m.logger.Info("🔧 User module notified of service registration", "service", serviceName)
+		var data map[string]interface{}
+		if err := event.DataAs(&data); err == nil {
+			if serviceName, ok := data["serviceName"].(string); ok {
+				m.logger.Info("🔧 User module notified of service registration", "service", serviceName)
+			}
 		}
 	}
 	return nil
@@ -168,20 +171,18 @@ func (m *UserModule) CreateUser(id, email string) error {
 	user := &User{ID: id, Email: email}
 	m.userStore.users[id] = user
 	
-	// Emit custom event
-	event := modular.ObserverEvent{
-		Type:   "user.created",
-		Source: m.name,
-		Data: map[string]interface{}{
+	// Emit custom CloudEvent
+	event := modular.NewCloudEvent(
+		"com.example.user.created",
+		m.name,
+		map[string]interface{}{
 			"userID": id,
 			"email":  email,
 		},
-		Metadata: map[string]interface{}{
-			"timestamp": time.Now(),
-			"module":    m.name,
+		map[string]interface{}{
+			"module": m.name,
 		},
-		Timestamp: time.Now(),
-	}
+	)
 	
 	if err := m.EmitEvent(context.Background(), event); err != nil {
 		m.logger.Error("Failed to emit user.created event", "error", err)
@@ -197,20 +198,18 @@ func (m *UserModule) LoginUser(id string) error {
 		return fmt.Errorf("user not found: %s", id)
 	}
 	
-	// Emit custom event
-	event := modular.ObserverEvent{
-		Type:   "user.login",
-		Source: m.name,
-		Data: map[string]interface{}{
+	// Emit custom CloudEvent
+	event := modular.NewCloudEvent(
+		"com.example.user.login",
+		m.name,
+		map[string]interface{}{
 			"userID": id,
 			"email":  user.Email,
 		},
-		Metadata: map[string]interface{}{
-			"timestamp": time.Now(),
-			"module":    m.name,
+		map[string]interface{}{
+			"module": m.name,
 		},
-		Timestamp: time.Now(),
-	}
+	)
 	
 	if err := m.EmitEvent(context.Background(), event); err != nil {
 		m.logger.Error("Failed to emit user.login event", "error", err)

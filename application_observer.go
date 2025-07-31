@@ -17,8 +17,7 @@ type observerRegistration struct {
 
 // ObservableApplication extends StdApplication with observer pattern capabilities.
 // This struct embeds StdApplication and adds observer management functionality.
-// It supports both traditional ObserverEvents and CloudEvents for standardized
-// event handling and interoperability.
+// It uses CloudEvents specification for standardized event handling and interoperability.
 type ObservableApplication struct {
 	*StdApplication
 	observers     map[string]*observerRegistration // key is observer ID
@@ -73,46 +72,9 @@ func (app *ObservableApplication) UnregisterObserver(observer Observer) error {
 	return nil
 }
 
-// NotifyObservers sends an event to all registered observers.
+// NotifyObservers sends a CloudEvent to all registered observers.
 // The notification process is non-blocking for the caller and handles observer errors gracefully.
-func (app *ObservableApplication) NotifyObservers(ctx context.Context, event ObserverEvent) error {
-	app.observerMutex.RLock()
-	defer app.observerMutex.RUnlock()
-
-	// Ensure timestamp is set
-	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now()
-	}
-
-	// Notify observers in goroutines to avoid blocking
-	for _, registration := range app.observers {
-		registration := registration // capture for goroutine
-
-		// Check if observer is interested in this event type
-		if len(registration.eventTypes) > 0 && !registration.eventTypes[event.Type] {
-			continue // observer not interested in this event type
-		}
-
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					app.logger.Error("Observer panicked", "observerID", registration.observer.ObserverID(), "event", event.Type, "panic", r)
-				}
-			}()
-
-			if err := registration.observer.OnEvent(ctx, event); err != nil {
-				app.logger.Error("Observer error", "observerID", registration.observer.ObserverID(), "event", event.Type, "error", err)
-			}
-		}()
-	}
-
-	return nil
-}
-
-// NotifyCloudEventObservers sends a CloudEvent to all registered observers.
-// The notification process is non-blocking for the caller and handles observer errors gracefully.
-// Both CloudEventObservers and regular Observers will receive the event (converted for regular observers).
-func (app *ObservableApplication) NotifyCloudEventObservers(ctx context.Context, event cloudevents.Event) error {
+func (app *ObservableApplication) NotifyObservers(ctx context.Context, event cloudevents.Event) error {
 	app.observerMutex.RLock()
 	defer app.observerMutex.RUnlock()
 
@@ -126,9 +88,6 @@ func (app *ObservableApplication) NotifyCloudEventObservers(ctx context.Context,
 		app.logger.Error("Invalid CloudEvent", "eventType", event.Type(), "error", err)
 		return err
 	}
-
-	// Convert to ObserverEvent for backward compatibility
-	observerEvent := FromCloudEvent(event)
 
 	// Notify observers in goroutines to avoid blocking
 	for _, registration := range app.observers {
@@ -146,22 +105,27 @@ func (app *ObservableApplication) NotifyCloudEventObservers(ctx context.Context,
 				}
 			}()
 
-			// Try CloudEventObserver first, then fall back to regular Observer
-			if cloudObserver, ok := registration.observer.(CloudEventObserver); ok {
-				if err := cloudObserver.OnCloudEvent(ctx, event); err != nil {
-					app.logger.Error("CloudEvent observer error", "observerID", registration.observer.ObserverID(), "event", event.Type(), "error", err)
-				}
-			} else {
-				// Fall back to regular observer with converted event
-				if err := registration.observer.OnEvent(ctx, observerEvent); err != nil {
-					app.logger.Error("Observer error", "observerID", registration.observer.ObserverID(), "event", event.Type(), "error", err)
-				}
+			if err := registration.observer.OnEvent(ctx, event); err != nil {
+				app.logger.Error("Observer error", "observerID", registration.observer.ObserverID(), "event", event.Type(), "error", err)
 			}
 		}()
 	}
 
 	return nil
 }
+
+// emitEvent is a helper method to emit CloudEvents with proper source information
+func (app *ObservableApplication) emitEvent(ctx context.Context, eventType string, data interface{}, metadata map[string]interface{}) {
+	event := NewCloudEvent(eventType, "application", data, metadata)
+
+	// Use a separate goroutine to avoid blocking application operations
+	go func() {
+		if err := app.NotifyObservers(ctx, event); err != nil {
+			app.logger.Error("Failed to notify observers", "event", eventType, "error", err)
+		}
+	}()
+}
+
 // GetObservers returns information about currently registered observers.
 // This is useful for debugging and monitoring.
 func (app *ObservableApplication) GetObservers() []ObserverInfo {
@@ -185,39 +149,9 @@ func (app *ObservableApplication) GetObservers() []ObserverInfo {
 	return info
 }
 
-// emitCloudEvent is a helper method to emit CloudEvents with proper source information
-func (app *ObservableApplication) emitCloudEvent(ctx context.Context, eventType string, data interface{}, metadata map[string]interface{}) {
-	event := NewCloudEvent(eventType, "application", data, metadata)
-
-	// Use a separate goroutine to avoid blocking application operations
-	go func() {
-		if err := app.NotifyCloudEventObservers(ctx, event); err != nil {
-			app.logger.Error("Failed to notify CloudEvent observers", "event", eventType, "error", err)
-		}
-	}()
-}
-
-// emitEvent is a helper method to emit events with proper source information
-func (app *ObservableApplication) emitEvent(ctx context.Context, eventType string, data interface{}, metadata map[string]interface{}) {
-	event := ObserverEvent{
-		Type:      eventType,
-		Source:    "application",
-		Data:      data,
-		Metadata:  metadata,
-		Timestamp: time.Now(),
-	}
-
-	// Use a separate goroutine to avoid blocking application operations
-	go func() {
-		if err := app.NotifyObservers(ctx, event); err != nil {
-			app.logger.Error("Failed to notify observers", "event", eventType, "error", err)
-		}
-	}()
-}
-
 // Override key methods to emit events
 
-// RegisterModule registers a module and emits both ObserverEvent and CloudEvent
+// RegisterModule registers a module and emits CloudEvent
 func (app *ObservableApplication) RegisterModule(module Module) {
 	app.StdApplication.RegisterModule(module)
 
@@ -226,14 +160,11 @@ func (app *ObservableApplication) RegisterModule(module Module) {
 		"moduleType": getTypeName(module),
 	}
 
-	// Emit traditional ObserverEvent for backward compatibility
-	app.emitEvent(context.Background(), EventTypeModuleRegistered, data, nil)
-
 	// Emit CloudEvent for standardized event handling
-	app.emitCloudEvent(context.Background(), CloudEventTypeModuleRegistered, data, nil)
+	app.emitEvent(context.Background(), EventTypeModuleRegistered, data, nil)
 }
 
-// RegisterService registers a service and emits both ObserverEvent and CloudEvent
+// RegisterService registers a service and emits CloudEvent
 func (app *ObservableApplication) RegisterService(name string, service any) error {
 	err := app.StdApplication.RegisterService(name, service)
 	if err != nil {
@@ -245,24 +176,18 @@ func (app *ObservableApplication) RegisterService(name string, service any) erro
 		"serviceType": getTypeName(service),
 	}
 
-	// Emit traditional ObserverEvent for backward compatibility
-	app.emitEvent(context.Background(), EventTypeServiceRegistered, data, nil)
-
 	// Emit CloudEvent for standardized event handling
-	app.emitCloudEvent(context.Background(), CloudEventTypeServiceRegistered, data, nil)
+	app.emitEvent(context.Background(), EventTypeServiceRegistered, data, nil)
 
 	return nil
 }
 
-// Init initializes the application and emits lifecycle events (both formats)
+// Init initializes the application and emits lifecycle events
 func (app *ObservableApplication) Init() error {
 	ctx := context.Background()
 
-	// Emit application starting initialization (both formats)
+	// Emit application starting initialization
 	app.emitEvent(ctx, EventTypeConfigLoaded, nil, map[string]interface{}{
-		"phase": "init_start",
-	})
-	app.emitCloudEvent(ctx, CloudEventTypeConfigLoaded, nil, map[string]interface{}{
 		"phase": "init_start",
 	})
 
@@ -273,7 +198,6 @@ func (app *ObservableApplication) Init() error {
 			"error": err.Error(),
 		}
 		app.emitEvent(ctx, EventTypeApplicationFailed, failureData, nil)
-		app.emitCloudEvent(ctx, CloudEventTypeApplicationFailed, failureData, nil)
 		return err
 	}
 
@@ -286,18 +210,15 @@ func (app *ObservableApplication) Init() error {
 		}
 	}
 
-	// Emit initialization complete (both formats)
+	// Emit initialization complete
 	app.emitEvent(ctx, EventTypeConfigValidated, nil, map[string]interface{}{
-		"phase": "init_complete",
-	})
-	app.emitCloudEvent(ctx, CloudEventTypeConfigValidated, nil, map[string]interface{}{
 		"phase": "init_complete",
 	})
 
 	return nil
 }
 
-// Start starts the application and emits lifecycle events (both formats)
+// Start starts the application and emits lifecycle events
 func (app *ObservableApplication) Start() error {
 	ctx := context.Background()
 
@@ -308,18 +229,16 @@ func (app *ObservableApplication) Start() error {
 			"error": err.Error(),
 		}
 		app.emitEvent(ctx, EventTypeApplicationFailed, failureData, nil)
-		app.emitCloudEvent(ctx, CloudEventTypeApplicationFailed, failureData, nil)
 		return err
 	}
 
-	// Emit application started event (both formats)
+	// Emit application started event
 	app.emitEvent(ctx, EventTypeApplicationStarted, nil, nil)
-	app.emitCloudEvent(ctx, CloudEventTypeApplicationStarted, nil, nil)
 
 	return nil
 }
 
-// Stop stops the application and emits lifecycle events (both formats)
+// Stop stops the application and emits lifecycle events
 func (app *ObservableApplication) Stop() error {
 	ctx := context.Background()
 
@@ -330,13 +249,11 @@ func (app *ObservableApplication) Stop() error {
 			"error": err.Error(),
 		}
 		app.emitEvent(ctx, EventTypeApplicationFailed, failureData, nil)
-		app.emitCloudEvent(ctx, CloudEventTypeApplicationFailed, failureData, nil)
 		return err
 	}
 
-	// Emit application stopped event (both formats)
+	// Emit application stopped event
 	app.emitEvent(ctx, EventTypeApplicationStopped, nil, nil)
-	app.emitCloudEvent(ctx, CloudEventTypeApplicationStopped, nil, nil)
 
 	return nil
 }

@@ -38,6 +38,8 @@ type HealthStatus struct {
 	CircuitBreakerOpen   bool   `json:"circuit_breaker_open"`
 	CircuitBreakerState  string `json:"circuit_breaker_state,omitempty"`
 	CircuitFailureCount  int    `json:"circuit_failure_count,omitempty"`
+	// Health check result (independent of circuit breaker status)
+	HealthCheckPassing   bool   `json:"health_check_passing"`
 }
 
 // HealthCircuitBreakerInfo provides circuit breaker status information for health checks.
@@ -153,8 +155,21 @@ func (hc *HealthChecker) IsRunning() bool {
 
 // GetHealthStatus returns the current health status for all backends.
 func (hc *HealthChecker) GetHealthStatus() map[string]*HealthStatus {
-	hc.statusMutex.RLock()
-	defer hc.statusMutex.RUnlock()
+	hc.statusMutex.Lock()
+	defer hc.statusMutex.Unlock()
+
+	// Update circuit breaker information for all backends before returning status
+	if hc.circuitBreakerProvider != nil {
+		for backendID, status := range hc.healthStatus {
+			if cbInfo := hc.circuitBreakerProvider(backendID); cbInfo != nil {
+				status.CircuitBreakerOpen = cbInfo.IsOpen
+				status.CircuitBreakerState = cbInfo.State
+				status.CircuitFailureCount = cbInfo.FailureCount
+				// Update overall health status considering circuit breaker
+				status.Healthy = status.HealthCheckPassing && !status.CircuitBreakerOpen
+			}
+		}
+	}
 
 	result := make(map[string]*HealthStatus)
 	for id, status := range hc.healthStatus {
@@ -167,12 +182,23 @@ func (hc *HealthChecker) GetHealthStatus() map[string]*HealthStatus {
 
 // GetBackendHealthStatus returns the health status for a specific backend.
 func (hc *HealthChecker) GetBackendHealthStatus(backendID string) (*HealthStatus, bool) {
-	hc.statusMutex.RLock()
-	defer hc.statusMutex.RUnlock()
+	hc.statusMutex.Lock()
+	defer hc.statusMutex.Unlock()
 
 	status, exists := hc.healthStatus[backendID]
 	if !exists {
 		return nil, false
+	}
+
+	// Update circuit breaker information for this backend before returning status
+	if hc.circuitBreakerProvider != nil {
+		if cbInfo := hc.circuitBreakerProvider(backendID); cbInfo != nil {
+			status.CircuitBreakerOpen = cbInfo.IsOpen
+			status.CircuitBreakerState = cbInfo.State
+			status.CircuitFailureCount = cbInfo.FailureCount
+			// Update overall health status considering circuit breaker
+			status.Healthy = status.HealthCheckPassing && !status.CircuitBreakerOpen
+		}
 	}
 
 	// Return a copy to avoid race conditions
@@ -383,6 +409,10 @@ func (hc *HealthChecker) updateHealthStatus(backendID string, healthy bool, resp
 	status.DNSResolved = dnsResolved
 	status.ResolvedIPs = resolvedIPs
 
+	// Store health check result (independent of circuit breaker)
+	healthCheckPassing := healthy && dnsResolved
+	status.HealthCheckPassing = healthCheckPassing
+
 	// Get circuit breaker information if provider is available
 	if hc.circuitBreakerProvider != nil {
 		if cbInfo := hc.circuitBreakerProvider(backendID); cbInfo != nil {
@@ -392,10 +422,10 @@ func (hc *HealthChecker) updateHealthStatus(backendID string, healthy bool, resp
 		}
 	}
 
-	// A backend is healthy if health check passes, DNS resolves, AND circuit breaker is not open
-	status.Healthy = healthy && dnsResolved && !status.CircuitBreakerOpen
+	// A backend is overall healthy if health check passes AND circuit breaker is not open
+	status.Healthy = healthCheckPassing && !status.CircuitBreakerOpen
 
-	if healthy && dnsResolved {
+	if healthCheckPassing {
 		status.LastSuccess = now
 		status.LastError = ""
 		status.SuccessfulChecks++

@@ -597,13 +597,14 @@ func (m *ReverseProxyModule) OnTenantRemoved(tenantID modular.TenantID) {
 
 // ProvidesServices returns the services provided by this module.
 // This module can provide a featureFlagEvaluator service if configured to do so,
-// but only if the evaluator wasn't provided externally.
+// whether the evaluator was created internally or provided externally.
+// This allows other modules to discover and use the evaluator.
 func (m *ReverseProxyModule) ProvidesServices() []modular.ServiceProvider {
 	var services []modular.ServiceProvider
 
-	// Only provide the feature flag evaluator service if we created it internally,
-	// not if it was provided externally
-	if m.featureFlagEvaluator != nil && m.config != nil && m.config.FeatureFlags.Enabled && !m.featureFlagEvaluatorProvided {
+	// Provide the feature flag evaluator service if we have one and feature flags are enabled.
+	// This includes both internally created and externally provided evaluators so other modules can use them.
+	if m.featureFlagEvaluator != nil && m.config != nil && m.config.FeatureFlags.Enabled {
 		services = append(services, modular.ServiceProvider{
 			Name:     "featureFlagEvaluator",
 			Instance: m.featureFlagEvaluator,
@@ -900,17 +901,56 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 			return nil
 		}
 
-		// Create a catch-all route handler for the default backend
-		handler := m.createBackendProxyHandler(m.defaultBackend)
+		// Create a selective catch-all route handler that excludes health/metrics endpoints
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			// Check if this is a health or metrics path that should not be proxied
+			if m.shouldExcludeFromProxy(r.URL.Path) {
+				// Let other handlers handle this (health/metrics endpoints)
+				http.NotFound(w, r)
+				return
+			}
+			
+			// Use the default backend proxy handler
+			backendHandler := m.createBackendProxyHandler(m.defaultBackend)
+			backendHandler(w, r)
+		}
 
-		// Register the catch-all default route
+		// Register the selective catch-all default route
 		m.router.HandleFunc("/*", handler)
 		if m.app != nil && m.app.Logger() != nil {
-			m.app.Logger().Info("Registered default backend", "backend", m.defaultBackend)
+			m.app.Logger().Info("Registered selective catch-all route for default backend", "backend", m.defaultBackend)
 		}
 	}
 
 	return nil
+}
+
+// shouldExcludeFromProxy checks if a request path should be excluded from proxying
+// to allow health/metrics/debug endpoints to be handled by internal handlers.
+func (m *ReverseProxyModule) shouldExcludeFromProxy(path string) bool {
+	// Health endpoint
+	if path == "/health" || path == "/health/" {
+		return true
+	}
+	
+	// Metrics endpoints
+	if m.config != nil && m.config.MetricsEndpoint != "" {
+		metricsEndpoint := m.config.MetricsEndpoint
+		if path == metricsEndpoint || path == metricsEndpoint+"/" {
+			return true
+		}
+		// Health endpoint under metrics
+		if path == metricsEndpoint+"/health" || path == metricsEndpoint+"/health/" {
+			return true
+		}
+	}
+	
+	// Debug endpoints (if they are configured)
+	if strings.HasPrefix(path, "/debug/") {
+		return true
+	}
+	
+	return false
 }
 
 // registerTenantAwareRoutes registers routes when tenants are configured
@@ -951,8 +991,19 @@ func (m *ReverseProxyModule) registerTenantAwareRoutes() error {
 
 	// Register the catch-all route if not already registered
 	if !allPaths["/*"] {
-		// Create a tenant-aware catch-all handler
-		catchAllHandler := m.createTenantAwareCatchAllHandler()
+		// Create a selective tenant-aware catch-all handler that excludes health/metrics endpoints
+		catchAllHandler := func(w http.ResponseWriter, r *http.Request) {
+			// Check if this is a path that should not be proxied
+			if m.shouldExcludeFromProxy(r.URL.Path) {
+				// Let other handlers handle this (health/metrics endpoints)
+				http.NotFound(w, r)
+				return
+			}
+			
+			// Use the tenant-aware handler
+			tenantHandler := m.createTenantAwareCatchAllHandler()
+			tenantHandler(w, r)
+		}
 		m.router.HandleFunc("/*", catchAllHandler)
 
 		if m.app != nil && m.app.Logger() != nil {
@@ -2097,38 +2148,6 @@ func (m *ReverseProxyModule) registerMetricsEndpoint(endpoint string) {
 
 		m.router.HandleFunc(healthEndpoint, healthHandler)
 		m.app.Logger().Info("Registered health check endpoint", "endpoint", healthEndpoint)
-
-		// Register overall service health endpoint
-		overallHealthEndpoint := "/health"
-		overallHealthHandler := func(w http.ResponseWriter, r *http.Request) {
-			// Get overall health status without detailed backend information
-			overallHealth := m.healthChecker.GetOverallHealthStatus(false)
-
-			// Convert to JSON
-			jsonData, err := json.Marshal(overallHealth)
-			if err != nil {
-				m.app.Logger().Error("Failed to marshal overall health data", "error", err)
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-				return
-			}
-
-			// Set content type
-			w.Header().Set("Content-Type", "application/json")
-
-			// Set status code based on overall health
-			if overallHealth.Healthy {
-				w.WriteHeader(http.StatusOK)
-			} else {
-				w.WriteHeader(http.StatusServiceUnavailable)
-			}
-
-			if _, err := w.Write(jsonData); err != nil {
-				m.app.Logger().Error("Failed to write overall health response", "error", err)
-			}
-		}
-
-		m.router.HandleFunc(overallHealthEndpoint, overallHealthHandler)
-		m.app.Logger().Info("Registered overall health endpoint", "endpoint", overallHealthEndpoint)
 	}
 }
 

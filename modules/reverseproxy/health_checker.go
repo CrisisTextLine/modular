@@ -34,22 +34,37 @@ type HealthStatus struct {
 	ChecksSkipped    int64         `json:"checks_skipped"`
 	TotalChecks      int64         `json:"total_checks"`
 	SuccessfulChecks int64         `json:"successful_checks"`
+	// Circuit breaker status
+	CircuitBreakerOpen   bool   `json:"circuit_breaker_open"`
+	CircuitBreakerState  string `json:"circuit_breaker_state,omitempty"`
+	CircuitFailureCount  int    `json:"circuit_failure_count,omitempty"`
 }
+
+// HealthCircuitBreakerInfo provides circuit breaker status information for health checks.
+type HealthCircuitBreakerInfo struct {
+	IsOpen       bool
+	State        string
+	FailureCount int
+}
+
+// CircuitBreakerProvider defines a function to get circuit breaker information for a backend.
+type CircuitBreakerProvider func(backendID string) *HealthCircuitBreakerInfo
 
 // HealthChecker manages health checking for backend services.
 type HealthChecker struct {
-	config       *HealthCheckConfig
-	httpClient   *http.Client
-	logger       *slog.Logger
-	backends     map[string]string // backend_id -> base_url
-	healthStatus map[string]*HealthStatus
-	statusMutex  sync.RWMutex
-	requestTimes map[string]time.Time // backend_id -> last_request_time
-	requestMutex sync.RWMutex
-	stopChan     chan struct{}
-	wg           sync.WaitGroup
-	running      bool
-	runningMutex sync.RWMutex
+	config                 *HealthCheckConfig
+	httpClient             *http.Client
+	logger                 *slog.Logger
+	backends               map[string]string // backend_id -> base_url
+	healthStatus           map[string]*HealthStatus
+	statusMutex            sync.RWMutex
+	requestTimes           map[string]time.Time // backend_id -> last_request_time
+	requestMutex           sync.RWMutex
+	stopChan               chan struct{}
+	wg                     sync.WaitGroup
+	running                bool
+	runningMutex           sync.RWMutex
+	circuitBreakerProvider CircuitBreakerProvider
 }
 
 // NewHealthChecker creates a new health checker with the given configuration.
@@ -63,6 +78,11 @@ func NewHealthChecker(config *HealthCheckConfig, backends map[string]string, htt
 		requestTimes: make(map[string]time.Time),
 		stopChan:     make(chan struct{}),
 	}
+}
+
+// SetCircuitBreakerProvider sets the circuit breaker provider function.
+func (hc *HealthChecker) SetCircuitBreakerProvider(provider CircuitBreakerProvider) {
+	hc.circuitBreakerProvider = provider
 }
 
 // Start begins the health checking process.
@@ -359,10 +379,21 @@ func (hc *HealthChecker) updateHealthStatus(backendID string, healthy bool, resp
 
 	now := time.Now()
 	status.LastCheck = now
-	status.Healthy = healthy && dnsResolved
 	status.ResponseTime = responseTime
 	status.DNSResolved = dnsResolved
 	status.ResolvedIPs = resolvedIPs
+
+	// Get circuit breaker information if provider is available
+	if hc.circuitBreakerProvider != nil {
+		if cbInfo := hc.circuitBreakerProvider(backendID); cbInfo != nil {
+			status.CircuitBreakerOpen = cbInfo.IsOpen
+			status.CircuitBreakerState = cbInfo.State
+			status.CircuitFailureCount = cbInfo.FailureCount
+		}
+	}
+
+	// A backend is healthy if health check passes, DNS resolves, AND circuit breaker is not open
+	status.Healthy = healthy && dnsResolved && !status.CircuitBreakerOpen
 
 	if healthy && dnsResolved {
 		status.LastSuccess = now
@@ -481,4 +512,50 @@ func (hc *HealthChecker) UpdateBackends(ctx context.Context, backends map[string
 	}
 
 	hc.backends = backends
+}
+
+// OverallHealthStatus represents the overall health status of the service.
+type OverallHealthStatus struct {
+	Healthy           bool                     `json:"healthy"`
+	TotalBackends     int                      `json:"total_backends"`
+	HealthyBackends   int                      `json:"healthy_backends"`
+	UnhealthyBackends int                      `json:"unhealthy_backends"`
+	CircuitOpenCount  int                      `json:"circuit_open_count"`
+	LastCheck         time.Time                `json:"last_check"`
+	BackendDetails    map[string]*HealthStatus `json:"backend_details,omitempty"`
+}
+
+// GetOverallHealthStatus returns the overall health status of all backends.
+// The service is considered healthy if all configured backends are healthy.
+func (hc *HealthChecker) GetOverallHealthStatus(includeDetails bool) *OverallHealthStatus {
+	allStatus := hc.GetHealthStatus()
+	
+	overall := &OverallHealthStatus{
+		TotalBackends:   len(allStatus),
+		LastCheck:       time.Now(),
+		BackendDetails:  make(map[string]*HealthStatus),
+	}
+	
+	healthyCount := 0
+	circuitOpenCount := 0
+	
+	for backendID, status := range allStatus {
+		if status.Healthy {
+			healthyCount++
+		}
+		if status.CircuitBreakerOpen {
+			circuitOpenCount++
+		}
+		
+		if includeDetails {
+			overall.BackendDetails[backendID] = status
+		}
+	}
+	
+	overall.HealthyBackends = healthyCount
+	overall.UnhealthyBackends = overall.TotalBackends - healthyCount
+	overall.CircuitOpenCount = circuitOpenCount
+	overall.Healthy = healthyCount == overall.TotalBackends && overall.TotalBackends > 0
+	
+	return overall
 }

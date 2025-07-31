@@ -302,8 +302,8 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 			// Create circuit breaker for this backend
 			cb := NewCircuitBreakerWithConfig(backendID, cbConfig, m.metrics)
 			m.circuitBreakers[backendID] = cb
-			
-			app.Logger().Debug("Initialized circuit breaker", "backend", backendID, 
+
+			app.Logger().Debug("Initialized circuit breaker", "backend", backendID,
 				"failure_threshold", cbConfig.FailureThreshold, "open_timeout", cbConfig.OpenTimeout)
 		}
 		app.Logger().Info("Circuit breakers initialized", "backends", len(m.circuitBreakers))
@@ -2077,14 +2077,14 @@ func (m *ReverseProxyModule) registerMetricsEndpoint(endpoint string) {
 
 			// Set content type
 			w.Header().Set("Content-Type", "application/json")
-			
+
 			// Set status code based on overall health
 			if overallHealth.Healthy {
 				w.WriteHeader(http.StatusOK)
 			} else {
 				w.WriteHeader(http.StatusServiceUnavailable)
 			}
-			
+
 			if _, err := w.Write(jsonData); err != nil {
 				m.app.Logger().Error("Failed to write health status response", "error", err)
 			}
@@ -2092,7 +2092,7 @@ func (m *ReverseProxyModule) registerMetricsEndpoint(endpoint string) {
 
 		m.router.HandleFunc(healthEndpoint, healthHandler)
 		m.app.Logger().Info("Registered health check endpoint", "endpoint", healthEndpoint)
-		
+
 		// Register overall service health endpoint
 		overallHealthEndpoint := "/health"
 		overallHealthHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -2109,14 +2109,14 @@ func (m *ReverseProxyModule) registerMetricsEndpoint(endpoint string) {
 
 			// Set content type
 			w.Header().Set("Content-Type", "application/json")
-			
+
 			// Set status code based on overall health
 			if overallHealth.Healthy {
 				w.WriteHeader(http.StatusOK)
 			} else {
 				w.WriteHeader(http.StatusServiceUnavailable)
 			}
-			
+
 			if _, err := w.Write(jsonData); err != nil {
 				m.app.Logger().Error("Failed to write overall health response", "error", err)
 			}

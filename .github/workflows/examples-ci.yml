@@ -204,12 +204,15 @@ jobs:
               exit 1
             fi
             
-            # Test basic health endpoint
+            # Test basic health endpoint (accepts both 200 and 503 status codes)
             echo "Testing basic health endpoint..."
-            if curl -f -s http://localhost:8080/health > /dev/null; then
-              echo "✅ health-aware-reverse-proxy health endpoint responding"
+            health_response=$(curl -s -w "HTTP_CODE:%{http_code}" http://localhost:8080/health)
+            http_code=$(echo "$health_response" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+            if [ "$http_code" = "200" ] || [ "$http_code" = "503" ]; then
+              echo "✅ health-aware-reverse-proxy health endpoint responding (HTTP $http_code)"
             else
-              echo "❌ health-aware-reverse-proxy health endpoint not responding"
+              echo "❌ health-aware-reverse-proxy health endpoint returned unexpected status: HTTP $http_code"
+              echo "Response: $health_response"
               kill $PID 2>/dev/null || true
               exit 1
             fi

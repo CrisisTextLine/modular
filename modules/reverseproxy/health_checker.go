@@ -35,11 +35,11 @@ type HealthStatus struct {
 	TotalChecks      int64         `json:"total_checks"`
 	SuccessfulChecks int64         `json:"successful_checks"`
 	// Circuit breaker status
-	CircuitBreakerOpen   bool   `json:"circuit_breaker_open"`
-	CircuitBreakerState  string `json:"circuit_breaker_state,omitempty"`
-	CircuitFailureCount  int    `json:"circuit_failure_count,omitempty"`
+	CircuitBreakerOpen  bool   `json:"circuit_breaker_open"`
+	CircuitBreakerState string `json:"circuit_breaker_state,omitempty"`
+	CircuitFailureCount int    `json:"circuit_failure_count,omitempty"`
 	// Health check result (independent of circuit breaker status)
-	HealthCheckPassing   bool   `json:"health_check_passing"`
+	HealthCheckPassing bool `json:"health_check_passing"`
 }
 
 // HealthCircuitBreakerInfo provides circuit breaker status information for health checks.
@@ -559,16 +559,16 @@ type OverallHealthStatus struct {
 // The service is considered healthy if all configured backends are healthy.
 func (hc *HealthChecker) GetOverallHealthStatus(includeDetails bool) *OverallHealthStatus {
 	allStatus := hc.GetHealthStatus()
-	
+
 	overall := &OverallHealthStatus{
-		TotalBackends:   len(allStatus),
-		LastCheck:       time.Now(),
-		BackendDetails:  make(map[string]*HealthStatus),
+		TotalBackends:  len(allStatus),
+		LastCheck:      time.Now(),
+		BackendDetails: make(map[string]*HealthStatus),
 	}
-	
+
 	healthyCount := 0
 	circuitOpenCount := 0
-	
+
 	for backendID, status := range allStatus {
 		if status.Healthy {
 			healthyCount++
@@ -576,16 +576,16 @@ func (hc *HealthChecker) GetOverallHealthStatus(includeDetails bool) *OverallHea
 		if status.CircuitBreakerOpen {
 			circuitOpenCount++
 		}
-		
+
 		if includeDetails {
 			overall.BackendDetails[backendID] = status
 		}
 	}
-	
+
 	overall.HealthyBackends = healthyCount
 	overall.UnhealthyBackends = overall.TotalBackends - healthyCount
 	overall.CircuitOpenCount = circuitOpenCount
 	overall.Healthy = healthyCount == overall.TotalBackends && overall.TotalBackends > 0
-	
+
 	return overall
 }

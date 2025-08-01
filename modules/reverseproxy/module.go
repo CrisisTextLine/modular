@@ -449,6 +449,13 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to register routes: %w", err)
 	}
 
+	// Register debug endpoints if enabled
+	if m.config.DebugEndpoints.Enabled {
+		if err := m.registerDebugEndpoints(); err != nil {
+			return fmt.Errorf("failed to register debug endpoints: %w", err)
+		}
+	}
+
 	// Create and configure feature flag evaluator if none was provided via service
 	if m.featureFlagEvaluator == nil && m.config.FeatureFlags.Enabled {
 		// Convert the logger to *slog.Logger
@@ -2149,6 +2156,74 @@ func (m *ReverseProxyModule) registerMetricsEndpoint(endpoint string) {
 		m.router.HandleFunc(healthEndpoint, healthHandler)
 		m.app.Logger().Info("Registered health check endpoint", "endpoint", healthEndpoint)
 	}
+}
+
+// registerDebugEndpoints registers debug endpoints if they are enabled
+func (m *ReverseProxyModule) registerDebugEndpoints() error {
+	if m.router == nil {
+		return ErrCannotRegisterRoutes
+	}
+
+	// Get tenant service if available
+	var tenantService modular.TenantService
+	if m.app != nil {
+		err := m.app.GetService("tenantService", &tenantService)
+		if err != nil {
+			m.app.Logger().Warn("TenantService not available for debug endpoints", "error", err)
+		}
+	}
+
+	// Create debug handler
+	debugHandler := NewDebugHandler(
+		m.config.DebugEndpoints,
+		m.featureFlagEvaluator,
+		m.config,
+		tenantService,
+		m.app.Logger(),
+	)
+
+	// Set circuit breakers and health checkers for debugging
+	if len(m.circuitBreakers) > 0 {
+		debugHandler.SetCircuitBreakers(m.circuitBreakers)
+	}
+	if m.healthChecker != nil {
+		// Create a map with the health checker
+		healthCheckers := map[string]*HealthChecker{
+			"reverseproxy": m.healthChecker,
+		}
+		debugHandler.SetHealthCheckers(healthCheckers)
+	}
+
+	// Register debug endpoints individually since our routerService doesn't support http.ServeMux
+	basePath := m.config.DebugEndpoints.BasePath
+
+	// Feature flags debug endpoint
+	flagsEndpoint := basePath + "/flags"
+	m.router.HandleFunc(flagsEndpoint, debugHandler.HandleFlags)
+	m.app.Logger().Info("Registered debug endpoint", "endpoint", flagsEndpoint)
+
+	// General debug info endpoint
+	infoEndpoint := basePath + "/info"
+	m.router.HandleFunc(infoEndpoint, debugHandler.HandleInfo)
+	m.app.Logger().Info("Registered debug endpoint", "endpoint", infoEndpoint)
+
+	// Backend status endpoint
+	backendsEndpoint := basePath + "/backends"
+	m.router.HandleFunc(backendsEndpoint, debugHandler.HandleBackends)
+	m.app.Logger().Info("Registered debug endpoint", "endpoint", backendsEndpoint)
+
+	// Circuit breaker status endpoint
+	circuitBreakersEndpoint := basePath + "/circuit-breakers"
+	m.router.HandleFunc(circuitBreakersEndpoint, debugHandler.HandleCircuitBreakers)
+	m.app.Logger().Info("Registered debug endpoint", "endpoint", circuitBreakersEndpoint)
+
+	// Health check status endpoint
+	healthChecksEndpoint := basePath + "/health-checks"
+	m.router.HandleFunc(healthChecksEndpoint, debugHandler.HandleHealthChecks)
+	m.app.Logger().Info("Registered debug endpoint", "endpoint", healthChecksEndpoint)
+
+	m.app.Logger().Info("Debug endpoints registered", "basePath", basePath)
+	return nil
 }
 
 // createTenantAwareHandler creates a handler that routes based on tenant-specific configuration for a specific path

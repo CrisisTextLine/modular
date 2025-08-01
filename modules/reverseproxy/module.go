@@ -886,12 +886,12 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 									if dryRunBackend == "" {
 										dryRunBackend = backendID // Default to primary for comparison
 									}
-									
+
 									m.app.Logger().Debug("Processing dry run request (feature flag disabled)",
 										"route", routePath, "returnBackend", alternativeBackend, "compareBackend", dryRunBackend)
-									
+
 									// Use dry run handler - return alternative backend response, compare with dry run backend
-									m.handleDryRunRequest(w, r, routeConfig, alternativeBackend, dryRunBackend)
+									m.handleDryRunRequest(r.Context(), w, r, routeConfig, alternativeBackend, dryRunBackend)
 									return
 								}
 
@@ -912,13 +912,13 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 								if dryRunBackend == "" {
 									dryRunBackend = m.getAlternativeBackend(routeConfig.AlternativeBackend) // Default to alternative for comparison
 								}
-								
+
 								if dryRunBackend != "" && dryRunBackend != backendID {
 									m.app.Logger().Debug("Processing dry run request (feature flag enabled)",
 										"route", routePath, "returnBackend", backendID, "compareBackend", dryRunBackend)
-									
+
 									// Use dry run handler - return primary backend response, compare with dry run backend
-									m.handleDryRunRequest(w, r, routeConfig, backendID, dryRunBackend)
+									m.handleDryRunRequest(r.Context(), w, r, routeConfig, backendID, dryRunBackend)
 									return
 								}
 							}
@@ -2315,12 +2315,12 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 									if dryRunBackend == "" {
 										dryRunBackend = primaryBackend // Default to primary for comparison
 									}
-									
+
 									m.app.Logger().Debug("Processing dry run request (feature flag disabled)",
 										"path", path, "returnBackend", alternativeBackend, "compareBackend", dryRunBackend)
-									
+
 									// Use dry run handler - return alternative backend response, compare with dry run backend
-									m.handleDryRunRequest(w, r, routeConfig, alternativeBackend, dryRunBackend)
+									m.handleDryRunRequest(r.Context(), w, r, routeConfig, alternativeBackend, dryRunBackend)
 									return
 								}
 
@@ -2352,13 +2352,13 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 						if dryRunBackend == "" {
 							dryRunBackend = m.getAlternativeBackend(routeConfig.AlternativeBackend) // Default to alternative for comparison
 						}
-						
+
 						if dryRunBackend != "" && dryRunBackend != primaryBackend {
 							m.app.Logger().Debug("Processing dry run request (feature flag enabled or no flag)",
 								"path", path, "returnBackend", primaryBackend, "compareBackend", dryRunBackend)
-							
+
 							// Use dry run handler - return primary backend response, compare with dry run backend
-							m.handleDryRunRequest(w, r, routeConfig, primaryBackend, dryRunBackend)
+							m.handleDryRunRequest(r.Context(), w, r, routeConfig, primaryBackend, dryRunBackend)
 							return
 						}
 					}
@@ -2540,7 +2540,7 @@ func (m *ReverseProxyModule) getAlternativeBackend(alternativeBackend string) st
 
 // handleDryRunRequest processes a request with dry run enabled, sending it to both backends
 // and returning the response from the appropriate backend based on configuration.
-func (m *ReverseProxyModule) handleDryRunRequest(w http.ResponseWriter, r *http.Request, routeConfig RouteConfig, primaryBackend, secondaryBackend string) {
+func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, routeConfig RouteConfig, primaryBackend, secondaryBackend string) {
 	if m.dryRunHandler == nil {
 		// Dry run not initialized, fall back to regular handling
 		m.app.Logger().Warn("Dry run requested but handler not initialized, falling back to regular handling")
@@ -2559,7 +2559,7 @@ func (m *ReverseProxyModule) handleDryRunRequest(w http.ResponseWriter, r *http.
 
 	// Create a response recorder to capture the return backend's response
 	recorder := httptest.NewRecorder()
-	
+
 	// Get the handler for the backend we want to return to the client
 	var returnHandler http.HandlerFunc
 	if _, exists := m.backendProxies[returnBackend]; exists {
@@ -2588,31 +2588,31 @@ func (m *ReverseProxyModule) handleDryRunRequest(w http.ResponseWriter, r *http.
 	// Now perform dry run comparison in the background (async)
 	go func() {
 		// Create a copy of the request for background comparison
-		reqCopy := r.Clone(r.Context())
-		
+		reqCopy := r.Clone(ctx)
+
 		// Get the actual backend URLs
 		primaryURL, exists := m.config.BackendServices[primaryBackend]
 		if !exists {
 			m.app.Logger().Error("Primary backend URL not found for dry run", "backend", primaryBackend)
 			return
 		}
-		
+
 		secondaryURL, exists := m.config.BackendServices[secondaryBackend]
 		if !exists {
 			m.app.Logger().Error("Secondary backend URL not found for dry run", "backend", secondaryBackend)
 			return
 		}
-		
+
 		// Process dry run comparison with actual URLs
-		result, err := m.dryRunHandler.ProcessDryRun(reqCopy.Context(), reqCopy, primaryURL, secondaryURL)
+		result, err := m.dryRunHandler.ProcessDryRun(ctx, reqCopy, primaryURL, secondaryURL)
 		if err != nil {
 			m.app.Logger().Error("Background dry run processing failed", "error", err)
 			return
 		}
 
-		m.app.Logger().Debug("Dry run comparison completed", 
-			"endpoint", r.URL.Path, 
-			"primaryBackend", primaryBackend, 
+		m.app.Logger().Debug("Dry run comparison completed",
+			"endpoint", r.URL.Path,
+			"primaryBackend", primaryBackend,
 			"secondaryBackend", secondaryBackend,
 			"returnedBackend", returnBackend,
 			"statusCodeMatch", result.Comparison.StatusCodeMatch,

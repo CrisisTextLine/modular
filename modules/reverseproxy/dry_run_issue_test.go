@@ -73,10 +73,10 @@ func TestDryRunIssue(t *testing.T) {
 		},
 		RouteConfigs: map[string]RouteConfig{
 			"/api/some/endpoint": {
-				FeatureFlagID:      "v2-endpoint",     // Feature flag to control routing
-				AlternativeBackend: "legacy",          // Use legacy when flag is disabled
-				DryRun:             true,              // Enable dry run
-				DryRunBackend:      "v2",              // Compare against v2
+				FeatureFlagID:      "v2-endpoint", // Feature flag to control routing
+				AlternativeBackend: "legacy",      // Use legacy when flag is disabled
+				DryRun:             true,          // Enable dry run
+				DryRunBackend:      "v2",          // Compare against v2
 			},
 		},
 		DryRun: DryRunConfig{
@@ -134,7 +134,7 @@ func TestDryRunIssue(t *testing.T) {
 
 	// Currently, this test will likely fail or not behave as expected
 	// because dry run is not integrated into the main routing logic.
-	
+
 	// Expected behavior:
 	// 1. Since "v2-endpoint" feature flag is false, should use alternative backend (legacy)
 	// 2. Since dry_run is true, should also send request to dry_run_backend (v2) for comparison

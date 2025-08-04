@@ -3,6 +3,7 @@
 package reverseproxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2549,6 +2550,26 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 		return
 	}
 
+	// Read and preserve the request body before it gets consumed
+	var bodyBytes []byte
+	var err error
+	if r.Body != nil {
+		bodyBytes, err = io.ReadAll(r.Body)
+		if err != nil {
+			m.app.Logger().Error("Failed to read request body for dry run", "error", err)
+			http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+			return
+		}
+		r.Body.Close()
+	}
+
+	// Create a new request with the preserved body for the return backend
+	returnRequest := r.Clone(ctx)
+	if len(bodyBytes) > 0 {
+		returnRequest.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		returnRequest.ContentLength = int64(len(bodyBytes))
+	}
+
 	// Determine which response to return to the client
 	var returnBackend string
 	if m.config.DryRun.DefaultResponseBackend == "secondary" {
@@ -2571,7 +2592,7 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 	}
 
 	// Send request to the return backend and capture response
-	returnHandler(recorder, r)
+	returnHandler(recorder, returnRequest)
 
 	// Copy the recorded response to the actual response writer
 	// Copy headers
@@ -2587,8 +2608,12 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 
 	// Now perform dry run comparison in the background (async)
 	go func() {
-		// Create a copy of the request for background comparison
+		// Create a copy of the request for background comparison with preserved body
 		reqCopy := r.Clone(ctx)
+		if len(bodyBytes) > 0 {
+			reqCopy.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			reqCopy.ContentLength = int64(len(bodyBytes))
+		}
 
 		// Get the actual backend URLs
 		primaryURL, exists := m.config.BackendServices[primaryBackend]

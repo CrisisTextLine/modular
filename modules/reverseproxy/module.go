@@ -2596,9 +2596,9 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 
 	// Copy the recorded response to the actual response writer
 	// Copy headers
-	for key, values := range recorder.Header() {
-		for _, value := range values {
-			w.Header().Add(key, value)
+	for key, vals := range recorder.Header() {
+		for _, v := range vals {
+			w.Header().Add(key, v)
 		}
 	}
 	w.WriteHeader(recorder.Code)
@@ -2608,8 +2608,11 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 
 	// Now perform dry run comparison in the background (async)
 	go func() {
+		// Create a new context for background processing to avoid cancellation when the original request completes
+		backgroundCtx := context.Background()
+
 		// Create a copy of the request for background comparison with preserved body
-		reqCopy := r.Clone(ctx)
+		reqCopy := r.Clone(backgroundCtx)
 		if len(bodyBytes) > 0 {
 			reqCopy.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			reqCopy.ContentLength = int64(len(bodyBytes))
@@ -2628,8 +2631,8 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 			return
 		}
 
-		// Process dry run comparison with actual URLs
-		result, err := m.dryRunHandler.ProcessDryRun(ctx, reqCopy, primaryURL, secondaryURL)
+		// Process dry run comparison with actual URLs using the background context
+		result, err := m.dryRunHandler.ProcessDryRun(backgroundCtx, reqCopy, primaryURL, secondaryURL)
 		if err != nil {
 			m.app.Logger().Error("Background dry run processing failed", "error", err)
 			return

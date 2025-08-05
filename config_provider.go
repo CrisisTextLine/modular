@@ -744,7 +744,7 @@ func createTempConfig(cfg any) (interface{}, configInfo, error) {
 	}
 
 	tempCfgValue := reflect.New(targetType)
-	
+
 	// Copy existing values from the original config to the temp config
 	// This preserves any values that were already set (e.g., by tests)
 	tempCfgValue.Elem().Set(sourceValue)

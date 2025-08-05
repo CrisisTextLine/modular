@@ -1748,7 +1748,7 @@ func (m *ReverseProxyModule) AddBackendRoute(backendID, routePattern string) err
 	return nil
 }
 
-// AddCompositeRoute adds a composite route that combines responses from multiple backends.
+// AddCompositeRoute registers a composite route that combines responses from multiple backends.
 // The strategy parameter determines how the responses are combined.
 func (m *ReverseProxyModule) AddCompositeRoute(pattern string, backends []string, strategy string) {
 	// Initialize CompositeRoutes if nil
@@ -2594,7 +2594,7 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 	// Send request to the return backend and capture response
 	returnHandler(recorder, returnRequest)
 
-	// Copy the recorded response to the actual response writer
+	// Copy the recorded response to the original response writer
 	// Copy headers
 	for key, vals := range recorder.Header() {
 		for _, v := range vals {
@@ -2621,31 +2621,78 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 		// Get the actual backend URLs
 		primaryURL, exists := m.config.BackendServices[primaryBackend]
 		if !exists {
-			m.app.Logger().Error("Primary backend URL not found for dry run", "backend", primaryBackend)
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Error("Primary backend URL not found for dry run", "backend", primaryBackend)
+			}
 			return
 		}
 
 		secondaryURL, exists := m.config.BackendServices[secondaryBackend]
 		if !exists {
-			m.app.Logger().Error("Secondary backend URL not found for dry run", "backend", secondaryBackend)
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Error("Secondary backend URL not found for dry run", "backend", secondaryBackend)
+			}
 			return
 		}
+
+		// Capture endpoint path before processing to avoid accessing potentially invalid request
+		endpointPath := reqCopy.URL.Path
 
 		// Process dry run comparison with actual URLs using the background context
 		result, err := m.dryRunHandler.ProcessDryRun(backgroundCtx, reqCopy, primaryURL, secondaryURL)
 		if err != nil {
-			m.app.Logger().Error("Background dry run processing failed", "error", err)
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Error("Background dry run processing failed", "error", err)
+			}
 			return
 		}
 
-		m.app.Logger().Debug("Dry run comparison completed",
-			"endpoint", r.URL.Path,
-			"primaryBackend", primaryBackend,
-			"secondaryBackend", secondaryBackend,
-			"returnedBackend", returnBackend,
-			"statusCodeMatch", result.Comparison.StatusCodeMatch,
-			"bodyMatch", result.Comparison.BodyMatch,
-			"differences", len(result.Comparison.Differences),
-		)
+		// Add nil checks before accessing result fields
+		if result != nil && !isEmptyComparisonResult(result.Comparison) {
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Debug("Dry run comparison completed",
+					"endpoint", endpointPath,
+					"primaryBackend", primaryBackend,
+					"secondaryBackend", secondaryBackend,
+					"returnedBackend", returnBackend,
+					"statusCodeMatch", result.Comparison.StatusCodeMatch,
+					"bodyMatch", result.Comparison.BodyMatch,
+					"differences", len(result.Comparison.Differences),
+				)
+			}
+		} else {
+			if m.app != nil && m.app.Logger() != nil {
+				if result == nil {
+					m.app.Logger().Error("Dry run result is nil")
+				} else {
+					m.app.Logger().Error("Dry run result comparison is empty")
+				}
+			}
+		}
 	}()
+}
+
+// isEmptyComparisonResult checks if a ComparisonResult is empty or represents no differences.
+// This is used to determine if a dry run comparison yielded any differences.
+func isEmptyComparisonResult(result ComparisonResult) bool {
+	// Check if all boolean fields are false (indicating no matches found)
+	if !result.StatusCodeMatch && !result.HeadersMatch && !result.BodyMatch {
+		// If no matches and no differences recorded, it's likely an empty/default result
+		if len(result.Differences) == 0 && len(result.HeaderDiffs) == 0 {
+			return true
+		}
+	}
+
+	// If there are differences recorded, it's not empty
+	if len(result.Differences) > 0 || len(result.HeaderDiffs) > 0 {
+		return false
+	}
+
+	// If all match fields are true and no differences, it's a successful comparison (not empty)
+	if result.StatusCodeMatch && result.HeadersMatch && result.BodyMatch {
+		return false
+	}
+
+	// Default case: consider it empty if we can't determine otherwise
+	return true
 }

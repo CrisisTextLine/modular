@@ -2682,6 +2682,7 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 // Specifically, this function returns true if:
 //   - All of StatusCodeMatch, HeadersMatch, and BodyMatch are false, and both Differences and HeaderDiffs are empty.
 //   - There are no differences recorded at all.
+//
 // It returns false if:
 //   - Any differences are present (Differences or HeaderDiffs are non-empty), or
 //   - All match fields are true (indicating a successful comparison).

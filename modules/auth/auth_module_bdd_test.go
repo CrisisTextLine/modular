@@ -11,23 +11,24 @@ import (
 
 // Auth BDD Test Context
 type AuthBDDTestContext struct {
-	app           modular.Application
-	module        *Module
-	service       *Service
-	token         string
-	claims        *Claims
-	password      string
-	hashedPassword string
-	verifyResult  bool
-	strengthError error
-	session       *Session
-	sessionID     string
-	user          *User
-	userID        string
-	authResult    *User
-	authError     error
-	oauthURL      string
-	lastError     error
+	app             modular.Application
+	module          *Module
+	service         *Service
+	token           string
+	claims          *Claims
+	password        string
+	hashedPassword  string
+	verifyResult    bool
+	strengthError   error
+	session         *Session
+	sessionID       string
+	user            *User
+	userID          string
+	authResult      *User
+	authError       error
+	oauthURL        string
+	lastError       error
+	originalFeeders []modular.Feeder
 }
 
 // Test data structures
@@ -39,6 +40,12 @@ type testUser struct {
 }
 
 func (ctx *AuthBDDTestContext) resetContext() {
+	// Restore original feeders if they were saved
+	if ctx.originalFeeders != nil {
+		modular.ConfigFeeders = ctx.originalFeeders
+		ctx.originalFeeders = nil
+	}
+	
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -60,6 +67,11 @@ func (ctx *AuthBDDTestContext) resetContext() {
 
 func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured() error {
 	ctx.resetContext()
+	
+	// Save original feeders and disable env feeder for BDD tests
+	// This ensures BDD tests have full control over configuration
+	ctx.originalFeeders = modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
 	
 	// Create application
 	logger := &MockLogger{}

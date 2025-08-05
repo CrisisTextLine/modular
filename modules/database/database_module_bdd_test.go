@@ -13,15 +13,22 @@ import (
 type DatabaseBDDTestContext struct {
 	app             modular.Application
 	module          *Module
-	service         *Service
+	service         DatabaseService
 	queryResult     interface{}
 	queryError      error
 	lastError       error
 	transactionID   string
 	healthStatus    bool
+	originalFeeders []modular.Feeder
 }
 
 func (ctx *DatabaseBDDTestContext) resetContext() {
+	// Restore original feeders if they were saved
+	if ctx.originalFeeders != nil {
+		modular.ConfigFeeders = ctx.originalFeeders
+		ctx.originalFeeders = nil
+	}
+	
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -35,32 +42,40 @@ func (ctx *DatabaseBDDTestContext) resetContext() {
 func (ctx *DatabaseBDDTestContext) iHaveAModularApplicationWithDatabaseModuleConfigured() error {
 	ctx.resetContext()
 	
+	// Save original feeders and disable env feeder for BDD tests
+	// This ensures BDD tests have full control over configuration  
+	ctx.originalFeeders = modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
+	
 	// Create application with database config
 	logger := &testLogger{}
 	
 	// Create basic database configuration for testing
 	dbConfig := &Config{
-		Connections: map[string]*Connection{
+		Connections: map[string]*ConnectionConfig{
 			"default": {
 				Driver: "sqlite3",
 				DSN:    ":memory:",
-				MaxOpenConns: 10,
-				MaxIdleConns: 5,
+				MaxOpenConnections: 10,
+				MaxIdleConnections: 5,
 			},
 		},
-		DefaultConnection: "default",
+		Default: "default",
 	}
 	
-	cp := modular.NewStdConfigProvider(dbConfig)
-	ctx.app = modular.NewStdApplication(cp, logger)
+	// Create provider with the database config
+	dbConfigProvider := modular.NewStdConfigProvider(dbConfig)
+	
+	// Create app with empty main config
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
 	
 	// Create and configure database module
-	ctx.module = NewModule().(*Module)
+	module := NewModule()
+	ctx.module = module.(*Module)
 	
-	// Register config
-	if err := ctx.module.RegisterConfig(ctx.app); err != nil {
-		return fmt.Errorf("failed to register database config: %v", err)
-	}
+	// Register the database config section first
+	ctx.app.RegisterConfigSection("database", dbConfigProvider)
 	
 	// Register module
 	ctx.app.RegisterModule(ctx.module)
@@ -71,11 +86,11 @@ func (ctx *DatabaseBDDTestContext) iHaveAModularApplicationWithDatabaseModuleCon
 	}
 	
 	// Get the database service
-	var dbService Service
+	var dbService DatabaseService
 	if err := ctx.app.GetService("database", &dbService); err != nil {
 		return fmt.Errorf("failed to get database service: %v", err)
 	}
-	ctx.service = &dbService
+	ctx.service = dbService
 	
 	return nil
 }
@@ -114,7 +129,21 @@ func (ctx *DatabaseBDDTestContext) iExecuteASimpleSQLQuery() error {
 	}
 	
 	// Execute a simple query like CREATE TABLE or SELECT 1
-	ctx.queryResult, ctx.queryError = ctx.service.ExecuteQuery(context.Background(), "default", "SELECT 1 as test_value")
+	rows, err := ctx.service.Query("SELECT 1 as test_value")
+	if err != nil {
+		ctx.queryError = err
+		return nil
+	}
+	defer rows.Close()
+	
+	if rows.Next() {
+		var testValue int
+		if err := rows.Scan(&testValue); err != nil {
+			ctx.queryError = err
+			return nil
+		}
+		ctx.queryResult = testValue
+	}
 	return nil
 }
 
@@ -138,7 +167,21 @@ func (ctx *DatabaseBDDTestContext) iExecuteAParameterizedSQLQuery() error {
 	}
 	
 	// Execute a parameterized query
-	ctx.queryResult, ctx.queryError = ctx.service.ExecuteQuery(context.Background(), "default", "SELECT ? as param_value", 42)
+	rows, err := ctx.service.Query("SELECT ? as param_value", 42)
+	if err != nil {
+		ctx.queryError = err
+		return nil
+	}
+	defer rows.Close()
+	
+	if rows.Next() {
+		var paramValue int
+		if err := rows.Scan(&paramValue); err != nil {
+			ctx.queryError = err
+			return nil
+		}
+		ctx.queryResult = paramValue
+	}
 	return nil
 }
 

@@ -42,7 +42,9 @@ func testRequestBodyConsumptionFix(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"primary"}`))
+		if _, err := w.Write([]byte(`{"backend":"primary"}`)); err != nil {
+			t.Errorf("Primary server failed to write response: %v", err)
+		}
 	}))
 	defer primaryServer.Close()
 
@@ -58,7 +60,9 @@ func testRequestBodyConsumptionFix(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"secondary"}`))
+		if _, err := w.Write([]byte(`{"backend":"secondary"}`)); err != nil {
+			t.Errorf("Secondary server failed to write response: %v", err)
+		}
 	}))
 	defer secondaryServer.Close()
 
@@ -130,7 +134,9 @@ func testContextCancellationFix(t *testing.T) {
 		default:
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"primary"}`))
+		if _, err := w.Write([]byte(`{"backend":"primary"}`)); err != nil {
+			t.Errorf("Primary server failed to write response: %v", err)
+		}
 	}))
 	defer primaryServer.Close()
 
@@ -140,7 +146,9 @@ func testContextCancellationFix(t *testing.T) {
 		default:
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"secondary"}`))
+		if _, err := w.Write([]byte(`{"backend":"secondary"}`)); err != nil {
+			t.Errorf("Secondary server failed to write response: %v", err)
+		}
 	}))
 	defer secondaryServer.Close()
 
@@ -211,7 +219,9 @@ func testURLPathJoiningFix(t *testing.T) {
 		primaryURLReceived = r.URL.String()
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"primary"}`))
+		if _, err := w.Write([]byte(`{"backend":"primary"}`)); err != nil {
+			t.Errorf("Primary server failed to write response: %v", err)
+		}
 	}))
 	defer primaryServer.Close()
 
@@ -221,7 +231,9 @@ func testURLPathJoiningFix(t *testing.T) {
 		secondaryURLReceived = r.URL.String()
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"secondary"}`))
+		if _, err := w.Write([]byte(`{"backend":"secondary"}`)); err != nil {
+			t.Errorf("Secondary server failed to write response: %v", err)
+		}
 	}))
 	defer secondaryServerBase.Close()
 
@@ -344,7 +356,9 @@ func testEndToEndDryRunWithRequestBody(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"primary","path":"` + r.URL.Path + `"}`))
+		if _, err := w.Write([]byte(`{"backend":"primary","path":"` + r.URL.Path + `"}`)); err != nil {
+			t.Errorf("Primary server failed to write response: %v", err)
+		}
 	}))
 	defer primaryServer.Close()
 
@@ -358,7 +372,9 @@ func testEndToEndDryRunWithRequestBody(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"backend":"secondary","path":"` + r.URL.Path + `"}`))
+		if _, err := w.Write([]byte(`{"backend":"secondary","path":"` + r.URL.Path + `"}`)); err != nil {
+			t.Errorf("Secondary server failed to write response: %v", err)
+		}
 	}))
 	defer secondaryServer.Close()
 
@@ -471,5 +487,7 @@ func testEndToEndDryRunWithRequestBody(t *testing.T) {
 	}
 
 	// Clean up
-	reverseProxyModule.Stop(context.Background())
+	if err := reverseProxyModule.Stop(context.Background()); err != nil {
+		t.Errorf("Failed to stop reverse proxy module: %v", err)
+	}
 }

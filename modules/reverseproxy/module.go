@@ -1748,7 +1748,7 @@ func (m *ReverseProxyModule) AddBackendRoute(backendID, routePattern string) err
 	return nil
 }
 
-// AddCompositeRoute registers a composite route that combines responses from multiple backends.
+// AddCompositeRoute adds a composite route that combines responses from multiple backends.
 // The strategy parameter determines how the responses are combined.
 func (m *ReverseProxyModule) AddCompositeRoute(pattern string, backends []string, strategy string) {
 	// Initialize CompositeRoutes if nil
@@ -2673,7 +2673,20 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 }
 
 // isEmptyComparisonResult checks if a ComparisonResult is empty or represents no differences.
-// This is used to determine if a dry run comparison yielded any differences.
+// isEmptyComparisonResult determines whether a ComparisonResult is considered "empty".
+//
+// An "empty" ComparisonResult means that either:
+//   - No matches were found (all match fields are false) and there are no recorded differences,
+//   - Or, the result does not indicate any differences (Differences and HeaderDiffs are empty).
+//
+// Specifically, this function returns true if:
+//   - All of StatusCodeMatch, HeadersMatch, and BodyMatch are false, and both Differences and HeaderDiffs are empty.
+//   - There are no differences recorded at all.
+// It returns false if:
+//   - Any differences are present (Differences or HeaderDiffs are non-empty), or
+//   - All match fields are true (indicating a successful comparison).
+//
+// This is used to determine if a dry run comparison yielded any differences or if the result is a default/empty value.
 func isEmptyComparisonResult(result ComparisonResult) bool {
 	// Check if all boolean fields are false (indicating no matches found)
 	if !result.StatusCodeMatch && !result.HeadersMatch && !result.BodyMatch {
@@ -2693,6 +2706,7 @@ func isEmptyComparisonResult(result ComparisonResult) bool {
 		return false
 	}
 
-	// Default case: consider it empty if we can't determine otherwise
+	// Default case: If none of the above conditions matched, we conservatively assume the result is empty.
+	// This ensures that only explicit differences or matches are treated as non-empty; ambiguous or default-initialized results are considered empty.
 	return true
 }

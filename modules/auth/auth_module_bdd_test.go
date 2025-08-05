@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/cucumber/godog"
@@ -69,15 +68,15 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 	authConfig := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret-key-for-bdd-tests",
-			Expiration:        time.Hour,
-			RefreshExpiration: time.Hour * 24,
+			Expiration:        3600,  // 1 hour in seconds
+			RefreshExpiration: 86400, // 24 hours in seconds
 			Issuer:            "bdd-test",
 			Algorithm:         "HS256",
 		},
 		Session: SessionConfig{
 			Store:      "memory",
 			CookieName: "test_session",
-			MaxAge:     time.Hour,
+			MaxAge:     3600, // 1 hour in seconds
 			Secure:     false,
 			HTTPOnly:   true,
 			SameSite:   "strict",
@@ -106,16 +105,18 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 		},
 	}
 	
-	cp := modular.NewStdConfigProvider(authConfig)
-	ctx.app = modular.NewStdApplication(cp, logger)
+	// Create provider with the auth config
+	authConfigProvider := modular.NewStdConfigProvider(authConfig)
+	
+	// Create app with empty main config
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
 	
 	// Create and configure auth module
 	ctx.module = NewModule().(*Module)
 	
-	// Register config
-	if err := ctx.module.RegisterConfig(ctx.app); err != nil {
-		return fmt.Errorf("failed to register auth config: %v", err)
-	}
+	// Register the auth config section first
+	ctx.app.RegisterConfigSection("auth", authConfigProvider)
 	
 	// Register module
 	ctx.app.RegisterModule(ctx.module)

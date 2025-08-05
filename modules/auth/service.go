@@ -63,7 +63,7 @@ func (s *Service) GenerateToken(userID string, customClaims map[string]interface
 		"user_id": userID,
 		"type":    "access",
 		"iat":     now.Unix(),
-		"exp":     now.Add(s.config.JWT.Expiration).Unix(),
+		"exp":     now.Add(s.config.JWT.GetJWTExpiration()).Unix(),
 		"counter": counter, // Add counter to make tokens unique
 	}
 
@@ -89,7 +89,7 @@ func (s *Service) GenerateToken(userID string, customClaims map[string]interface
 		"user_id": userID,
 		"type":    "refresh",
 		"iat":     now.Unix(),
-		"exp":     now.Add(s.config.JWT.RefreshExpiration).Unix(),
+		"exp":     now.Add(s.config.JWT.GetJWTRefreshExpiration()).Unix(),
 		"counter": refreshCounter, // Different counter for refresh token
 	}
 
@@ -104,13 +104,13 @@ func (s *Service) GenerateToken(userID string, customClaims map[string]interface
 		return nil, fmt.Errorf("failed to sign refresh token: %w", err)
 	}
 
-	expiresAt := now.Add(s.config.JWT.Expiration)
+	expiresAt := now.Add(s.config.JWT.GetJWTExpiration())
 
 	return &TokenPair{
 		AccessToken:  accessTokenString,
 		RefreshToken: refreshTokenString,
 		TokenType:    "Bearer",
-		ExpiresIn:    int64(s.config.JWT.Expiration.Seconds()),
+		ExpiresIn:    int64(s.config.JWT.GetJWTExpiration().Seconds()),
 		ExpiresAt:    expiresAt,
 	}, nil
 }
@@ -329,7 +329,7 @@ func (s *Service) CreateSession(userID string, metadata map[string]interface{}) 
 		ID:        sessionID,
 		UserID:    userID,
 		CreatedAt: now,
-		ExpiresAt: now.Add(s.config.Session.MaxAge),
+		ExpiresAt: now.Add(s.config.Session.GetSessionMaxAge()),
 		Active:    true,
 		Metadata:  metadata,
 	}
@@ -384,7 +384,7 @@ func (s *Service) RefreshSession(sessionID string) (*Session, error) {
 	time.Sleep(time.Millisecond)
 
 	// Update expiration time to extend the session
-	newExpiresAt := time.Now().Add(s.config.Session.MaxAge)
+	newExpiresAt := time.Now().Add(s.config.Session.GetSessionMaxAge())
 	session.ExpiresAt = newExpiresAt
 
 	// Ensure the new expiration is actually later than the original

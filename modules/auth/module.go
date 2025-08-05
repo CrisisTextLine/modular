@@ -73,6 +73,13 @@ func (m *Module) Name() string {
 //   - OAuth2 provider settings
 //   - Password policy settings
 func (m *Module) RegisterConfig(app modular.Application) error {
+	// Check if auth config is already registered (e.g., by tests)
+	if _, err := app.GetConfigSection(m.Name()); err == nil {
+		// Config already registered, skip to avoid overriding
+		return nil
+	}
+	
+	// Register default config only if not already present
 	m.config = &Config{}
 	app.RegisterConfigSection(m.Name(), modular.NewStdConfigProvider(m.config))
 	return nil
@@ -84,6 +91,13 @@ func (m *Module) RegisterConfig(app modular.Application) error {
 // dependency injection of user and session stores.
 func (m *Module) Init(app modular.Application) error {
 	m.logger = app.Logger()
+
+	// Get the config section
+	cfg, err := app.GetConfigSection(m.Name())
+	if err != nil {
+		return fmt.Errorf("failed to get config section '%s': %w", m.Name(), err)
+	}
+	m.config = cfg.GetConfig().(*Config)
 
 	// Validate configuration
 	if err := m.config.Validate(); err != nil {

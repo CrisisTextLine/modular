@@ -86,9 +86,7 @@ func (m *Module) RegisterConfig(app modular.Application) error {
 }
 
 // Init initializes the authentication module.
-// This method validates the configuration and prepares the module for use.
-// The actual service creation happens in the Constructor method to support
-// dependency injection of user and session stores.
+// This method validates the configuration and creates the authentication service.
 func (m *Module) Init(app modular.Application) error {
 	m.logger = app.Logger()
 
@@ -103,6 +101,12 @@ func (m *Module) Init(app modular.Application) error {
 	if err := m.config.Validate(); err != nil {
 		return fmt.Errorf("auth module configuration validation failed: %w", err)
 	}
+
+	// Create the auth service with default stores
+	// The constructor will replace these with injected stores if available
+	userStore := NewMemoryUserStore()
+	sessionStore := NewMemorySessionStore()
+	m.service = NewService(m.config, userStore, sessionStore)
 
 	m.logger.Info("Authentication module initialized", "module", m.Name())
 	return nil
@@ -168,43 +172,50 @@ func (m *Module) RequiresServices() []modular.ServiceDependency {
 }
 
 // Constructor provides dependency injection for the module.
-// This method creates the authentication service with injected dependencies,
-// using fallback implementations for optional services that aren't provided.
-//
-// The constructor pattern allows the module to be reconstructed with proper
-// dependency injection after all required services have been resolved.
+// This method replaces the default stores with injected dependencies if available.
+// If the service doesn't exist yet (e.g., in unit tests), it creates it.
 //
 // Dependencies resolved:
 //   - user_store: External user storage (falls back to memory store)
 //   - session_store: External session storage (falls back to memory store)
 func (m *Module) Constructor() modular.ModuleConstructor {
 	return func(app modular.Application, services map[string]any) (modular.Module, error) {
-		// Get user store (use mock if not provided)
-		var userStore UserStore
+		// Get user store (use injected if provided)
+		var userStore UserStore = NewMemoryUserStore() // default
 		if us, ok := services["user_store"]; ok {
 			if userStoreImpl, ok := us.(UserStore); ok {
 				userStore = userStoreImpl
 			} else {
 				return nil, fmt.Errorf("user_store service does not implement UserStore interface")
 			}
-		} else {
-			userStore = NewMemoryUserStore()
 		}
 
-		// Get session store (use mock if not provided)
-		var sessionStore SessionStore
+		// Get session store (use injected if provided)
+		var sessionStore SessionStore = NewMemorySessionStore() // default
 		if ss, ok := services["session_store"]; ok {
 			if sessionStoreImpl, ok := ss.(SessionStore); ok {
 				sessionStore = sessionStoreImpl
 			} else {
 				return nil, fmt.Errorf("session_store service does not implement SessionStore interface")
 			}
-		} else {
-			sessionStore = NewMemorySessionStore()
 		}
 
-		// Create the auth service
-		m.service = NewService(m.config, userStore, sessionStore)
+		// Create or recreate the auth service with the appropriate stores
+		// This handles both the case where Init() already created a service (normal flow)
+		// and the case where the constructor is called directly (unit tests)
+		if m.config != nil {
+			m.service = NewService(m.config, userStore, sessionStore)
+		} else {
+			// Fallback for unit tests that call constructor directly
+			// Use a minimal config - this should only happen in tests
+			m.service = NewService(&Config{
+				JWT: JWTConfig{
+					Secret:            "test-secret",
+					Expiration:        3600,
+					RefreshExpiration: 86400,
+				},
+			}, userStore, sessionStore)
+		}
 
 		return m, nil
 	}

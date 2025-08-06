@@ -45,32 +45,16 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyM
 	
 	// Create basic reverse proxy configuration for testing
 	ctx.config = &ReverseProxyConfig{
-		Backends: map[string]BackendConfig{
+		BackendServices: map[string]string{
+			"test-backend": "http://localhost:8080",
+		},
+		Routes: map[string]string{
+			"/api/*": "test-backend",
+		},
+		BackendConfigs: map[string]BackendServiceConfig{
 			"test-backend": {
-				URL:                "http://localhost:8080",
-				HealthCheckPath:    "/health",
-				HealthCheckTimeout: 5000,
-				MaxRetries:         3,
-				RetryDelay:         1000,
+				URL: "http://localhost:8080",
 			},
-		},
-		Routes: map[string]RouteConfig{
-			"/api/*": {
-				Backend: "test-backend",
-				Methods: []string{"GET", "POST"},
-			},
-		},
-		Cache: &CacheConfig{
-			Enabled:    true,
-			DefaultTTL: 300,
-		},
-		CircuitBreaker: &CircuitBreakerConfig{
-			Enabled:          true,
-			FailureThreshold: 5,
-			OpenTimeout:      10000,
-		},
-		Metrics: &MetricsConfig{
-			Enabled: true,
 		},
 	}
 	

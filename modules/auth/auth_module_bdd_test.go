@@ -45,7 +45,7 @@ func (ctx *AuthBDDTestContext) resetContext() {
 		modular.ConfigFeeders = ctx.originalFeeders
 		ctx.originalFeeders = nil
 	}
-	
+
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -67,15 +67,15 @@ func (ctx *AuthBDDTestContext) resetContext() {
 
 func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured() error {
 	ctx.resetContext()
-	
+
 	// Save original feeders and disable env feeder for BDD tests
 	// This ensures BDD tests have full control over configuration
 	ctx.originalFeeders = modular.ConfigFeeders
 	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
-	
+
 	// Create application
 	logger := &MockLogger{}
-	
+
 	// Create proper auth configuration
 	authConfig := &Config{
 		JWT: JWTConfig{
@@ -95,18 +95,18 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 			Path:       "/",
 		},
 		Password: PasswordConfig{
-			MinLength:    8,
-			BcryptCost:   4, // Low cost for testing
-			RequireUpper: true,
-			RequireLower: true,
-			RequireDigit: true,
+			MinLength:      8,
+			BcryptCost:     4, // Low cost for testing
+			RequireUpper:   true,
+			RequireLower:   true,
+			RequireDigit:   true,
 			RequireSpecial: true,
 		},
 		OAuth2: OAuth2Config{
 			Providers: map[string]OAuth2Provider{
 				"google": {
 					ClientID:     "test-client-id",
-					ClientSecret: "test-client-secret", 
+					ClientSecret: "test-client-secret",
 					RedirectURL:  "http://localhost:8080/auth/callback",
 					Scopes:       []string{"openid", "email", "profile"},
 					AuthURL:      "https://accounts.google.com/o/oauth2/auth",
@@ -116,35 +116,35 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 			},
 		},
 	}
-	
+
 	// Create provider with the auth config
 	authConfigProvider := modular.NewStdConfigProvider(authConfig)
-	
+
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
-	
+
 	// Create and configure auth module
 	ctx.module = NewModule().(*Module)
-	
+
 	// Register the auth config section first
 	ctx.app.RegisterConfigSection("auth", authConfigProvider)
-	
+
 	// Register module
 	ctx.app.RegisterModule(ctx.module)
-	
+
 	// Initialize
 	if err := ctx.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
 	}
-	
+
 	// Get the auth service
 	var authService Service
 	if err := ctx.app.GetService("auth", &authService); err != nil {
 		return fmt.Errorf("failed to get auth service: %v", err)
 	}
 	ctx.service = &authService
-	
+
 	return nil
 }
 
@@ -162,7 +162,7 @@ func (ctx *AuthBDDTestContext) iGenerateAJWTTokenForTheUser() error {
 		ctx.lastError = err
 		return nil // Don't return error here as it might be expected
 	}
-	
+
 	ctx.token = tokenPair.AccessToken
 	return nil
 }
@@ -181,16 +181,16 @@ func (ctx *AuthBDDTestContext) theTokenShouldContainTheUserInformation() error {
 	if ctx.token == "" {
 		return fmt.Errorf("no token available")
 	}
-	
+
 	claims, err := ctx.service.ValidateToken(ctx.token)
 	if err != nil {
 		return fmt.Errorf("failed to validate token: %v", err)
 	}
-	
+
 	if claims.UserID != "test-user-123" {
 		return fmt.Errorf("expected UserID 'test-user-123', got '%s'", claims.UserID)
 	}
-	
+
 	return nil
 }
 
@@ -202,7 +202,7 @@ func (ctx *AuthBDDTestContext) iHaveAValidJWTToken() error {
 	if err != nil {
 		return fmt.Errorf("failed to generate valid token: %v", err)
 	}
-	
+
 	ctx.token = tokenPair.AccessToken
 	return nil
 }
@@ -214,7 +214,7 @@ func (ctx *AuthBDDTestContext) iValidateTheToken() error {
 		ctx.lastError = err
 		return nil // Don't return error here as validation might be expected to fail
 	}
-	
+
 	return nil
 }
 
@@ -276,7 +276,7 @@ func (ctx *AuthBDDTestContext) iRefreshTheToken() error {
 	if ctx.token == "" {
 		return fmt.Errorf("no token to refresh")
 	}
-	
+
 	// We need the refresh token, not the access token
 	// For now, we'll simulate this by generating a new token
 	tokenPair, err := ctx.service.GenerateToken("refresh-user", map[string]interface{}{
@@ -286,14 +286,14 @@ func (ctx *AuthBDDTestContext) iRefreshTheToken() error {
 		ctx.lastError = err
 		return nil
 	}
-	
+
 	// Use the refresh token to get a new token pair
 	newTokenPair, err := ctx.service.RefreshToken(tokenPair.RefreshToken)
 	if err != nil {
 		ctx.lastError = err
 		return nil
 	}
-	
+
 	ctx.token = newTokenPair.AccessToken
 	return nil
 }
@@ -583,7 +583,7 @@ func (ctx *AuthBDDTestContext) iCreateANewUser() error {
 		ID:    "new-user-123",
 		Email: "newuser@example.com",
 	}
-	
+
 	err := ctx.service.userStore.CreateUser(context.Background(), user)
 	if err != nil {
 		ctx.lastError = err
@@ -617,18 +617,18 @@ func (ctx *AuthBDDTestContext) iHaveAUserWithCredentialsInTheStore() error {
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %v", err)
 	}
-	
+
 	user := &User{
 		ID:           "auth-user-123",
 		Email:        "authuser@example.com",
 		PasswordHash: hashedPassword,
 	}
-	
+
 	err = ctx.service.userStore.CreateUser(context.Background(), user)
 	if err != nil {
 		return fmt.Errorf("failed to create user: %v", err)
 	}
-	
+
 	ctx.user = user
 	ctx.password = "userpassword123!"
 	return nil
@@ -641,13 +641,13 @@ func (ctx *AuthBDDTestContext) iAuthenticateWithCorrectCredentials() error {
 		ctx.authError = err
 		return nil
 	}
-	
+
 	err = ctx.service.VerifyPassword(user.PasswordHash, ctx.password)
 	if err != nil {
 		ctx.authError = err
 		return nil
 	}
-	
+
 	ctx.authResult = user
 	return nil
 }
@@ -679,13 +679,13 @@ func (ctx *AuthBDDTestContext) iAuthenticateWithIncorrectCredentials() error {
 		ctx.authError = err
 		return nil
 	}
-	
+
 	err = ctx.service.VerifyPassword(user.PasswordHash, "wrongpassword")
 	if err != nil {
 		ctx.authError = err
 		return nil
 	}
-	
+
 	ctx.authResult = user
 	return nil
 }

@@ -14,20 +14,20 @@ import (
 
 // HTTP Server BDD Test Context
 type HTTPServerBDDTestContext struct {
-	app            modular.Application
-	module         *HTTPServerModule
-	service        *HTTPServerModule
-	serverConfig   *HTTPServerConfig
-	lastError      error
-	testServer     *http.Server
-	serverAddress  string
-	serverPort     string
-	clientResponse *http.Response
-	healthStatus   string
-	isHTTPS        bool
-	customHandler  http.Handler
+	app               modular.Application
+	module            *HTTPServerModule
+	service           *HTTPServerModule
+	serverConfig      *HTTPServerConfig
+	lastError         error
+	testServer        *http.Server
+	serverAddress     string
+	serverPort        string
+	clientResponse    *http.Response
+	healthStatus      string
+	isHTTPS           bool
+	customHandler     http.Handler
 	middlewareApplied bool
-	testClient     *http.Client
+	testClient        *http.Client
 }
 
 func (ctx *HTTPServerBDDTestContext) resetContext() {
@@ -57,10 +57,10 @@ func (ctx *HTTPServerBDDTestContext) resetContext() {
 
 func (ctx *HTTPServerBDDTestContext) iHaveAModularApplicationWithHTTPServerModuleConfigured() error {
 	ctx.resetContext()
-	
+
 	// Create application with HTTP server config
 	logger := &testLogger{}
-	
+
 	// Create basic HTTP server configuration for testing
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
@@ -70,14 +70,14 @@ func (ctx *HTTPServerBDDTestContext) iHaveAModularApplicationWithHTTPServerModul
 		IdleTimeout:  30,
 		TLS:          nil, // No TLS for basic test
 	}
-	
+
 	// Create provider with the HTTP server config
 	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
-	
+
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
-	
+
 	// Create a simple router service that the HTTP server requires
 	router := http.NewServeMux()
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -88,22 +88,22 @@ func (ctx *HTTPServerBDDTestContext) iHaveAModularApplicationWithHTTPServerModul
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("test response"))
 	})
-	
+
 	// Register the router service
 	err := ctx.app.RegisterService("router", router)
 	if err != nil {
 		return fmt.Errorf("failed to register router service: %w", err)
 	}
-	
+
 	// Create and register HTTP server module
 	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
-	
+
 	// Register the HTTP server config section first
 	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)
-	
-	// Register the module  
+
+	// Register the module
 	ctx.app.RegisterModule(ctx.module)
-	
+
 	return nil
 }
 
@@ -113,10 +113,10 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerModuleIsInitialized() error {
 		ctx.lastError = err
 		return nil
 	}
-	
+
 	// The HTTP server module doesn't provide services, so we access it directly
 	ctx.service = ctx.module
-	
+
 	return nil
 }
 
@@ -131,22 +131,22 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldBeConfiguredWithDefaultSetti
 	if ctx.service == nil {
 		return fmt.Errorf("HTTP server service not available")
 	}
-	
+
 	if ctx.service.config == nil {
 		return fmt.Errorf("HTTP server config not available")
 	}
-	
+
 	// Verify basic configuration is present
 	if ctx.service.config.Host == "" {
 		return fmt.Errorf("server host not configured")
 	}
-	
+
 	return nil
 }
 
 func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerConfiguration() error {
 	ctx.resetContext()
-	
+
 	// Create specific HTTP server configuration
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
@@ -156,13 +156,13 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerConfiguration() error {
 		IdleTimeout:  60,
 		TLS:          nil, // No TLS for basic HTTP
 	}
-	
+
 	return ctx.setupApplicationWithConfig()
 }
 
 func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPSServerConfigurationWithTLSEnabled() error {
 	ctx.resetContext()
-	
+
 	// Create HTTPS server configuration
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
@@ -176,30 +176,30 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPSServerConfigurationWithTLSEnabl
 			Domains:      []string{"localhost"},
 		},
 	}
-	
+
 	ctx.isHTTPS = true
 	return ctx.setupApplicationWithConfig()
 }
 
 func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithCustomTimeoutSettings() error {
 	ctx.resetContext()
-	
+
 	// Create HTTP server configuration with custom timeouts
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         0,
-		ReadTimeout:  5,  // Short timeout for testing
+		ReadTimeout:  5, // Short timeout for testing
 		WriteTimeout: 5,
 		IdleTimeout:  10,
 		TLS:          nil,
 	}
-	
+
 	return ctx.setupApplicationWithConfig()
 }
 
 func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithHealthChecksEnabled() error {
 	ctx.resetContext()
-	
+
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         0,
@@ -208,7 +208,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithHealthChecksEnabled() 
 		IdleTimeout:  30,
 		TLS:          nil,
 	}
-	
+
 	return ctx.setupApplicationWithConfig()
 }
 
@@ -221,7 +221,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithMiddlewareConfigured()
 	if err != nil {
 		return err
 	}
-	
+
 	// Set up a test middleware
 	testMiddleware := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -230,13 +230,13 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithMiddlewareConfigured()
 			next.ServeHTTP(w, r)
 		})
 	}
-	
+
 	// Create a handler with middleware
 	baseHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("test response"))
 	})
-	
+
 	ctx.customHandler = testMiddleware(baseHandler)
 	return nil
 }
@@ -246,7 +246,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveARunningHTTPServer() error {
 	if err != nil {
 		return err
 	}
-	
+
 	return ctx.theHTTPServerIsStarted()
 }
 
@@ -256,14 +256,14 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerRunning() error {
 
 func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 	logger := &testLogger{}
-	
+
 	// Create provider with the HTTP server config
 	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
-	
+
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
-	
+
 	// Create a simple router service that the HTTP server requires
 	router := http.NewServeMux()
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -274,32 +274,32 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("test response"))
 	})
-	
+
 	// Register the router service
 	err := ctx.app.RegisterService("router", router)
 	if err != nil {
 		return fmt.Errorf("failed to register router service: %w", err)
 	}
-	
+
 	// Create and register HTTP server module
 	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
-	
+
 	// Register the HTTP server config section first
 	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)
-	
-	// Register the module  
+
+	// Register the module
 	ctx.app.RegisterModule(ctx.module)
-	
+
 	// Initialize
 	err = ctx.app.Init()
 	if err != nil {
 		ctx.lastError = err
 		return nil
 	}
-	
+
 	// The HTTP server module doesn't provide services, so we access it directly
 	ctx.service = ctx.module
-	
+
 	return nil
 }
 
@@ -307,7 +307,7 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerIsStarted() error {
 	if ctx.service == nil {
 		return fmt.Errorf("HTTP server service not available")
 	}
-	
+
 	// Set a simple handler for testing
 	if ctx.customHandler != nil {
 		ctx.service.handler = ctx.customHandler
@@ -322,14 +322,14 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerIsStarted() error {
 			w.Write([]byte("test response"))
 		})
 	}
-	
+
 	// Start the server
 	err := ctx.service.Start(context.Background())
 	if err != nil {
 		ctx.lastError = err
 		return nil
 	}
-	
+
 	// Get the actual server address for testing
 	if ctx.service.server != nil {
 		addr := ctx.service.server.Addr
@@ -337,7 +337,7 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerIsStarted() error {
 			ctx.serverAddress = addr
 		}
 	}
-	
+
 	return nil
 }
 
@@ -349,7 +349,7 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldListenOnTheConfiguredAddress
 	if ctx.service == nil || ctx.service.server == nil {
 		return fmt.Errorf("server not started")
 	}
-	
+
 	// Verify the server is listening
 	expectedAddr := fmt.Sprintf("%s:%d", ctx.serverConfig.Host, ctx.serverConfig.Port)
 	if ctx.service.server.Addr != expectedAddr && ctx.serverConfig.Port != 0 {
@@ -358,7 +358,7 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldListenOnTheConfiguredAddress
 			return fmt.Errorf("server not listening on any address")
 		}
 	}
-	
+
 	return nil
 }
 
@@ -372,11 +372,11 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldAcceptHTTPRequests() error {
 	if ctx.service == nil || ctx.service.server == nil {
 		return fmt.Errorf("server not configured to accept HTTP requests")
 	}
-	
+
 	if ctx.service.server.Handler == nil {
 		return fmt.Errorf("server has no handler configured")
 	}
-	
+
 	return nil
 }
 
@@ -384,11 +384,11 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldAcceptHTTPSRequests() error 
 	if ctx.service == nil || ctx.service.server == nil {
 		return fmt.Errorf("server not configured")
 	}
-	
+
 	if !ctx.isHTTPS {
 		return fmt.Errorf("server not configured for HTTPS")
 	}
-	
+
 	return nil
 }
 
@@ -401,18 +401,18 @@ func (ctx *HTTPServerBDDTestContext) theReadTimeoutShouldBeRespected() error {
 	if ctx.service == nil {
 		return fmt.Errorf("server not available")
 	}
-	
+
 	if ctx.service.config == nil {
 		return fmt.Errorf("server config not available")
 	}
-	
+
 	expectedTimeout := ctx.serverConfig.ReadTimeout
 	actualTimeout := ctx.service.config.ReadTimeout
 	if actualTimeout != expectedTimeout {
-		return fmt.Errorf("read timeout not configured correctly: expected %ds, got %ds", 
+		return fmt.Errorf("read timeout not configured correctly: expected %ds, got %ds",
 			expectedTimeout, actualTimeout)
 	}
-	
+
 	return nil
 }
 
@@ -420,18 +420,18 @@ func (ctx *HTTPServerBDDTestContext) theWriteTimeoutShouldBeRespected() error {
 	if ctx.service == nil {
 		return fmt.Errorf("server not available")
 	}
-	
+
 	if ctx.service.config == nil {
 		return fmt.Errorf("server config not available")
 	}
-	
+
 	expectedTimeout := ctx.serverConfig.WriteTimeout
 	actualTimeout := ctx.service.config.WriteTimeout
 	if actualTimeout != expectedTimeout {
-		return fmt.Errorf("write timeout not configured correctly: expected %ds, got %ds", 
+		return fmt.Errorf("write timeout not configured correctly: expected %ds, got %ds",
 			expectedTimeout, actualTimeout)
 	}
-	
+
 	return nil
 }
 
@@ -439,18 +439,18 @@ func (ctx *HTTPServerBDDTestContext) theIdleTimeoutShouldBeRespected() error {
 	if ctx.service == nil {
 		return fmt.Errorf("server not available")
 	}
-	
+
 	if ctx.service.config == nil {
 		return fmt.Errorf("server config not available")
 	}
-	
+
 	expectedTimeout := ctx.serverConfig.IdleTimeout
 	actualTimeout := ctx.service.config.IdleTimeout
 	if actualTimeout != expectedTimeout {
-		return fmt.Errorf("idle timeout not configured correctly: expected %ds, got %ds", 
+		return fmt.Errorf("idle timeout not configured correctly: expected %ds, got %ds",
 			expectedTimeout, actualTimeout)
 	}
-	
+
 	return nil
 }
 
@@ -458,13 +458,13 @@ func (ctx *HTTPServerBDDTestContext) theServerShutdownIsInitiated() error {
 	if ctx.service == nil {
 		return fmt.Errorf("server not available")
 	}
-	
+
 	// Initiate shutdown
 	err := ctx.service.Stop(context.Background())
 	if err != nil {
 		ctx.lastError = err
 	}
-	
+
 	return nil
 }
 
@@ -474,7 +474,7 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldStopAcceptingNewConnections(
 	if ctx.lastError != nil {
 		return fmt.Errorf("server shutdown failed: %w", ctx.lastError)
 	}
-	
+
 	return nil
 }
 
@@ -489,7 +489,7 @@ func (ctx *HTTPServerBDDTestContext) theShutdownShouldCompleteWithinTheTimeout()
 	if ctx.lastError != nil {
 		return fmt.Errorf("shutdown did not complete successfully: %w", ctx.lastError)
 	}
-	
+
 	return nil
 }
 
@@ -497,7 +497,7 @@ func (ctx *HTTPServerBDDTestContext) iRequestTheHealthCheckEndpoint() error {
 	if ctx.service == nil {
 		return fmt.Errorf("server not available")
 	}
-	
+
 	// For BDD testing, simulate health check request
 	ctx.healthStatus = "OK"
 	return nil
@@ -507,7 +507,7 @@ func (ctx *HTTPServerBDDTestContext) theHealthCheckShouldReturnServerStatus() er
 	if ctx.healthStatus == "" {
 		return fmt.Errorf("health check did not return status")
 	}
-	
+
 	return nil
 }
 
@@ -515,7 +515,7 @@ func (ctx *HTTPServerBDDTestContext) theResponseShouldIndicateServerHealth() err
 	if ctx.healthStatus != "OK" {
 		return fmt.Errorf("health check indicates unhealthy server: %s", ctx.healthStatus)
 	}
-	
+
 	return nil
 }
 
@@ -523,13 +523,13 @@ func (ctx *HTTPServerBDDTestContext) iRegisterCustomHandlersWithTheServer() erro
 	if ctx.service == nil {
 		return fmt.Errorf("server service not available")
 	}
-	
+
 	// Register a test handler
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("custom handler response"))
 	})
-	
+
 	ctx.service.handler = testHandler
 	return nil
 }
@@ -538,7 +538,7 @@ func (ctx *HTTPServerBDDTestContext) theHandlersShouldBeAvailableForRequests() e
 	if ctx.service == nil || ctx.service.handler == nil {
 		return fmt.Errorf("custom handlers not available")
 	}
-	
+
 	return nil
 }
 
@@ -547,24 +547,24 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldRouteRequestsToTheCorrectHan
 	if ctx.service == nil {
 		return fmt.Errorf("server not available")
 	}
-	
+
 	if ctx.service.handler == nil {
 		return fmt.Errorf("server handler not configured")
 	}
-	
+
 	return nil
 }
 
 func (ctx *HTTPServerBDDTestContext) requestsAreProcessedThroughTheServer() error {
 	// Simulate request processing through middleware
 	ctx.middlewareApplied = false
-	
+
 	// This would normally involve making actual requests
 	// For BDD purposes, we'll simulate the middleware execution
 	if ctx.customHandler != nil {
 		ctx.middlewareApplied = true
 	}
-	
+
 	return nil
 }
 
@@ -572,7 +572,7 @@ func (ctx *HTTPServerBDDTestContext) theMiddlewareShouldBeAppliedToRequests() er
 	if !ctx.middlewareApplied {
 		return fmt.Errorf("middleware was not applied to requests")
 	}
-	
+
 	return nil
 }
 
@@ -581,13 +581,13 @@ func (ctx *HTTPServerBDDTestContext) theMiddlewareChainShouldExecuteInOrder() er
 	if ctx.customHandler == nil {
 		return fmt.Errorf("middleware chain not configured")
 	}
-	
+
 	return nil
 }
 
 func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFiles() error {
 	ctx.resetContext()
-	
+
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         0,
@@ -602,7 +602,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFil
 			Domains:      []string{"localhost"},
 		},
 	}
-	
+
 	ctx.isHTTPS = true
 	return ctx.setupApplicationWithConfig()
 }
@@ -615,12 +615,12 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldGenerateSelfSignedCertificat
 	if ctx.service == nil {
 		return fmt.Errorf("server service not available")
 	}
-	
+
 	// For BDD purposes, validate auto-TLS configuration
 	if ctx.serverConfig.TLS == nil || !ctx.serverConfig.TLS.AutoGenerate {
 		return fmt.Errorf("auto-TLS not enabled")
 	}
-	
+
 	return nil
 }
 
@@ -629,11 +629,11 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldUseTheGeneratedCertificates(
 	if ctx.service == nil || ctx.service.server == nil {
 		return fmt.Errorf("server not configured")
 	}
-	
+
 	if !ctx.isHTTPS {
 		return fmt.Errorf("server not configured for HTTPS")
 	}
-	
+
 	return nil
 }
 
@@ -648,7 +648,7 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldHandleErrorsGracefully() err
 	if ctx.service == nil || ctx.service.server == nil {
 		return fmt.Errorf("server not configured for error handling")
 	}
-	
+
 	return nil
 }
 
@@ -657,13 +657,13 @@ func (ctx *HTTPServerBDDTestContext) appropriateErrorResponsesShouldBeReturned()
 	if ctx.service == nil || ctx.service.handler == nil {
 		return fmt.Errorf("error response handling not configured")
 	}
-	
+
 	return nil
 }
 
 func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithMonitoringEnabled() error {
 	ctx.resetContext()
-	
+
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         0,
@@ -673,7 +673,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithMonitoringEnabled() er
 		TLS:          nil,
 		// Monitoring would be configured here
 	}
-	
+
 	return ctx.setupApplicationWithConfig()
 }
 
@@ -682,7 +682,7 @@ func (ctx *HTTPServerBDDTestContext) serverMetricsShouldBeCollected() error {
 	if ctx.service == nil {
 		return fmt.Errorf("server monitoring not available")
 	}
-	
+
 	return nil
 }
 
@@ -691,7 +691,7 @@ func (ctx *HTTPServerBDDTestContext) theMetricsShouldIncludeRequestCountsAndResp
 	if ctx.service == nil {
 		return fmt.Errorf("metrics collection not configured")
 	}
-	
+
 	return nil
 }
 
@@ -708,71 +708,71 @@ func TestHTTPServerModuleBDD(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
 			testCtx := &HTTPServerBDDTestContext{}
-			
+
 			// Background
 			ctx.Given(`^I have a modular application with httpserver module configured$`, testCtx.iHaveAModularApplicationWithHTTPServerModuleConfigured)
-			
+
 			// Steps for module initialization
 			ctx.When(`^the httpserver module is initialized$`, testCtx.theHTTPServerModuleIsInitialized)
 			ctx.Then(`^the HTTP server service should be available$`, testCtx.theHTTPServerServiceShouldBeAvailable)
 			ctx.Then(`^the server should be configured with default settings$`, testCtx.theServerShouldBeConfiguredWithDefaultSettings)
-			
+
 			// Steps for basic HTTP server
 			ctx.Given(`^I have an HTTP server configuration$`, testCtx.iHaveAnHTTPServerConfiguration)
 			ctx.When(`^the HTTP server is started$`, testCtx.theHTTPServerIsStarted)
 			ctx.Then(`^the server should listen on the configured address$`, testCtx.theServerShouldListenOnTheConfiguredAddress)
 			ctx.Then(`^the server should accept HTTP requests$`, testCtx.theServerShouldAcceptHTTPRequests)
-			
+
 			// Steps for HTTPS server
 			ctx.Given(`^I have an HTTPS server configuration with TLS enabled$`, testCtx.iHaveAnHTTPSServerConfigurationWithTLSEnabled)
 			ctx.When(`^the HTTPS server is started$`, testCtx.theHTTPSServerIsStarted)
 			ctx.Then(`^the server should listen on the configured TLS port$`, testCtx.theServerShouldListenOnTheConfiguredTLSPort)
 			ctx.Then(`^the server should accept HTTPS requests$`, testCtx.theServerShouldAcceptHTTPSRequests)
-			
+
 			// Steps for timeout configuration
 			ctx.Given(`^I have an HTTP server with custom timeout settings$`, testCtx.iHaveAnHTTPServerWithCustomTimeoutSettings)
 			ctx.When(`^the server processes requests$`, testCtx.theServerProcessesRequests)
 			ctx.Then(`^the read timeout should be respected$`, testCtx.theReadTimeoutShouldBeRespected)
 			ctx.Then(`^the write timeout should be respected$`, testCtx.theWriteTimeoutShouldBeRespected)
 			ctx.Then(`^the idle timeout should be respected$`, testCtx.theIdleTimeoutShouldBeRespected)
-			
+
 			// Steps for graceful shutdown
 			ctx.Given(`^I have a running HTTP server$`, testCtx.iHaveARunningHTTPServer)
 			ctx.When(`^the server shutdown is initiated$`, testCtx.theServerShutdownIsInitiated)
 			ctx.Then(`^the server should stop accepting new connections$`, testCtx.theServerShouldStopAcceptingNewConnections)
 			ctx.Then(`^existing connections should be allowed to complete$`, testCtx.existingConnectionsShouldBeAllowedToComplete)
 			ctx.Then(`^the shutdown should complete within the timeout$`, testCtx.theShutdownShouldCompleteWithinTheTimeout)
-			
+
 			// Steps for health checks
 			ctx.Given(`^I have an HTTP server with health checks enabled$`, testCtx.iHaveAnHTTPServerWithHealthChecksEnabled)
 			ctx.When(`^I request the health check endpoint$`, testCtx.iRequestTheHealthCheckEndpoint)
 			ctx.Then(`^the health check should return server status$`, testCtx.theHealthCheckShouldReturnServerStatus)
 			ctx.Then(`^the response should indicate server health$`, testCtx.theResponseShouldIndicateServerHealth)
-			
+
 			// Steps for handler registration
 			ctx.Given(`^I have an HTTP server service available$`, testCtx.iHaveAnHTTPServerServiceAvailable)
 			ctx.When(`^I register custom handlers with the server$`, testCtx.iRegisterCustomHandlersWithTheServer)
 			ctx.Then(`^the handlers should be available for requests$`, testCtx.theHandlersShouldBeAvailableForRequests)
 			ctx.Then(`^the server should route requests to the correct handlers$`, testCtx.theServerShouldRouteRequestsToTheCorrectHandlers)
-			
+
 			// Steps for middleware
 			ctx.Given(`^I have an HTTP server with middleware configured$`, testCtx.iHaveAnHTTPServerWithMiddlewareConfigured)
 			ctx.When(`^requests are processed through the server$`, testCtx.requestsAreProcessedThroughTheServer)
 			ctx.Then(`^the middleware should be applied to requests$`, testCtx.theMiddlewareShouldBeAppliedToRequests)
 			ctx.Then(`^the middleware chain should execute in order$`, testCtx.theMiddlewareChainShouldExecuteInOrder)
-			
+
 			// Steps for TLS auto-generation
 			ctx.Given(`^I have a TLS configuration without certificate files$`, testCtx.iHaveATLSConfigurationWithoutCertificateFiles)
 			ctx.When(`^the HTTPS server is started with auto-generation$`, testCtx.theHTTPSServerIsStartedWithAutoGeneration)
 			ctx.Then(`^the server should generate self-signed certificates$`, testCtx.theServerShouldGenerateSelfSignedCertificates)
 			ctx.Then(`^the server should use the generated certificates$`, testCtx.theServerShouldUseTheGeneratedCertificates)
-			
+
 			// Steps for error handling
 			ctx.Given(`^I have an HTTP server running$`, testCtx.iHaveAnHTTPServerRunning)
 			ctx.When(`^an error occurs during request processing$`, testCtx.anErrorOccursDuringRequestProcessing)
 			ctx.Then(`^the server should handle errors gracefully$`, testCtx.theServerShouldHandleErrorsGracefully)
 			ctx.Then(`^appropriate error responses should be returned$`, testCtx.appropriateErrorResponsesShouldBeReturned)
-			
+
 			// Steps for monitoring
 			ctx.Given(`^I have an HTTP server with monitoring enabled$`, testCtx.iHaveAnHTTPServerWithMonitoringEnabled)
 			ctx.Then(`^server metrics should be collected$`, testCtx.serverMetricsShouldBeCollected)

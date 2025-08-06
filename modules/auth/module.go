@@ -78,7 +78,7 @@ func (m *Module) RegisterConfig(app modular.Application) error {
 		// Config already registered, skip to avoid overriding
 		return nil
 	}
-	
+
 	// Register default config only if not already present
 	m.config = &Config{}
 	app.RegisterConfigSection(m.Name(), modular.NewStdConfigProvider(m.config))
@@ -186,7 +186,7 @@ func (m *Module) Constructor() modular.ModuleConstructor {
 			if userStoreImpl, ok := us.(UserStore); ok {
 				userStore = userStoreImpl
 			} else {
-				return nil, fmt.Errorf("user_store service does not implement UserStore interface")
+				return nil, ErrUserStoreNotInterface
 			}
 		}
 
@@ -196,7 +196,7 @@ func (m *Module) Constructor() modular.ModuleConstructor {
 			if sessionStoreImpl, ok := ss.(SessionStore); ok {
 				sessionStore = sessionStoreImpl
 			} else {
-				return nil, fmt.Errorf("session_store service does not implement SessionStore interface")
+				return nil, ErrSessionStoreNotInterface
 			}
 		}
 

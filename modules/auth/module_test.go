@@ -186,7 +186,7 @@ func TestModule_RegisterConfig(t *testing.T) {
 func TestModule_Init(t *testing.T) {
 	// Test with valid config
 	module := &Module{}
-	
+
 	config := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret",
@@ -202,7 +202,7 @@ func TestModule_Init(t *testing.T) {
 	app := NewMockApplication()
 	// Register the config section
 	app.RegisterConfigSection("auth", modular.NewStdConfigProvider(config))
-	
+
 	err := module.Init(app)
 	assert.NoError(t, err)
 	assert.NotNil(t, module.logger)
@@ -212,7 +212,7 @@ func TestModule_Init(t *testing.T) {
 func TestModule_Init_InvalidConfig(t *testing.T) {
 	// Test with invalid config
 	module := &Module{}
-	
+
 	config := &Config{
 		JWT: JWTConfig{
 			Secret: "", // Invalid: empty secret
@@ -222,7 +222,7 @@ func TestModule_Init_InvalidConfig(t *testing.T) {
 	app := NewMockApplication()
 	// Register the invalid config section
 	app.RegisterConfigSection("auth", modular.NewStdConfigProvider(config))
-	
+
 	err := module.Init(app)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "configuration validation failed")

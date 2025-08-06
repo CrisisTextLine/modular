@@ -119,7 +119,7 @@ func (s *Service) GenerateToken(userID string, customClaims map[string]interface
 func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			return nil, fmt.Errorf("%w: %v", ErrUnexpectedSigningMethod, token.Header["alg"])
 		}
 		return []byte(s.config.JWT.Secret), nil
 	})
@@ -206,7 +206,7 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 func (s *Service) RefreshToken(refreshTokenString string) (*TokenPair, error) {
 	token, err := jwt.Parse(refreshTokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			return nil, fmt.Errorf("%w: %v", ErrUnexpectedSigningMethod, token.Header["alg"])
 		}
 		return []byte(s.config.JWT.Secret), nil
 	})
@@ -363,14 +363,18 @@ func (s *Service) GetSession(sessionID string) (*Session, error) {
 
 // DeleteSession removes a session
 func (s *Service) DeleteSession(sessionID string) error {
-	return s.sessionStore.Delete(context.Background(), sessionID)
+	err := s.sessionStore.Delete(context.Background(), sessionID)
+	if err != nil {
+		return fmt.Errorf("deleting session: %w", err)
+	}
+	return nil
 }
 
 // RefreshSession extends a session's expiration time
 func (s *Service) RefreshSession(sessionID string) (*Session, error) {
 	session, err := s.sessionStore.Get(context.Background(), sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getting session for refresh: %w", err)
 	}
 
 	if !session.Active {
@@ -395,7 +399,7 @@ func (s *Service) RefreshSession(sessionID string) (*Session, error) {
 
 	err = s.sessionStore.Store(context.Background(), session)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storing refreshed session: %w", err)
 	}
 
 	return session, nil
@@ -420,7 +424,7 @@ func (s *Service) ExchangeOAuth2Code(provider, code, state string) (*OAuth2Resul
 
 	token, err := config.Exchange(context.Background(), code)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrOAuth2Failed, err)
+		return nil, fmt.Errorf("%w: %w", ErrOAuth2Failed, err)
 	}
 
 	// Get user info from provider
@@ -446,7 +450,7 @@ func (s *Service) fetchOAuth2UserInfo(provider, accessToken string) (map[string]
 	}
 
 	if providerConfig.UserInfoURL == "" {
-		return nil, fmt.Errorf("user info URL not configured for provider %s", provider)
+		return nil, fmt.Errorf("%w: %s", ErrUserInfoURLNotConfigured, provider)
 	}
 
 	// This is a simplified implementation - in practice, you'd make an HTTP request
@@ -463,7 +467,7 @@ func (s *Service) fetchOAuth2UserInfo(provider, accessToken string) (map[string]
 func generateRandomID(length int) (string, error) {
 	bytes := make([]byte, length)
 	if _, err := rand.Read(bytes); err != nil {
-		return "", err
+		return "", fmt.Errorf("generating random bytes: %w", err)
 	}
 	return hex.EncodeToString(bytes), nil
 }

@@ -15,7 +15,7 @@ type Config struct {
 // JWTConfig contains JWT-related configuration
 type JWTConfig struct {
 	Secret            string `yaml:"secret" required:"true" env:"SECRET"`
-	Expiration        int    `yaml:"expiration" default:"86400" env:"EXPIRATION"`       // 24 hours in seconds
+	Expiration        int    `yaml:"expiration" default:"86400" env:"EXPIRATION"`                  // 24 hours in seconds
 	RefreshExpiration int    `yaml:"refresh_expiration" default:"604800" env:"REFRESH_EXPIRATION"` // 7 days in seconds
 	Issuer            string `yaml:"issuer" default:"modular-auth" env:"ISSUER"`
 	Algorithm         string `yaml:"algorithm" default:"HS256" env:"ALGORITHM"`
@@ -90,7 +90,7 @@ func (c *JWTConfig) GetJWTExpiration() time.Duration {
 	return time.Duration(c.Expiration) * time.Second
 }
 
-// GetJWTRefreshExpiration returns the JWT refresh expiration as time.Duration  
+// GetJWTRefreshExpiration returns the JWT refresh expiration as time.Duration
 func (c *JWTConfig) GetJWTRefreshExpiration() time.Duration {
 	return time.Duration(c.RefreshExpiration) * time.Second
 }

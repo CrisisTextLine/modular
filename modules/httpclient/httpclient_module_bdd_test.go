@@ -80,9 +80,9 @@ func (ctx *HTTPClientBDDTestContext) theHTTPClientModuleIsInitialized() error {
 		return nil
 	}
 	
-	// Get the httpclient service
+	// Get the httpclient service (the service interface, not the raw client)
 	var clientService *HTTPClientModule
-	if err := ctx.app.GetService("httpclient", &clientService); err == nil {
+	if err := ctx.app.GetService("httpclient-service", &clientService); err == nil {
 		ctx.service = clientService
 	}
 	
@@ -595,9 +595,9 @@ func (ctx *HTTPClientBDDTestContext) setupApplicationWithConfig() error {
 		return nil
 	}
 	
-	// Get the httpclient service
+	// Get the httpclient service (the service interface, not the raw client)
 	var clientService *HTTPClientModule
-	if err := ctx.app.GetService("httpclient", &clientService); err == nil {
+	if err := ctx.app.GetService("httpclient-service", &clientService); err == nil {
 		ctx.service = clientService
 	}
 	

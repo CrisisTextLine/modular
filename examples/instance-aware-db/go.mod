@@ -9,7 +9,7 @@ replace github.com/CrisisTextLine/modular/modules/database => ../../modules/data
 require (
 	github.com/CrisisTextLine/modular v1.4.0
 	github.com/CrisisTextLine/modular/modules/database v1.1.0
-	github.com/mattn/go-sqlite3 v1.14.28
+	github.com/mattn/go-sqlite3 v1.14.30
 )
 
 require (

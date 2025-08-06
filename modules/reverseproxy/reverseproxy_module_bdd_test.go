@@ -118,7 +118,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredWithASingleBa
 	ctx.testServers = append(ctx.testServers, testServer)
 	
 	// Update config to use the test server
-	ctx.config.Backends["test-backend"].URL = testServer.URL
+	ctx.config.BackendServices["test-backend"] = testServer.URL
 	
 	return ctx.theReverseProxyModuleIsInitialized()
 }
@@ -165,22 +165,10 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredWithMultipleB
 	}
 	
 	// Update config with multiple backends
-	ctx.config.Backends = map[string]BackendConfig{
-		"backend-1": {
-			URL:                ctx.testServers[0].URL,
-			HealthCheckPath:    "/health",
-			HealthCheckTimeout: 5000,
-		},
-		"backend-2": {
-			URL:                ctx.testServers[1].URL,
-			HealthCheckPath:    "/health",
-			HealthCheckTimeout: 5000,
-		},
-		"backend-3": {
-			URL:                ctx.testServers[2].URL,
-			HealthCheckPath:    "/health",
-			HealthCheckTimeout: 5000,
-		},
+	ctx.config.BackendServices = map[string]string{
+		"backend-1": ctx.testServers[0].URL,
+		"backend-2": ctx.testServers[1].URL,
+		"backend-3": ctx.testServers[2].URL,
 	}
 	
 	return ctx.theReverseProxyModuleIsInitialized()
@@ -192,8 +180,8 @@ func (ctx *ReverseProxyBDDTestContext) iSendMultipleRequestsToTheProxy() error {
 
 func (ctx *ReverseProxyBDDTestContext) requestsShouldBeDistributedAcrossAllBackends() error {
 	// Verify multiple backends are configured
-	if len(ctx.service.config.Backends) < 2 {
-		return fmt.Errorf("expected multiple backends, got %d", len(ctx.service.config.Backends))
+	if len(ctx.service.config.BackendServices) < 2 {
+		return fmt.Errorf("expected multiple backends, got %d", len(ctx.service.config.BackendServices))
 	}
 	return nil
 }
@@ -210,11 +198,10 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithHealthChecksEnabled
 	}
 	
 	// Ensure health checks are enabled
-	for name, backend := range ctx.config.Backends {
-		backend.HealthCheckEnabled = true
-		backend.HealthCheckPath = "/health"
-		backend.HealthCheckInterval = 5000
-		ctx.config.Backends[name] = backend
+	ctx.config.HealthCheck.Enabled = true
+	ctx.config.HealthCheck.Interval = 5 * time.Second
+	ctx.config.HealthCheck.HealthEndpoints = map[string]string{
+		"test-backend": "/health",
 	}
 	
 	return ctx.theReverseProxyModuleIsInitialized()
@@ -245,8 +232,8 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCircuitBreakerEnabl
 	}
 	
 	// Ensure circuit breaker is enabled
-	ctx.config.CircuitBreaker.Enabled = true
-	ctx.config.CircuitBreaker.FailureThreshold = 3
+	ctx.config.CircuitBreakerConfig.Enabled = true
+	ctx.config.CircuitBreakerConfig.FailureThreshold = 3
 	
 	return ctx.theReverseProxyModuleIsInitialized()
 }
@@ -258,7 +245,7 @@ func (ctx *ReverseProxyBDDTestContext) aBackendFailsRepeatedly() error {
 
 func (ctx *ReverseProxyBDDTestContext) theCircuitBreakerShouldOpen() error {
 	// Verify circuit breaker configuration
-	if !ctx.service.config.CircuitBreaker.Enabled {
+	if !ctx.service.config.CircuitBreakerConfig.Enabled {
 		return fmt.Errorf("circuit breaker not enabled")
 	}
 	return nil
@@ -276,8 +263,8 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCachingEnabled() er
 	}
 	
 	// Ensure caching is enabled
-	ctx.config.Cache.Enabled = true
-	ctx.config.Cache.DefaultTTL = 300
+	ctx.config.CacheEnabled = true
+	ctx.config.CacheTTL = 300 * time.Second
 	
 	return ctx.theReverseProxyModuleIsInitialized()
 }
@@ -293,7 +280,7 @@ func (ctx *ReverseProxyBDDTestContext) theFirstRequestShouldHitTheBackend() erro
 
 func (ctx *ReverseProxyBDDTestContext) subsequentRequestsShouldBeServedFromCache() error {
 	// Verify caching is enabled
-	if !ctx.service.config.Cache.Enabled {
+	if !ctx.service.config.CacheEnabled {
 		return fmt.Errorf("caching not enabled")
 	}
 	return nil
@@ -306,11 +293,8 @@ func (ctx *ReverseProxyBDDTestContext) iHaveATenantAwareReverseProxyConfigured()
 	}
 	
 	// Add tenant-specific configuration
-	ctx.config.TenantRouting = &TenantRoutingConfig{
-		Enabled:      true,
-		HeaderName:   "X-Tenant-ID",
-		DefaultTenant: "default",
-	}
+	ctx.config.RequireTenantID = true
+	ctx.config.TenantIDHeader = "X-Tenant-ID"
 	
 	return ctx.theReverseProxyModuleIsInitialized()
 }
@@ -339,8 +323,9 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredForCompositeR
 	}
 	
 	// Add composite route configuration
-	ctx.config.CompositeRoutes = map[string]CompositeRouteConfig{
+	ctx.config.CompositeRoutes = map[string]CompositeRoute{
 		"/api/combined": {
+			Pattern:  "/api/combined",
 			Backends: []string{"backend-1", "backend-2"},
 			Strategy: "combine",
 		},
@@ -372,13 +357,16 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithRequestTransformati
 		return err
 	}
 	
-	// Add request transformation configuration
-	ctx.config.RequestTransforms = map[string]RequestTransformConfig{
-		"/api/*": {
-			AddHeaders: map[string]string{
-				"X-Forwarded-By": "reverse-proxy",
+	// Add backend configuration with header rewriting
+	ctx.config.BackendConfigs = map[string]BackendServiceConfig{
+		"backend-1": {
+			URL: "http://backend1.example.com",
+			HeaderRewriting: HeaderRewritingConfig{
+				SetHeaders: map[string]string{
+					"X-Forwarded-By": "reverse-proxy",
+				},
+				RemoveHeaders: []string{"Authorization"},
 			},
-			RemoveHeaders: []string{"Authorization"},
 		},
 	}
 	
@@ -386,9 +374,9 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithRequestTransformati
 }
 
 func (ctx *ReverseProxyBDDTestContext) theRequestShouldBeTransformedBeforeForwarding() error {
-	// Verify request transforms are configured
-	if len(ctx.service.config.RequestTransforms) == 0 {
-		return fmt.Errorf("no request transforms configured")
+	// Verify backend configs with header rewriting are configured
+	if len(ctx.service.config.BackendConfigs) == 0 {
+		return fmt.Errorf("no backend configs configured")
 	}
 	return nil
 }

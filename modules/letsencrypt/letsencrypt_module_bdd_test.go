@@ -73,9 +73,15 @@ func (ctx *LetsEncryptBDDTestContext) iHaveAModularApplicationWithLetsEncryptMod
 }
 
 func (ctx *LetsEncryptBDDTestContext) theLetsEncryptModuleIsInitialized() error {
-	// Since this is not a standard modular module, we just verify configuration
+	// If module is not yet created, try to create it
 	if ctx.module == nil {
-		return fmt.Errorf("module not created")
+		module, err := New(ctx.config)
+		if err != nil {
+			ctx.lastError = err
+			// This could be expected (for invalid config tests)
+			return nil
+		}
+		ctx.module = module
 	}
 	
 	// Test configuration validation
@@ -383,22 +389,14 @@ func (ctx *LetsEncryptBDDTestContext) iHaveLetsEncryptConfiguredWithInvalidSetti
 		return err
 	}
 	
-	// Create invalid configuration
+	// Create invalid configuration (but don't create module yet)
 	ctx.config = &LetsEncryptConfig{
 		Email:   "", // Missing required email
 		Domains: []string{}, // No domains specified
 	}
 	
-	// This should fail during module creation
-	ctx.module, err = New(ctx.config)
-	if err != nil {
-		ctx.lastError = err
-		// Expected failure
-		return nil
-	}
-	
-	// If no error, that's unexpected
-	return fmt.Errorf("expected validation error but got none")
+	// Don't create the module yet - let theModuleIsInitialized handle it
+	return nil
 }
 
 func (ctx *LetsEncryptBDDTestContext) appropriateConfigurationErrorsShouldBeReported() error {

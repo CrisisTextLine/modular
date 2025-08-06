@@ -113,7 +113,13 @@ func (m *HTTPServerModule) Name() string {
 // Default values are provided for common use cases, but can be
 // overridden through configuration files or environment variables.
 func (m *HTTPServerModule) RegisterConfig(app modular.Application) error {
-	// Register the configuration with default values
+	// Check if httpserver config is already registered (e.g., by tests)
+	if _, err := app.GetConfigSection(m.Name()); err == nil {
+		// Config already registered, skip to avoid overriding
+		return nil
+	}
+
+	// Register default config only if not already present
 	defaultConfig := &HTTPServerConfig{
 		Host:            "0.0.0.0",
 		Port:            8080,
@@ -148,6 +154,14 @@ func (m *HTTPServerModule) Init(app modular.Application) error {
 		return fmt.Errorf("failed to get config section '%s': %w", m.Name(), err)
 	}
 	m.config = cfg.GetConfig().(*HTTPServerConfig)
+
+	// Debug: Check TLS config after loading
+	if m.config.TLS != nil {
+		fmt.Printf("DEBUG: HTTPServer module loaded with TLS config - enabled: %v, autoGenerate: %v\n", 
+			m.config.TLS.Enabled, m.config.TLS.AutoGenerate)
+	} else {
+		fmt.Printf("DEBUG: HTTPServer module loaded without TLS config\n")
+	}
 
 	return nil
 }

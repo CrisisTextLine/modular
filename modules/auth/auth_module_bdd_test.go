@@ -277,8 +277,25 @@ func (ctx *AuthBDDTestContext) iRefreshTheToken() error {
 		return fmt.Errorf("no token to refresh")
 	}
 
-	// We need the refresh token, not the access token
-	// For now, we'll simulate this by generating a new token
+	// First, create a user in the user store for refresh functionality
+	refreshUser := &User{
+		ID:       "refresh-user",
+		Email:    "refresh@example.com",
+		Active:   true,
+		Roles:    []string{"user"},
+		Permissions: []string{"read"},
+	}
+	
+	// Create the user in the store
+	if err := ctx.service.userStore.CreateUser(context.Background(), refreshUser); err != nil {
+		// If user already exists, that's fine
+		if err != ErrUserAlreadyExists {
+			ctx.lastError = err
+			return nil
+		}
+	}
+
+	// Generate a token pair for the user
 	tokenPair, err := ctx.service.GenerateToken("refresh-user", map[string]interface{}{
 		"email": "refresh@example.com",
 	})

@@ -1,7 +1,6 @@
 package reverseproxy
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -305,7 +304,7 @@ func (ctx *ReverseProxyBDDTestContext) iSendRequestsWithDifferentTenantContexts(
 
 func (ctx *ReverseProxyBDDTestContext) requestsShouldBeRoutedBasedOnTenantConfiguration() error {
 	// Verify tenant routing is configured
-	if ctx.service.config.TenantRouting == nil || !ctx.service.config.TenantRouting.Enabled {
+	if !ctx.service.config.RequireTenantID {
 		return fmt.Errorf("tenant routing not enabled")
 	}
 	return nil

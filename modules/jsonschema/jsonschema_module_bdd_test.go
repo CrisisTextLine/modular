@@ -2,6 +2,7 @@ package jsonschema
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ type JSONSchemaBDDTestContext struct {
 	lastError      error
 	compiledSchema Schema
 	validationPass bool
+	tempFile       string
 }
 
 func (ctx *JSONSchemaBDDTestContext) resetContext() {
@@ -84,6 +86,7 @@ func (ctx *JSONSchemaBDDTestContext) iCompileASchemaFromAJSONString() error {
 		return fmt.Errorf("jsonschema service not available")
 	}
 	
+	// Create a temporary schema file
 	schemaString := `{
 		"type": "object",
 		"properties": {
@@ -93,10 +96,24 @@ func (ctx *JSONSchemaBDDTestContext) iCompileASchemaFromAJSONString() error {
 		"required": ["name"]
 	}`
 	
-	schema, err := ctx.service.CompileSchemaFromString(schemaString)
+	// Write to temporary file
+	tmpFile, err := os.CreateTemp("", "schema-*.json")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer tmpFile.Close()
+	
+	_, err = tmpFile.WriteString(schemaString)
+	if err != nil {
+		return fmt.Errorf("failed to write schema: %w", err)
+	}
+	
+	ctx.tempFile = tmpFile.Name()
+	
+	schema, err := ctx.service.CompileSchema(ctx.tempFile)
 	if err != nil {
 		ctx.lastError = err
-		return nil
+		return fmt.Errorf("failed to compile schema: %w", err)
 	}
 	
 	ctx.compiledSchema = schema
@@ -248,7 +265,19 @@ func (ctx *JSONSchemaBDDTestContext) iTryToCompileAnInvalidSchema() error {
 	
 	invalidSchemaString := `{"type": "invalid_type"}` // Invalid schema type
 	
-	_, err := ctx.service.CompileSchemaFromString(invalidSchemaString)
+	// Write to temporary file
+	tmpFile, err := os.CreateTemp("", "invalid-schema-*.json")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer tmpFile.Close()
+	
+	_, err = tmpFile.WriteString(invalidSchemaString)
+	if err != nil {
+		return fmt.Errorf("failed to write schema: %w", err)
+	}
+	
+	_, err = ctx.service.CompileSchema(tmpFile.Name())
 	if err != nil {
 		ctx.lastError = err
 	}

@@ -107,8 +107,12 @@ func (ctx *SchedulerBDDTestContext) iHaveASchedulerConfiguredForImmediateExecuti
 }
 
 func (ctx *SchedulerBDDTestContext) iScheduleAJobToRunImmediately() error {
+	// Ensure service is available
 	if ctx.service == nil {
-		return fmt.Errorf("service not available")
+		err := ctx.theSchedulerServiceShouldBeAvailable()
+		if err != nil {
+			return err
+		}
 	}
 
 	// Start the service
@@ -161,8 +165,12 @@ func (ctx *SchedulerBDDTestContext) iHaveASchedulerConfiguredForDelayedExecution
 }
 
 func (ctx *SchedulerBDDTestContext) iScheduleAJobToRunInTheFuture() error {
+	// Ensure service is available
 	if ctx.service == nil {
-		return fmt.Errorf("service not available")
+		err := ctx.theSchedulerServiceShouldBeAvailable()
+		if err != nil {
+			return err
+		}
 	}
 
 	// Start the service
@@ -220,8 +228,12 @@ func (ctx *SchedulerBDDTestContext) iHaveASchedulerWithPersistenceEnabled() erro
 }
 
 func (ctx *SchedulerBDDTestContext) iScheduleMultipleJobs() error {
+	// Ensure service is available
 	if ctx.service == nil {
-		return fmt.Errorf("service not available")
+		err := ctx.theSchedulerServiceShouldBeAvailable()
+		if err != nil {
+			return err
+		}
 	}
 
 	// Start the service

@@ -264,8 +264,32 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 	
 	logger := &testLogger{}
 
-	// Create provider with the HTTP server config
-	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
+	// Create a copy of the config to avoid the original being modified
+	// during the configuration loading process
+	configCopy := &HTTPServerConfig{
+		Host:            ctx.serverConfig.Host,
+		Port:            ctx.serverConfig.Port,
+		ReadTimeout:     ctx.serverConfig.ReadTimeout,
+		WriteTimeout:    ctx.serverConfig.WriteTimeout,
+		IdleTimeout:     ctx.serverConfig.IdleTimeout,
+		ShutdownTimeout: ctx.serverConfig.ShutdownTimeout,
+	}
+	
+	// Copy TLS config if it exists
+	if ctx.serverConfig.TLS != nil {
+		configCopy.TLS = &TLSConfig{
+			Enabled:      ctx.serverConfig.TLS.Enabled,
+			AutoGenerate: ctx.serverConfig.TLS.AutoGenerate,
+			CertFile:     ctx.serverConfig.TLS.CertFile,
+			KeyFile:      ctx.serverConfig.TLS.KeyFile,
+			Domains:      make([]string, len(ctx.serverConfig.TLS.Domains)),
+			UseService:   ctx.serverConfig.TLS.UseService,
+		}
+		copy(configCopy.TLS.Domains, ctx.serverConfig.TLS.Domains)
+	}
+
+	// Create provider with the copied config
+	serverConfigProvider := modular.NewStdConfigProvider(configCopy)
 
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
@@ -302,6 +326,19 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 		fmt.Printf("DEBUG: setupApplicationWithConfig() before Init - TLS config valid\n")
 	} else {
 		fmt.Printf("DEBUG: setupApplicationWithConfig() before Init - TLS config is nil\n")
+	}
+	
+	// Debug: Check what config the app actually has registered
+	if testConfigSection, err := ctx.app.GetConfigSection("httpserver"); err != nil {
+		fmt.Printf("DEBUG: Cannot get registered config section before Init: %v\n", err)
+	} else {
+		testActualConfig := testConfigSection.GetConfig().(*HTTPServerConfig)
+		if testActualConfig.TLS != nil {
+			fmt.Printf("DEBUG: Before Init, registered config has TLS - Enabled: %v, AutoGenerate: %v\n", 
+				testActualConfig.TLS.Enabled, testActualConfig.TLS.AutoGenerate)
+		} else {
+			fmt.Printf("DEBUG: Before Init, registered config has no TLS\n")
+		}
 	}
 
 	// Initialize
@@ -643,7 +680,17 @@ func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFil
 	}
 
 	ctx.isHTTPS = true
-	return ctx.setupApplicationWithConfig()
+	err := ctx.setupApplicationWithConfig()
+	
+	// Debug: check if our test config is still intact after setup
+	if ctx.serverConfig.TLS != nil {
+		fmt.Printf("DEBUG: After setupApplicationWithConfig, test config still has TLS - Enabled: %v, AutoGenerate: %v\n", 
+			ctx.serverConfig.TLS.Enabled, ctx.serverConfig.TLS.AutoGenerate)
+	} else {
+		fmt.Printf("DEBUG: After setupApplicationWithConfig, test config lost TLS!\n")
+	}
+	
+	return err
 }
 
 func (ctx *HTTPServerBDDTestContext) theHTTPSServerIsStartedWithAutoGeneration() error {
@@ -667,14 +714,20 @@ func (ctx *HTTPServerBDDTestContext) theServerShouldGenerateSelfSignedCertificat
 		return fmt.Errorf("debug: test config TLS is nil")
 	}
 	
-	// Debug: print the actual config values
-	if ctx.service.config.TLS == nil {
-		return fmt.Errorf("auto-TLS not enabled: TLS config is nil (test config has TLS.Enabled=%v, TLS.AutoGenerate=%v)", 
+	// Debug: Let's check what config section we can get from the app
+	configSection, err := ctx.app.GetConfigSection("httpserver")
+	if err != nil {
+		return fmt.Errorf("debug: cannot get config section: %v", err)
+	}
+	
+	actualConfig := configSection.GetConfig().(*HTTPServerConfig)
+	if actualConfig.TLS == nil {
+		return fmt.Errorf("debug: actual config TLS is nil (test config TLS.Enabled=%v, TLS.AutoGenerate=%v)", 
 			ctx.serverConfig.TLS.Enabled, ctx.serverConfig.TLS.AutoGenerate)
 	}
 	
-	if !ctx.service.config.TLS.AutoGenerate {
-		return fmt.Errorf("auto-TLS not enabled: AutoGenerate is %v", ctx.service.config.TLS.AutoGenerate)
+	if !actualConfig.TLS.AutoGenerate {
+		return fmt.Errorf("auto-TLS not enabled: AutoGenerate is %v", actualConfig.TLS.AutoGenerate)
 	}
 
 	return nil

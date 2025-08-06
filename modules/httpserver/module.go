@@ -155,14 +155,6 @@ func (m *HTTPServerModule) Init(app modular.Application) error {
 	}
 	m.config = cfg.GetConfig().(*HTTPServerConfig)
 
-	// Debug: Check TLS config after loading
-	if m.config.TLS != nil {
-		fmt.Printf("DEBUG: HTTPServer module loaded with TLS config - enabled: %v, autoGenerate: %v\n", 
-			m.config.TLS.Enabled, m.config.TLS.AutoGenerate)
-	} else {
-		fmt.Printf("DEBUG: HTTPServer module loaded without TLS config\n")
-	}
-
 	return nil
 }
 

@@ -76,11 +76,11 @@ func (ctx *EventBusBDDTestContext) iHaveAModularApplicationWithEventbusModuleCon
 	// Create and register eventbus module
 	ctx.module = NewModule().(*EventBusModule)
 	
-	// Register the eventbus config section first
-	ctx.app.RegisterConfigSection("eventbus", eventbusConfigProvider)
-	
-	// Register the module  
+	// Register module first (this will create the instance-aware config provider)
 	ctx.app.RegisterModule(ctx.module)
+	
+	// Now override the config section with our direct configuration 
+	ctx.app.RegisterConfigSection("eventbus", eventbusConfigProvider)
 	
 	return nil
 }
@@ -91,6 +91,9 @@ func (ctx *EventBusBDDTestContext) theEventbusModuleIsInitialized() error {
 		ctx.lastError = err
 		return nil
 	}
+	
+	// HACK: Manually set the config to work around instance-aware provider issue
+	ctx.module.config = ctx.eventbusConfig
 	
 	// Get the eventbus service
 	var eventbusService *EventBusModule

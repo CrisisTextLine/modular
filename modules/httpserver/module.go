@@ -278,7 +278,7 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 		timeout = time.Until(deadline)
 	}
 
-	checkCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	check := func() error {

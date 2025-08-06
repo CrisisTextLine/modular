@@ -294,7 +294,7 @@ func (s *MemoryJobStore) SaveToFile(jobs []Job, filePath string) error {
 	}
 
 	// Write to file
-	err = os.WriteFile(filePath, data, 0644)
+	err = os.WriteFile(filePath, data, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write jobs to file: %w", err)
 	}

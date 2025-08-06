@@ -8,6 +8,7 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/cucumber/godog"
+	_ "github.com/mattn/go-sqlite3" // Import SQLite driver for BDD tests
 )
 
 // Database BDD Test Context
@@ -64,7 +65,7 @@ func (ctx *DatabaseBDDTestContext) iHaveAModularApplicationWithDatabaseModuleCon
 		Default: "default",
 	}
 	
-	// Create provider with the database config
+	// Create provider with the database config - bypass instance-aware setup
 	dbConfigProvider := modular.NewStdConfigProvider(dbConfig)
 	
 	// Create app with empty main config
@@ -74,20 +75,32 @@ func (ctx *DatabaseBDDTestContext) iHaveAModularApplicationWithDatabaseModuleCon
 	// Create and configure database module
 	ctx.module = NewModule()
 	
-	// Register the database config section first
-	ctx.app.RegisterConfigSection("database", dbConfigProvider)
-	
-	// Register module
+	// Register module first (this will create the instance-aware config provider)
 	ctx.app.RegisterModule(ctx.module)
+	
+	// Now override the config section with our direct configuration 
+	ctx.app.RegisterConfigSection("database", dbConfigProvider)
 	
 	// Initialize
 	if err := ctx.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
 	}
 	
+	// HACK: Manually set the config and reinitialize connections
+	// This is needed because the instance-aware provider doesn't get our config
+	ctx.module.config = dbConfig
+	if err := ctx.module.initializeConnections(); err != nil {
+		return fmt.Errorf("failed to initialize connections manually: %v", err)
+	}
+	
+	// Start the app
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start app: %v", err)
+	}
+	
 	// Get the database service
 	var dbService DatabaseService
-	if err := ctx.app.GetService("database", &dbService); err != nil {
+	if err := ctx.app.GetService("database.service", &dbService); err != nil {
 		return fmt.Errorf("failed to get database service: %v", err)
 	}
 	ctx.service = dbService

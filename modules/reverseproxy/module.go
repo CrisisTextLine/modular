@@ -2607,12 +2607,10 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 	}
 
 	// Now perform dry run comparison in the background (async)
-	go func() {
-		// Create a new context for background processing to avoid cancellation when the original request completes
-		backgroundCtx := context.Background()
-
+	go func(requestCtx context.Context) {
+		// Use the passed context for background processing
 		// Create a copy of the request for background comparison with preserved body
-		reqCopy := r.Clone(backgroundCtx)
+		reqCopy := r.Clone(requestCtx)
 		if len(bodyBytes) > 0 {
 			reqCopy.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			reqCopy.ContentLength = int64(len(bodyBytes))
@@ -2639,7 +2637,7 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 		endpointPath := reqCopy.URL.Path
 
 		// Process dry run comparison with actual URLs using the background context
-		result, err := m.dryRunHandler.ProcessDryRun(backgroundCtx, reqCopy, primaryURL, secondaryURL)
+		result, err := m.dryRunHandler.ProcessDryRun(requestCtx, reqCopy, primaryURL, secondaryURL)
 		if err != nil {
 			if m.app != nil && m.app.Logger() != nil {
 				m.app.Logger().Error("Background dry run processing failed", "error", err)
@@ -2669,7 +2667,7 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 				}
 			}
 		}
-	}()
+	}(ctx)
 }
 
 // isEmptyComparisonResult checks if a ComparisonResult is empty or represents no differences.

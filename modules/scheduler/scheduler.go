@@ -163,6 +163,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// Start worker goroutines
 	for i := 0; i < s.workerCount; i++ {
 		s.wg.Add(1)
+		//nolint:contextcheck // Context is passed through s.ctx field
 		go s.worker(i)
 	}
 
@@ -411,7 +412,7 @@ func (s *Scheduler) ScheduleJob(job Job) (string, error) {
 	// Store the job
 	err := s.jobStore.AddJob(job)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to add job to store: %w", err)
 	}
 
 	// Register with cron if recurring
@@ -480,7 +481,7 @@ func (s *Scheduler) ScheduleRecurring(name string, cronExpr string, jobFunc JobF
 func (s *Scheduler) CancelJob(jobID string) error {
 	job, err := s.jobStore.GetJob(jobID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get job for cancellation: %w", err)
 	}
 
 	// Update job status
@@ -488,7 +489,7 @@ func (s *Scheduler) CancelJob(jobID string) error {
 	job.UpdatedAt = time.Now()
 	err = s.jobStore.UpdateJob(job)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to update job status to cancelled: %w", err)
 	}
 
 	// Remove from cron if it's recurring
@@ -506,17 +507,29 @@ func (s *Scheduler) CancelJob(jobID string) error {
 
 // GetJob returns information about a scheduled job
 func (s *Scheduler) GetJob(jobID string) (Job, error) {
-	return s.jobStore.GetJob(jobID)
+	job, err := s.jobStore.GetJob(jobID)
+	if err != nil {
+		return Job{}, fmt.Errorf("failed to get job: %w", err)
+	}
+	return job, nil
 }
 
 // ListJobs returns a list of all scheduled jobs
 func (s *Scheduler) ListJobs() ([]Job, error) {
-	return s.jobStore.GetJobs()
+	jobs, err := s.jobStore.GetJobs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list jobs: %w", err)
+	}
+	return jobs, nil
 }
 
 // GetJobHistory returns the execution history for a job
 func (s *Scheduler) GetJobHistory(jobID string) ([]JobExecution, error) {
-	return s.jobStore.GetJobExecutions(jobID)
+	history, err := s.jobStore.GetJobExecutions(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get job history: %w", err)
+	}
+	return history, nil
 }
 
 // ResumeJob resumes a persisted job
@@ -543,7 +556,7 @@ func (s *Scheduler) ResumeJob(job Job) (string, error) {
 	// Store the job
 	err := s.jobStore.UpdateJob(job)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to update job for resume: %w", err)
 	}
 
 	return job.ID, nil
@@ -575,7 +588,7 @@ func (s *Scheduler) ResumeRecurringJob(job Job) (string, error) {
 	// Store the job
 	err = s.jobStore.UpdateJob(job)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to update job for reschedule: %w", err)
 	}
 
 	// Register with cron if running

@@ -58,11 +58,17 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+)
+
+// Module errors
+var (
+	ErrJobStoreNotPersistable = errors.New("job store does not implement PersistableJobStore interface")
 )
 
 // ModuleName is the unique identifier for the scheduler module.
@@ -338,7 +344,7 @@ func (m *SchedulerModule) loadPersistedJobs() error {
 	}
 
 	m.logger.Warn("Job store does not support persistence")
-	return fmt.Errorf("job store does not implement PersistableJobStore interface")
+	return ErrJobStoreNotPersistable
 }
 
 // savePersistedJobs saves jobs to the persistence file
@@ -362,5 +368,5 @@ func (m *SchedulerModule) savePersistedJobs() error {
 	}
 
 	m.logger.Warn("Job store does not support persistence")
-	return fmt.Errorf("job store does not implement PersistableJobStore interface")
+	return ErrJobStoreNotPersistable
 }

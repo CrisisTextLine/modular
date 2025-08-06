@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 
@@ -17,7 +18,7 @@ type DatabaseBDDTestContext struct {
 	queryResult     interface{}
 	queryError      error
 	lastError       error
-	transactionID   string
+	transaction     *sql.Tx
 	healthStatus    bool
 	originalFeeders []modular.Feeder
 }
@@ -35,7 +36,7 @@ func (ctx *DatabaseBDDTestContext) resetContext() {
 	ctx.queryResult = nil
 	ctx.queryError = nil
 	ctx.lastError = nil
-	ctx.transactionID = ""
+	ctx.transaction = nil
 	ctx.healthStatus = false
 }
 
@@ -71,8 +72,7 @@ func (ctx *DatabaseBDDTestContext) iHaveAModularApplicationWithDatabaseModuleCon
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
 	
 	// Create and configure database module
-	module := NewModule()
-	ctx.module = module.(*Module)
+	ctx.module = NewModule()
 	
 	// Register the database config section first
 	ctx.app.RegisterConfigSection("database", dbConfigProvider)
@@ -208,7 +208,7 @@ func (ctx *DatabaseBDDTestContext) iTryToExecuteAQuery() error {
 	}
 	
 	// Try to execute a query
-	ctx.queryResult, ctx.queryError = ctx.service.ExecuteQuery(context.Background(), "default", "SELECT 1")
+	_, ctx.queryError = ctx.service.Query("SELECT 1")
 	return nil
 }
 
@@ -232,22 +232,23 @@ func (ctx *DatabaseBDDTestContext) iStartADatabaseTransaction() error {
 	}
 	
 	// Start a transaction
-	txID, err := ctx.service.BeginTransaction(context.Background(), "default")
+	tx, err := ctx.service.Begin()
 	if err != nil {
 		ctx.lastError = err
 		return nil
 	}
-	ctx.transactionID = txID
+	ctx.transaction = tx
+	return nil
 	return nil
 }
 
 func (ctx *DatabaseBDDTestContext) iShouldBeAbleToExecuteQueriesWithinTheTransaction() error {
-	if ctx.transactionID == "" {
+	if ctx.transaction == nil {
 		return fmt.Errorf("no transaction started")
 	}
 	
 	// Execute query within transaction
-	_, err := ctx.service.ExecuteQuery(context.Background(), "default", "SELECT 1", ctx.transactionID)
+	_, err := ctx.transaction.Query("SELECT 1")
 	if err != nil {
 		ctx.lastError = err
 		return nil
@@ -256,16 +257,17 @@ func (ctx *DatabaseBDDTestContext) iShouldBeAbleToExecuteQueriesWithinTheTransac
 }
 
 func (ctx *DatabaseBDDTestContext) iShouldBeAbleToCommitOrRollbackTheTransaction() error {
-	if ctx.transactionID == "" {
+	if ctx.transaction == nil {
 		return fmt.Errorf("no transaction to commit/rollback")
 	}
 	
 	// Try to commit transaction
-	err := ctx.service.CommitTransaction(context.Background(), "default", ctx.transactionID)
+	err := ctx.transaction.Commit()
 	if err != nil {
 		ctx.lastError = err
 		return nil
 	}
+	ctx.transaction = nil // Clear transaction after commit
 	return nil
 }
 
@@ -282,7 +284,7 @@ func (ctx *DatabaseBDDTestContext) iMakeMultipleConcurrentDatabaseRequests() err
 	// Simulate multiple concurrent requests
 	for i := 0; i < 3; i++ {
 		go func() {
-			ctx.service.ExecuteQuery(context.Background(), "default", "SELECT 1")
+			ctx.service.Query("SELECT 1")
 		}()
 	}
 	return nil
@@ -304,7 +306,7 @@ func (ctx *DatabaseBDDTestContext) iPerformAHealthCheck() error {
 	}
 	
 	// Perform health check
-	err := ctx.service.HealthCheck(context.Background(), "default")
+	err := ctx.service.Ping(context.Background())
 	ctx.healthStatus = (err == nil)
 	if err != nil {
 		ctx.lastError = err

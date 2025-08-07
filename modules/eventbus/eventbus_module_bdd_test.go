@@ -530,8 +530,13 @@ func (ctx *EventBusBDDTestContext) theMemoryEngineShouldBeUsed() error {
 		return fmt.Errorf("eventbus service not available")
 	}
 	
+	// Debug: print the config
+	if ctx.service.config == nil {
+		return fmt.Errorf("eventbus service config is nil")
+	}
+	
 	if ctx.service.config.Engine != "memory" {
-		return fmt.Errorf("expected memory engine, got %s", ctx.service.config.Engine)
+		return fmt.Errorf("expected memory engine, got '%s'", ctx.service.config.Engine)
 	}
 	
 	return nil

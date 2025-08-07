@@ -337,6 +337,11 @@ func (ctx *DatabaseBDDTestContext) indicateWhetherTheDatabaseIsAccessible() erro
 	return nil
 }
 
+func (ctx *DatabaseBDDTestContext) iHaveADatabaseModuleConfigured() error {
+	// This is the same as the background step but for the health check scenario
+	return ctx.iHaveAModularApplicationWithDatabaseModuleConfigured()
+}
+
 // Simple test logger for database BDD tests
 type testLogger struct{}
 
@@ -392,6 +397,7 @@ func InitializeDatabaseScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^connections should be reused properly$`, testCtx.connectionsShouldBeReusedProperly)
 
 	// Health check steps
+	ctx.Step(`^I have a database module configured$`, testCtx.iHaveADatabaseModuleConfigured)
 	ctx.Step(`^I perform a health check$`, testCtx.iPerformAHealthCheck)
 	ctx.Step(`^the health check should report database status$`, testCtx.theHealthCheckShouldReportDatabaseStatus)
 	ctx.Step(`^indicate whether the database is accessible$`, testCtx.indicateWhetherTheDatabaseIsAccessible)

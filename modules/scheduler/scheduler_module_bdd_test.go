@@ -302,9 +302,14 @@ func (ctx *SchedulerBDDTestContext) iScheduleMultipleJobs() error {
 			RunAt:   time.Now().Add(time.Minute),
 			JobFunc: testJob,
 		}
-		_, err := ctx.service.ScheduleJob(job)
+		jobID, err := ctx.service.ScheduleJob(job)
 		if err != nil {
 			return fmt.Errorf("failed to schedule job %d: %w", i, err)
+		}
+		
+		// Store the first job ID for cancellation tests
+		if i == 0 {
+			ctx.jobID = jobID
 		}
 	}
 
@@ -490,10 +495,21 @@ func (ctx *SchedulerBDDTestContext) iHaveASchedulerWithRunningJobs() error {
 }
 
 func (ctx *SchedulerBDDTestContext) iCancelAScheduledJob() error {
-	// In a real implementation, would cancel a job
+	// Cancel the scheduled job
 	if ctx.jobID == "" {
 		return fmt.Errorf("no job to cancel")
 	}
+	
+	// Cancel the job using the service
+	if ctx.service == nil {
+		return fmt.Errorf("scheduler service not available")
+	}
+	
+	err := ctx.service.CancelJob(ctx.jobID)
+	if err != nil {
+		return fmt.Errorf("failed to cancel job: %w", err)
+	}
+	
 	return nil
 }
 

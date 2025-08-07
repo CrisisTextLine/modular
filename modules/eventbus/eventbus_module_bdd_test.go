@@ -171,9 +171,11 @@ func (ctx *EventBusBDDTestContext) iSubscribeToTopicWithAHandler(topic string) e
 	
 	// Create a handler that captures events
 	handler := func(handlerCtx context.Context, event Event) error {
+		fmt.Printf("DEBUG: Handler called with event - Topic: %s, Payload: %v\n", event.Topic, event.Payload)
 		ctx.mutex.Lock()
 		defer ctx.mutex.Unlock()
 		ctx.receivedEvents = append(ctx.receivedEvents, event)
+		fmt.Printf("DEBUG: Total received events now: %d\n", len(ctx.receivedEvents))
 		return nil
 	}
 	
@@ -210,8 +212,8 @@ func (ctx *EventBusBDDTestContext) iPublishAnEventToTopicWithPayload(topic, payl
 	
 	fmt.Printf("DEBUG: Event published successfully\n")
 	
-	// Give a moment for synchronous processing
-	time.Sleep(10 * time.Millisecond)
+	// Give more time for event processing
+	time.Sleep(500 * time.Millisecond)
 	
 	return nil
 }

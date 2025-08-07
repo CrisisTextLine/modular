@@ -326,7 +326,7 @@ func GenerateStandaloneConfigFile(outputDir string, options *ConfigOptions) erro
 
 	// Write the generated config to a file
 	outputFile := filepath.Join(outputDir, fmt.Sprintf("%s.go", strings.ToLower(options.Name)))
-	if err := os.WriteFile(outputFile, content.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(outputFile, content.Bytes(), 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -384,7 +384,7 @@ func generateYAMLSample(outputDir string, options *ConfigOptions) error {
 
 	// Write the sample YAML to a file
 	outputFile := filepath.Join(outputDir, "config-sample.yaml")
-	if err := os.WriteFile(outputFile, content.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(outputFile, content.Bytes(), 0600); err != nil {
 		return fmt.Errorf("failed to write YAML sample: %w", err)
 	}
 
@@ -412,7 +412,7 @@ func generateJSONSample(outputDir string, options *ConfigOptions) error {
 
 	// Write the sample JSON to a file
 	outputFile := filepath.Join(outputDir, "config-sample.json")
-	if err := os.WriteFile(outputFile, content.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(outputFile, content.Bytes(), 0600); err != nil {
 		return fmt.Errorf("failed to write JSON sample: %w", err)
 	}
 
@@ -475,9 +475,6 @@ func (c *{{.ConfigName}}) Validate() error {
 	return nil
 }
 `
-
-// Template for generating a field in a config struct
-const fieldTemplateText = `{{define "field"}}{{.Name}} {{.Type}} ` + "`" + `{{range $i, $tag := .Tags}}{{if $i}} {{end}}{{$tag}}:"{{.Name | ToLowerF}}"{{end}}{{if .IsRequired}} validate:"required"{{end}}{{if .DefaultValue}} default:"{{.DefaultValue}}"{{end}}` + "`" + `{{if .Description}} // {{.Description}}{{end}}{{end}}`
 
 // Template for generating a sample YAML configuration file
 const yamlTemplateText = `# Sample configuration

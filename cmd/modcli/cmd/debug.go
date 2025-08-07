@@ -39,7 +39,7 @@ func NewDebugCommand() *cobra.Command {
 These tools help diagnose common issues like interface matching failures,
 missing dependencies, and circular dependencies.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Help()
+			_ = cmd.Help()
 		},
 	}
 
@@ -74,8 +74,8 @@ Examples:
 	cmd.Flags().StringP("interface", "i", "", "The interface to check against (e.g., 'http.Handler')")
 	cmd.Flags().BoolP("verbose", "v", false, "Show detailed reflection information")
 
-	cmd.MarkFlagRequired("type")
-	cmd.MarkFlagRequired("interface")
+	_ = cmd.MarkFlagRequired("type")
+	_ = cmd.MarkFlagRequired("interface")
 
 	return cmd
 }
@@ -1082,7 +1082,7 @@ func detectCircularDependencies(provided, required []ServiceInfo) []string {
 				if cycleStart != -1 {
 					cyclePath := path[cycleStart:]
 					cyclePath = append(cyclePath, dep) // Complete the cycle
-					cycles = append(cycles, fmt.Sprintf("%s", strings.Join(cyclePath, " → ")))
+					cycles = append(cycles, strings.Join(cyclePath, " → "))
 				}
 				return true
 			}

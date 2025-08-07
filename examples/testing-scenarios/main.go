@@ -1,6 +1,10 @@
 package main
 
 import (
+	"errors"
+	"context"
+
+import "context"
 	"context"
 	"encoding/json"
 	"flag"
@@ -487,12 +491,13 @@ func (t *TestingApp) startMockBackend(backend *MockBackend) {
 	}
 
 	backend.server = &http.Server{
+		ReadHeaderTimeout: 10 * time.Second,
 		Addr:    ":" + strconv.Itoa(backend.Port),
 		Handler: mux,
 	}
 
 	t.app.Logger().Info("Starting mock backend", "name", backend.Name, "port", backend.Port)
-	if err := backend.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := backend.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		t.app.Logger().Error("Mock backend error", "name", backend.Name, "error", err)
 	}
 }
@@ -603,7 +608,7 @@ func (t *TestingApp) runHealthCheckScenario(app *TestingApp) error {
 
 			fmt.Printf("  Testing %s backend health (%s)... ", backend, endpoint)
 
-			resp, err := t.httpClient.Get(endpoint)
+			req, _ := http.NewRequestWithContext(context.Background(), "GET", endpoint, nil); resp, err := t.httpClient.Do(req)
 			if err != nil {
 				fmt.Printf("FAIL - %v\n", err)
 				continue
@@ -626,7 +631,7 @@ func (t *TestingApp) runHealthCheckScenario(app *TestingApp) error {
 
 	// Test if /health gets a proper response or 404 from the reverse proxy
 	proxyURL := "http://localhost:8080/health"
-	resp, err := t.httpClient.Get(proxyURL)
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", proxyURL, nil); resp, err := t.httpClient.Do(req)
 	if err != nil {
 		fmt.Printf("FAIL - %v\n", err)
 	} else {
@@ -665,7 +670,7 @@ func (t *TestingApp) runHealthCheckScenario(app *TestingApp) error {
 		proxyURL := fmt.Sprintf("http://localhost:8080%s", endpoint)
 		fmt.Printf("    Testing %s (proxied to backend)... ", endpoint)
 
-		resp, err := t.httpClient.Get(proxyURL)
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", proxyURL, nil); resp, err := t.httpClient.Do(req)
 		if err != nil {
 			fmt.Printf("FAIL - %v\n", err)
 			continue
@@ -705,7 +710,7 @@ func (t *TestingApp) runLoadTestScenario(app *TestingApp) error {
 			semaphore <- struct{}{}        // Acquire semaphore
 			defer func() { <-semaphore }() // Release semaphore
 
-			req, err := http.NewRequest("GET", endpoint, nil)
+			req, err := http.NewRequestWithContext(context.Background(), "GET", endpoint, nil)
 			if err != nil {
 				results <- fmt.Errorf("request %d: create request failed: %w", requestID, err)
 				return
@@ -779,7 +784,7 @@ func (t *TestingApp) runFailoverScenario(app *TestingApp) error {
 
 	// Test 1: Normal operation
 	fmt.Println("  Phase 1: Testing normal operation")
-	resp, err := t.httpClient.Get("http://localhost:8080/api/v1/test")
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/api/v1/test", nil); resp, err := t.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("normal operation test failed: %w", err)
 	}
@@ -806,7 +811,7 @@ func (t *TestingApp) runFailoverScenario(app *TestingApp) error {
 		fmt.Println("    Making requests to trigger circuit breaker...")
 		failureCount := 0
 		for i := 0; i < 10; i++ {
-			resp, err := t.httpClient.Get("http://localhost:8080/unstable/test")
+			req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/unstable/test", nil); resp, err := t.httpClient.Do(req)
 			if err != nil {
 				failureCount++
 				fmt.Printf("    Request %d: Network error\n", i+1)
@@ -831,7 +836,7 @@ func (t *TestingApp) runFailoverScenario(app *TestingApp) error {
 		fmt.Println("  Phase 3: Testing circuit breaker behavior")
 		time.Sleep(2 * time.Second) // Allow circuit breaker to open
 
-		resp, err := t.httpClient.Get("http://localhost:8080/unstable/test")
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/unstable/test", nil); resp, err := t.httpClient.Do(req)
 		if err != nil {
 			fmt.Printf("    Circuit breaker test: Network error - %v\n", err)
 		} else {
@@ -852,7 +857,7 @@ func (t *TestingApp) runFailoverScenario(app *TestingApp) error {
 		// Test recovery
 		successCount := 0
 		for i := 0; i < 5; i++ {
-			resp, err := t.httpClient.Get("http://localhost:8080/unstable/test")
+			req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/unstable/test", nil); resp, err := t.httpClient.Do(req)
 			if err != nil {
 				fmt.Printf("    Recovery test %d: Network error\n", i+1)
 				continue
@@ -877,7 +882,7 @@ func (t *TestingApp) runFailoverScenario(app *TestingApp) error {
 			fmt.Println("  Failover scenario: PARTIAL (recovery incomplete)")
 		}
 	} else {
-		return fmt.Errorf("unstable backend not found for failover testing")
+		return errUnstableBackendNotFound
 	}
 
 	return nil
@@ -904,7 +909,7 @@ func (t *TestingApp) runFeatureFlagScenario(app *TestingApp) error {
 	for _, tc := range testCases {
 		fmt.Printf("    Testing %s... ", tc.description)
 
-		req, err := http.NewRequest("GET", "http://localhost:8080"+tc.endpoint, nil)
+		req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080"+tc.endpoint, nil)
 		if err != nil {
 			fmt.Printf("FAIL - %v\n", err)
 			continue
@@ -944,7 +949,7 @@ func (t *TestingApp) runFeatureFlagScenario(app *TestingApp) error {
 	for _, tc := range tenantTests {
 		fmt.Printf("    Testing %s... ", tc.description)
 
-		req, err := http.NewRequest("GET", "http://localhost:8080"+tc.endpoint, nil)
+		req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080"+tc.endpoint, nil)
 		if err != nil {
 			fmt.Printf("FAIL - %v\n", err)
 			continue
@@ -973,7 +978,7 @@ func (t *TestingApp) runFeatureFlagScenario(app *TestingApp) error {
 	// Toggle flags and test
 	fmt.Printf("    Enabling all feature flags... ")
 
-	resp, err := t.httpClient.Get("http://localhost:8080/api/v2/test")
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/api/v2/test", nil); resp, err := t.httpClient.Do(req)
 	if err != nil {
 		fmt.Printf("FAIL - %v\n", err)
 	} else {
@@ -1023,7 +1028,7 @@ func (t *TestingApp) runMultiTenantScenario(app *TestingApp) error {
 	for _, tc := range tenantTests {
 		fmt.Printf("    Testing %s... ", tc.description)
 
-		req, err := http.NewRequest("GET", "http://localhost:8080"+tc.endpoint, nil)
+		req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080"+tc.endpoint, nil)
 		if err != nil {
 			fmt.Printf("FAIL - %v\n", err)
 			continue
@@ -1056,7 +1061,7 @@ func (t *TestingApp) runMultiTenantScenario(app *TestingApp) error {
 
 	for _, tenant := range tenants {
 		go func(t string) {
-			req, err := http.NewRequest("GET", "http://localhost:8080/api/v1/isolation", nil)
+			req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/api/v1/isolation", nil)
 			if err != nil {
 				results <- fmt.Sprintf("%s: request creation failed", t)
 				return
@@ -1081,7 +1086,7 @@ func (t *TestingApp) runMultiTenantScenario(app *TestingApp) error {
 
 		// Also test the same tenant twice
 		go func(t string) {
-			req, err := http.NewRequest("GET", "http://localhost:8080/api/v1/isolation2", nil)
+			req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/api/v1/isolation2", nil)
 			if err != nil {
 				results <- fmt.Sprintf("%s-2: request creation failed", t)
 				return
@@ -1114,7 +1119,7 @@ func (t *TestingApp) runMultiTenantScenario(app *TestingApp) error {
 	// Test 3: No tenant header (should use default)
 	fmt.Println("  Phase 3: Testing default behavior (no tenant)")
 
-	req, err := http.NewRequest("GET", "http://localhost:8080/api/v1/default", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/api/v1/default", nil)
 	if err != nil {
 		return fmt.Errorf("default test request creation failed: %w", err)
 	}
@@ -1211,7 +1216,7 @@ func (t *TestingApp) runSecurityScenario(app *TestingApp) error {
 	for _, tc := range securityTests {
 		fmt.Printf("    Testing %s... ", tc.description)
 
-		req, err := http.NewRequest("GET", "http://localhost:8080/api/v1/secure", nil)
+		req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/api/v1/secure", nil)
 		if err != nil {
 			fmt.Printf("FAIL - %v\n", err)
 			continue
@@ -1260,7 +1265,7 @@ func (t *TestingApp) runPerformanceScenario(app *TestingApp) error {
 		fmt.Printf("    Testing %s... ", tc.description)
 
 		start := time.Now()
-		resp, err := t.httpClient.Get("http://localhost:8080" + tc.endpoint)
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080" + tc.endpoint, nil); resp, err := t.httpClient.Do(req)
 		latency := time.Since(start)
 
 		if err != nil {
@@ -1283,7 +1288,7 @@ func (t *TestingApp) runPerformanceScenario(app *TestingApp) error {
 	successCount := 0
 
 	for i := 0; i < 10; i++ {
-		resp, err := t.httpClient.Get("http://localhost:8080/api/v1/throughput")
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/api/v1/throughput", nil); resp, err := t.httpClient.Do(req)
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -1320,7 +1325,7 @@ func (t *TestingApp) runConfigurationScenario(app *TestingApp) error {
 	for _, tc := range configTests {
 		fmt.Printf("    Testing %s... ", tc.description)
 
-		resp, err := t.httpClient.Get("http://localhost:8080" + tc.endpoint)
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080" + tc.endpoint, nil); resp, err := t.httpClient.Do(req)
 		if err != nil {
 			fmt.Printf("FAIL - %v\n", err)
 			continue
@@ -1400,7 +1405,7 @@ func (t *TestingApp) runMonitoringScenario(app *TestingApp) error {
 	for _, tc := range monitoringTests {
 		fmt.Printf("    Testing %s... ", tc.description)
 
-		resp, err := t.httpClient.Get("http://localhost:8080" + tc.endpoint)
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080" + tc.endpoint, nil); resp, err := t.httpClient.Do(req)
 		if err != nil {
 			fmt.Printf("FAIL - %v\n", err)
 			continue
@@ -1417,7 +1422,7 @@ func (t *TestingApp) runMonitoringScenario(app *TestingApp) error {
 	// Test with tracing headers
 	fmt.Println("  Phase 2: Testing request tracing")
 
-	req, err := http.NewRequest("GET", "http://localhost:8080/api/v1/trace", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/api/v1/trace", nil)
 	if err != nil {
 		return fmt.Errorf("trace request creation failed: %w", err)
 	}
@@ -1448,7 +1453,7 @@ func (t *TestingApp) runToolkitApiScenario(app *TestingApp) error {
 	// Test 1: Without tenant (should use global feature flag)
 	fmt.Println("  Phase 1: Testing toolkit API without tenant context")
 
-	resp, err := t.httpClient.Get("http://localhost:8080" + endpoint)
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080" + endpoint, nil); resp, err := t.httpClient.Do(req)
 	if err != nil {
 		fmt.Printf("    Toolkit API test: FAIL - %v\n", err)
 	} else {
@@ -1459,7 +1464,7 @@ func (t *TestingApp) runToolkitApiScenario(app *TestingApp) error {
 	// Test 2: With sampleaff1 tenant (should use tenant-specific configuration)
 	fmt.Println("  Phase 2: Testing toolkit API with sampleaff1 tenant")
 
-	req, err := http.NewRequest("GET", "http://localhost:8080"+endpoint, nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080"+endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1616,7 +1621,7 @@ func (t *TestingApp) runTenantConfigScenario(app *TestingApp) error {
 	// Test 1: Test with existing tenant (sampleaff1)
 	fmt.Println("  Phase 1: Testing with existing tenant sampleaff1")
 
-	req, err := http.NewRequest("GET", "http://localhost:8080/api/v1/test", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/api/v1/test", nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1682,7 +1687,7 @@ func (t *TestingApp) runDebugEndpointsScenario(app *TestingApp) error {
 	// Test 1: Feature flags debug endpoint
 	fmt.Println("  Phase 1: Testing feature flags debug endpoint")
 
-	req, err := http.NewRequest("GET", "http://localhost:8080/debug/flags", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080/debug/flags", nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1754,7 +1759,7 @@ func (t *TestingApp) runDryRunScenario(app *TestingApp) error {
 	// Test 1: Test dry-run mode
 	fmt.Println("  Phase 1: Testing dry-run mode")
 
-	req, err := http.NewRequest("GET", "http://localhost:8080"+endpoint, nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:8080"+endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}

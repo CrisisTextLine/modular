@@ -623,6 +623,13 @@ func (m *ReverseProxyModule) OnTenantRemoved(tenantID modular.TenantID) {
 func (m *ReverseProxyModule) ProvidesServices() []modular.ServiceProvider {
 	var services []modular.ServiceProvider
 
+	// Provide the reverse proxy module itself as a service
+	services = append(services, modular.ServiceProvider{
+		Name:        "reverseproxy.provider",
+		Description: "Reverse proxy module providing request routing and load balancing",
+		Instance:    m,
+	})
+
 	// Provide the feature flag evaluator service if we have one and feature flags are enabled.
 	// This includes both internally created and externally provided evaluators so other modules can use them.
 	if m.featureFlagEvaluator != nil && m.config != nil && m.config.FeatureFlags.Enabled {

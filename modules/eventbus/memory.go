@@ -137,13 +137,13 @@ func matchesTopic(eventTopic, subscriptionTopic string) bool {
 	if eventTopic == subscriptionTopic {
 		return true
 	}
-	
+
 	// Wildcard match - check if subscription topic ends with *
 	if len(subscriptionTopic) > 1 && subscriptionTopic[len(subscriptionTopic)-1] == '*' {
 		prefix := subscriptionTopic[:len(subscriptionTopic)-1]
 		return len(eventTopic) >= len(prefix) && eventTopic[:len(prefix)] == prefix
 	}
-	
+
 	return false
 }
 
@@ -165,7 +165,7 @@ func (m *MemoryEventBus) Publish(ctx context.Context, event Event) error {
 	// Get all matching subscribers (exact match + wildcard matches)
 	m.topicMutex.RLock()
 	var allMatchingSubs []*memorySubscription
-	
+
 	// Check all subscription topics to find matches
 	for subscriptionTopic, subsMap := range m.subscriptions {
 		if matchesTopic(event.Topic, subscriptionTopic) {
@@ -247,7 +247,7 @@ func (m *MemoryEventBus) subscribe(ctx context.Context, topic string, handler Ev
 		close(started) // Signal that the goroutine has started
 		m.handleEvents(sub)
 	}()
-	
+
 	// Wait for the goroutine to be ready before returning
 	<-started
 

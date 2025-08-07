@@ -29,7 +29,7 @@ func (ctx *ReverseProxyBDDTestContext) resetContext() {
 			server.Close()
 		}
 	}
-	
+
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -41,14 +41,14 @@ func (ctx *ReverseProxyBDDTestContext) resetContext() {
 
 func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyModuleConfigured() error {
 	ctx.resetContext()
-	
+
 	// Create a test backend server first
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("test backend response"))
 	}))
 	ctx.testServers = append(ctx.testServers, testServer)
-	
+
 	// Create basic reverse proxy configuration for testing using the test server
 	ctx.config = &ReverseProxyConfig{
 		BackendServices: map[string]string{
@@ -63,36 +63,36 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyM
 			},
 		},
 	}
-	
+
 	// Create application
 	logger := &testLogger{}
-	
+
 	// Save and clear ConfigFeeders to prevent environment interference during tests
 	originalFeeders := modular.ConfigFeeders
 	modular.ConfigFeeders = []modular.Feeder{}
 	defer func() {
 		modular.ConfigFeeders = originalFeeders
 	}()
-	
+
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
-	
+
 	// Create and register a mock router service (required by ReverseProxy)
 	mockRouter := &testRouter{
 		routes: make(map[string]http.HandlerFunc),
 	}
 	ctx.app.RegisterService("router", mockRouter)
-	
+
 	// Create and register reverse proxy module
 	ctx.module = NewModule()
-	
+
 	// Register the reverseproxy config section
 	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
 	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
-	
+
 	// Register the module
 	ctx.app.RegisterModule(ctx.module)
-	
+
 	return nil
 }
 
@@ -100,41 +100,41 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyM
 func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 	// Create application
 	logger := &testLogger{}
-	
+
 	// Save and clear ConfigFeeders to prevent environment interference during tests
 	originalFeeders := modular.ConfigFeeders
 	modular.ConfigFeeders = []modular.Feeder{}
 	defer func() {
 		modular.ConfigFeeders = originalFeeders
 	}()
-	
+
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
-	
+
 	// Create and register a mock router service (required by ReverseProxy)
 	mockRouter := &testRouter{
 		routes: make(map[string]http.HandlerFunc),
 	}
 	ctx.app.RegisterService("router", mockRouter)
-	
+
 	// Create and register reverse proxy module
 	ctx.module = NewModule()
-	
+
 	// Register the reverseproxy config section with current configuration
 	reverseproxyConfigProvider := modular.NewStdConfigProvider(*ctx.config)
 	fmt.Printf("DEBUG: Config provider created with CircuitBreaker enabled: %v\n", ctx.config.CircuitBreakerConfig.Enabled)
 	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
-	
+
 	// Debug: test the config provider immediately after registration
 	testCfg, err := ctx.app.GetConfigSection("reverseproxy")
 	if err == nil {
 		retrievedConfig := testCfg.GetConfig().(ReverseProxyConfig)
 		fmt.Printf("DEBUG: Retrieved config has CircuitBreaker enabled: %v\n", retrievedConfig.CircuitBreakerConfig.Enabled)
 	}
-	
+
 	// Register the module
 	ctx.app.RegisterModule(ctx.module)
-	
+
 	// Initialize the application with the complete configuration
 	return ctx.app.Init()
 }
@@ -181,17 +181,17 @@ func (ctx *ReverseProxyBDDTestContext) iSendARequestToTheProxy() error {
 			return fmt.Errorf("failed to get reverseproxy service: %w", err)
 		}
 	}
-	
+
 	if ctx.service == nil {
 		return fmt.Errorf("service not available")
 	}
-	
+
 	// Start the service
 	err := ctx.app.Start()
 	if err != nil {
 		return err
 	}
-	
+
 	// Simulate a request (in real tests would make HTTP call)
 	// For BDD test, we just verify the service is ready
 	return nil
@@ -210,7 +210,7 @@ func (ctx *ReverseProxyBDDTestContext) theResponseShouldBeReturnedToTheClient() 
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredWithMultipleBackends() error {
 	// Reset context and set up fresh application for this scenario
 	ctx.resetContext()
-	
+
 	// Create multiple test backend servers
 	for i := 0; i < 3; i++ {
 		testServer := httptest.NewServer(http.HandlerFunc(func(idx int) http.HandlerFunc {
@@ -221,7 +221,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredWithMultipleB
 		}(i)))
 		ctx.testServers = append(ctx.testServers, testServer)
 	}
-	
+
 	// Create configuration with multiple backends
 	ctx.config = &ReverseProxyConfig{
 		BackendServices: map[string]string{
@@ -238,7 +238,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredWithMultipleB
 			"backend-3": {URL: ctx.testServers[2].URL},
 		},
 	}
-	
+
 	return ctx.setupApplicationWithConfig()
 }
 
@@ -254,11 +254,11 @@ func (ctx *ReverseProxyBDDTestContext) requestsShouldBeDistributedAcrossAllBacke
 			return fmt.Errorf("failed to get reverseproxy service: %w", err)
 		}
 	}
-	
+
 	if ctx.service == nil || ctx.service.config == nil {
 		return fmt.Errorf("service or config not available")
 	}
-	
+
 	// Verify multiple backends are configured
 	if len(ctx.service.config.BackendServices) < 2 {
 		return fmt.Errorf("expected multiple backends, got %d", len(ctx.service.config.BackendServices))
@@ -278,11 +278,11 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithHealthChecksEnabled
 	ctx.config.HealthCheck.HealthEndpoints = map[string]string{
 		"test-backend": "/health",
 	}
-	
+
 	// Re-register the config section with the updated configuration
 	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
 	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
-	
+
 	// Initialize the module with the updated configuration
 	return ctx.app.Init()
 }
@@ -308,14 +308,14 @@ func (ctx *ReverseProxyBDDTestContext) routeTrafficOnlyToHealthyBackends() error
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCircuitBreakerEnabled() error {
 	// Reset context and set up fresh application for this scenario
 	ctx.resetContext()
-	
+
 	// Create a test backend server
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("test backend response"))
 	}))
 	ctx.testServers = append(ctx.testServers, testServer)
-	
+
 	// Create configuration with circuit breaker enabled
 	ctx.config = &ReverseProxyConfig{
 		BackendServices: map[string]string{
@@ -334,7 +334,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCircuitBreakerEnabl
 			FailureThreshold: 3,
 		},
 	}
-	
+
 	return ctx.setupApplicationWithConfig()
 }
 
@@ -351,11 +351,11 @@ func (ctx *ReverseProxyBDDTestContext) theCircuitBreakerShouldOpen() error {
 			return fmt.Errorf("failed to get reverseproxy service: %w", err)
 		}
 	}
-	
+
 	if ctx.service == nil || ctx.service.config == nil {
 		return fmt.Errorf("service or config not available")
 	}
-	
+
 	// Debug: compare more fields to see what's different
 	fmt.Printf("DEBUG: Service backend services: %v\n", ctx.service.config.BackendServices)
 	fmt.Printf("DEBUG: Context backend services: %v\n", ctx.config.BackendServices)
@@ -363,7 +363,7 @@ func (ctx *ReverseProxyBDDTestContext) theCircuitBreakerShouldOpen() error {
 	fmt.Printf("DEBUG: Context CircuitBreaker enabled: %v\n", ctx.config.CircuitBreakerConfig.Enabled)
 	fmt.Printf("DEBUG: Service CircuitBreaker threshold: %v\n", ctx.service.config.CircuitBreakerConfig.FailureThreshold)
 	fmt.Printf("DEBUG: Context CircuitBreaker threshold: %v\n", ctx.config.CircuitBreakerConfig.FailureThreshold)
-	
+
 	// Verify circuit breaker configuration
 	if !ctx.service.config.CircuitBreakerConfig.Enabled {
 		return fmt.Errorf("circuit breaker not enabled")
@@ -379,14 +379,14 @@ func (ctx *ReverseProxyBDDTestContext) requestsShouldBeHandledGracefully() error
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCachingEnabled() error {
 	// Reset context and set up fresh application for this scenario
 	ctx.resetContext()
-	
+
 	// Create a test backend server
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("test backend response"))
 	}))
 	ctx.testServers = append(ctx.testServers, testServer)
-	
+
 	// Create configuration with caching enabled
 	ctx.config = &ReverseProxyConfig{
 		BackendServices: map[string]string{
@@ -403,7 +403,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCachingEnabled() er
 		CacheEnabled: true,
 		CacheTTL:     300 * time.Second,
 	}
-	
+
 	return ctx.setupApplicationWithConfig()
 }
 
@@ -424,11 +424,11 @@ func (ctx *ReverseProxyBDDTestContext) subsequentRequestsShouldBeServedFromCache
 			return fmt.Errorf("failed to get reverseproxy service: %w", err)
 		}
 	}
-	
+
 	if ctx.service == nil || ctx.service.config == nil {
 		return fmt.Errorf("service or config not available")
 	}
-	
+
 	// Verify caching is enabled
 	if !ctx.service.config.CacheEnabled {
 		return fmt.Errorf("caching not enabled")
@@ -440,11 +440,11 @@ func (ctx *ReverseProxyBDDTestContext) iHaveATenantAwareReverseProxyConfigured()
 	// Add tenant-specific configuration
 	ctx.config.RequireTenantID = true
 	ctx.config.TenantIDHeader = "X-Tenant-ID"
-	
+
 	// Re-register the config section with the updated configuration
 	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
 	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
-	
+
 	// Initialize the module with the updated configuration
 	return ctx.app.Init()
 }
@@ -461,11 +461,11 @@ func (ctx *ReverseProxyBDDTestContext) requestsShouldBeRoutedBasedOnTenantConfig
 			return fmt.Errorf("failed to get reverseproxy service: %w", err)
 		}
 	}
-	
+
 	if ctx.service == nil || ctx.service.config == nil {
 		return fmt.Errorf("service or config not available")
 	}
-	
+
 	// Verify tenant routing is configured
 	if !ctx.service.config.RequireTenantID {
 		return fmt.Errorf("tenant routing not enabled")
@@ -487,11 +487,11 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredForCompositeR
 			Strategy: "combine",
 		},
 	}
-	
+
 	// Re-register the config section with the updated configuration
 	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
 	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
-	
+
 	// Initialize the module with the updated configuration
 	return ctx.app.Init()
 }
@@ -508,11 +508,11 @@ func (ctx *ReverseProxyBDDTestContext) theProxyShouldCallAllRequiredBackends() e
 			return fmt.Errorf("failed to get reverseproxy service: %w", err)
 		}
 	}
-	
+
 	if ctx.service == nil || ctx.service.config == nil {
 		return fmt.Errorf("service or config not available")
 	}
-	
+
 	// Verify composite routes are configured
 	if len(ctx.service.config.CompositeRoutes) == 0 {
 		return fmt.Errorf("no composite routes configured")
@@ -532,7 +532,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithRequestTransformati
 		w.Write([]byte("transformed backend response"))
 	}))
 	ctx.testServers = append(ctx.testServers, testServer)
-	
+
 	// Add backend configuration with header rewriting
 	ctx.config.BackendConfigs = map[string]BackendServiceConfig{
 		"backend-1": {
@@ -545,14 +545,14 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithRequestTransformati
 			},
 		},
 	}
-	
+
 	// Update backend services to use the test server
 	ctx.config.BackendServices["backend-1"] = testServer.URL
-	
+
 	// Re-register the config section with the updated configuration
 	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
 	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
-	
+
 	// Initialize the module with the updated configuration
 	return ctx.app.Init()
 }
@@ -565,11 +565,11 @@ func (ctx *ReverseProxyBDDTestContext) theRequestShouldBeTransformedBeforeForwar
 			return fmt.Errorf("failed to get reverseproxy service: %w", err)
 		}
 	}
-	
+
 	if ctx.service == nil || ctx.service.config == nil {
 		return fmt.Errorf("service or config not available")
 	}
-	
+
 	// Verify backend configs with header rewriting are configured
 	if len(ctx.service.config.BackendConfigs) == 0 {
 		return fmt.Errorf("no backend configs configured")
@@ -588,12 +588,12 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAnActiveReverseProxyWithOngoingReque
 	if err != nil {
 		return err
 	}
-	
+
 	err = ctx.theProxyServiceShouldBeAvailable()
 	if err != nil {
 		return err
 	}
-	
+
 	// Start the module
 	return ctx.app.Start()
 }
@@ -615,10 +615,10 @@ func (ctx *ReverseProxyBDDTestContext) newRequestsShouldBeRejectedGracefully() e
 // Test helper structures
 type testLogger struct{}
 
-func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) {}
-func (l *testLogger) Info(msg string, keysAndValues ...interface{})  {}
-func (l *testLogger) Warn(msg string, keysAndValues ...interface{})  {}
-func (l *testLogger) Error(msg string, keysAndValues ...interface{}) {}
+func (l *testLogger) Debug(msg string, keysAndValues ...interface{})   {}
+func (l *testLogger) Info(msg string, keysAndValues ...interface{})    {}
+func (l *testLogger) Warn(msg string, keysAndValues ...interface{})    {}
+func (l *testLogger) Error(msg string, keysAndValues ...interface{})   {}
 func (l *testLogger) With(keysAndValues ...interface{}) modular.Logger { return l }
 
 // TestReverseProxyModuleBDD runs the BDD tests for the ReverseProxy module
@@ -626,62 +626,62 @@ func TestReverseProxyModuleBDD(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
 			ctx := &ReverseProxyBDDTestContext{}
-			
+
 			// Background
 			s.Given(`^I have a modular application with reverse proxy module configured$`, ctx.iHaveAModularApplicationWithReverseProxyModuleConfigured)
-			
+
 			// Initialization
 			s.When(`^the reverse proxy module is initialized$`, ctx.theReverseProxyModuleIsInitialized)
 			s.Then(`^the proxy service should be available$`, ctx.theProxyServiceShouldBeAvailable)
 			s.Then(`^the module should be ready to route requests$`, ctx.theModuleShouldBeReadyToRouteRequests)
-			
+
 			// Single backend
 			s.Given(`^I have a reverse proxy configured with a single backend$`, ctx.iHaveAReverseProxyConfiguredWithASingleBackend)
 			s.When(`^I send a request to the proxy$`, ctx.iSendARequestToTheProxy)
 			s.Then(`^the request should be forwarded to the backend$`, ctx.theRequestShouldBeForwardedToTheBackend)
 			s.Then(`^the response should be returned to the client$`, ctx.theResponseShouldBeReturnedToTheClient)
-			
+
 			// Multiple backends
 			s.Given(`^I have a reverse proxy configured with multiple backends$`, ctx.iHaveAReverseProxyConfiguredWithMultipleBackends)
 			s.When(`^I send multiple requests to the proxy$`, ctx.iSendMultipleRequestsToTheProxy)
 			s.Then(`^requests should be distributed across all backends$`, ctx.requestsShouldBeDistributedAcrossAllBackends)
 			s.Then(`^load balancing should be applied$`, ctx.loadBalancingShouldBeApplied)
-			
+
 			// Health checking
 			s.Given(`^I have a reverse proxy with health checks enabled$`, ctx.iHaveAReverseProxyWithHealthChecksEnabled)
 			s.When(`^a backend becomes unavailable$`, ctx.aBackendBecomesUnavailable)
 			s.Then(`^the proxy should detect the failure$`, ctx.theProxyShouldDetectTheFailure)
 			s.Then(`^route traffic only to healthy backends$`, ctx.routeTrafficOnlyToHealthyBackends)
-			
+
 			// Circuit breaker
 			s.Given(`^I have a reverse proxy with circuit breaker enabled$`, ctx.iHaveAReverseProxyWithCircuitBreakerEnabled)
 			s.When(`^a backend fails repeatedly$`, ctx.aBackendFailsRepeatedly)
 			s.Then(`^the circuit breaker should open$`, ctx.theCircuitBreakerShouldOpen)
 			s.Then(`^requests should be handled gracefully$`, ctx.requestsShouldBeHandledGracefully)
-			
+
 			// Caching
 			s.Given(`^I have a reverse proxy with caching enabled$`, ctx.iHaveAReverseProxyWithCachingEnabled)
 			s.When(`^I send the same request multiple times$`, ctx.iSendTheSameRequestMultipleTimes)
 			s.Then(`^the first request should hit the backend$`, ctx.theFirstRequestShouldHitTheBackend)
 			s.Then(`^subsequent requests should be served from cache$`, ctx.subsequentRequestsShouldBeServedFromCache)
-			
+
 			// Tenant routing
 			s.Given(`^I have a tenant-aware reverse proxy configured$`, ctx.iHaveATenantAwareReverseProxyConfigured)
 			s.When(`^I send requests with different tenant contexts$`, ctx.iSendRequestsWithDifferentTenantContexts)
 			s.Then(`^requests should be routed based on tenant configuration$`, ctx.requestsShouldBeRoutedBasedOnTenantConfiguration)
 			s.Then(`^tenant isolation should be maintained$`, ctx.tenantIsolationShouldBeMaintained)
-			
+
 			// Composite responses
 			s.Given(`^I have a reverse proxy configured for composite responses$`, ctx.iHaveAReverseProxyConfiguredForCompositeResponses)
 			s.When(`^I send a request that requires multiple backend calls$`, ctx.iSendARequestThatRequiresMultipleBackendCalls)
 			s.Then(`^the proxy should call all required backends$`, ctx.theProxyShouldCallAllRequiredBackends)
 			s.Then(`^combine the responses into a single response$`, ctx.combineTheResponsesIntoASingleResponse)
-			
+
 			// Request transformation
 			s.Given(`^I have a reverse proxy with request transformation configured$`, ctx.iHaveAReverseProxyWithRequestTransformationConfigured)
 			s.Then(`^the request should be transformed before forwarding$`, ctx.theRequestShouldBeTransformedBeforeForwarding)
 			s.Then(`^the backend should receive the transformed request$`, ctx.theBackendShouldReceiveTheTransformedRequest)
-			
+
 			// Shutdown
 			s.Given(`^I have an active reverse proxy with ongoing requests$`, ctx.iHaveAnActiveReverseProxyWithOngoingRequests)
 			s.When(`^the module is stopped$`, ctx.theModuleIsStopped)
@@ -694,7 +694,7 @@ func TestReverseProxyModuleBDD(t *testing.T) {
 			TestingT: t,
 		},
 	}
-	
+
 	if suite.Run() != 0 {
 		t.Fatal("non-zero status returned, failed to run feature tests")
 	}

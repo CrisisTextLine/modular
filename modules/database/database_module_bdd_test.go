@@ -252,7 +252,6 @@ func (ctx *DatabaseBDDTestContext) iStartADatabaseTransaction() error {
 	}
 	ctx.transaction = tx
 	return nil
-	return nil
 }
 
 func (ctx *DatabaseBDDTestContext) iShouldBeAbleToExecuteQueriesWithinTheTransaction() error {

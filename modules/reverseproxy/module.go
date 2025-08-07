@@ -150,7 +150,7 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 	if err != nil {
 		return fmt.Errorf("failed to get config section '%s': %w", m.Name(), err)
 	}
-	
+
 	// Handle both value and pointer types
 	configValue := cfg.GetConfig()
 	fmt.Printf("DEBUG: Module Init got config type: %T\n", configValue)
@@ -162,7 +162,7 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 		m.config = &v
 		fmt.Printf("DEBUG: Module Init using value config, CircuitBreaker enabled: %v\n", m.config.CircuitBreakerConfig.Enabled)
 	default:
-		return fmt.Errorf("unexpected config type: %T", v)
+		return fmt.Errorf("%w: %T", ErrUnexpectedConfigType, v)
 	}
 
 	// Validate configuration values
@@ -636,6 +636,11 @@ func (m *ReverseProxyModule) OnTenantRemoved(tenantID modular.TenantID) {
 func (m *ReverseProxyModule) ProvidesServices() []modular.ServiceProvider {
 	var services []modular.ServiceProvider
 
+	// Don't provide any services if config is nil
+	if m.config == nil {
+		return services
+	}
+
 	// Provide the reverse proxy module itself as a service
 	services = append(services, modular.ServiceProvider{
 		Name:        "reverseproxy.provider",
@@ -645,7 +650,7 @@ func (m *ReverseProxyModule) ProvidesServices() []modular.ServiceProvider {
 
 	// Provide the feature flag evaluator service if we have one and feature flags are enabled.
 	// This includes both internally created and externally provided evaluators so other modules can use them.
-	if m.featureFlagEvaluator != nil && m.config != nil && m.config.FeatureFlags.Enabled {
+	if m.featureFlagEvaluator != nil && m.config.FeatureFlags.Enabled {
 		services = append(services, modular.ServiceProvider{
 			Name:     "featureFlagEvaluator",
 			Instance: m.featureFlagEvaluator,

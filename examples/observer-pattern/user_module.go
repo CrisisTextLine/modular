@@ -2,10 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+)
+
+// Static errors for err113 compliance
+var (
+	errMaxUsersReached = errors.New("maximum users reached")
+	errUserNotFound    = errors.New("user not found")
 )
 
 // UserModuleConfig configures the user module
@@ -164,7 +171,7 @@ func (m *UserModule) ObserverID() string {
 
 func (m *UserModule) CreateUser(id, email string) error {
 	if len(m.userStore.users) >= m.config.MaxUsers {
-		return fmt.Errorf("maximum users reached: %d", m.config.MaxUsers)
+		return fmt.Errorf("maximum users reached: %d: %w", m.config.MaxUsers, errMaxUsersReached)
 	}
 
 	user := &User{ID: id, Email: email}
@@ -194,7 +201,7 @@ func (m *UserModule) CreateUser(id, email string) error {
 func (m *UserModule) LoginUser(id string) error {
 	user, exists := m.userStore.users[id]
 	if !exists {
-		return fmt.Errorf("user not found: %s", id)
+		return fmt.Errorf("user not found: %s: %w", id, errUserNotFound)
 	}
 
 	// Emit custom CloudEvent

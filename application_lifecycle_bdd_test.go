@@ -30,15 +30,14 @@ var (
 
 // BDDTestContext holds the test context for BDD scenarios
 type BDDTestContext struct {
-	app             Application
-	logger          Logger
-	modules         []Module
-	initError       error
-	startError      error
-	stopError       error
-	moduleStates    map[string]bool
-	servicesFound   map[string]interface{}
-	t               *testing.T
+	app           Application
+	logger        Logger
+	modules       []Module
+	initError     error
+	startError    error
+	stopError     error
+	moduleStates  map[string]bool
+	servicesFound map[string]interface{}
 }
 
 // Test modules for BDD scenarios
@@ -78,7 +77,10 @@ type ProviderTestModule struct {
 
 func (m *ProviderTestModule) Init(app Application) error {
 	m.initialized = true
-	return app.RegisterService("test-service", &MockTestService{})
+	if err := app.RegisterService("test-service", &MockTestService{}); err != nil {
+		return fmt.Errorf("failed to register test service: %w", err)
+	}
+	return nil
 }
 
 type MockTestService struct{}

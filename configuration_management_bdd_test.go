@@ -2,6 +2,7 @@ package modular
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -9,21 +10,46 @@ import (
 	"github.com/cucumber/godog"
 )
 
+// Static errors for configuration BDD tests
+var (
+	errPortOutOfRange                = errors.New("port must be between 1 and 65535")
+	errNameCannotBeEmpty             = errors.New("name cannot be empty")
+	errDatabaseDriverRequired        = errors.New("database driver is required")
+	errModuleNotConfigurable         = errors.New("module is not configurable")
+	errNoEnvironmentVariablesSet     = errors.New("no environment variables set")
+	errNoYAMLFileAvailable           = errors.New("no YAML file available")
+	errNoYAMLFileCreated             = errors.New("no YAML file was created")
+	errNoJSONFileAvailable           = errors.New("no JSON file available")
+	errNoJSONFileCreated             = errors.New("no JSON file was created")
+	errNoConfigurationData           = errors.New("no configuration data available")
+	errExpectedNoValidationErrors    = errors.New("expected no validation errors")
+	errValidationShouldHaveFailed    = errors.New("validation should have failed but passed")
+	errNoValidationErrorReported     = errors.New("no validation error reported")
+	errValidationErrorMessageEmpty   = errors.New("validation error message is empty")
+	errRequiredFieldMissing          = errors.New("required configuration field 'database.driver' is missing")
+	errConfigLoadingShouldHaveFailed = errors.New("configuration loading should have failed")
+	errNoErrorToCheckConfig          = errors.New("no error to check")
+	errErrorMessageEmpty             = errors.New("error message is empty")
+	errNoFieldsTracked               = errors.New("no fields were tracked")
+	errFieldNotTracked               = errors.New("field was not tracked")
+	errFieldSourceMismatch           = errors.New("field expected source mismatch")
+)
+
 // Configuration BDD Test Context
 type ConfigBDDTestContext struct {
-	app                  Application
-	logger               Logger
-	module               Module
-	configError          error
-	validationError      error
-	yamlFile             string
-	jsonFile             string
-	environmentVars      map[string]string
-	originalEnvVars      map[string]string
-	configData           interface{}
-	isValid              bool
-	validationErrors     []string
-	fieldTracker         *TestFieldTracker
+	app              Application
+	logger           Logger
+	module           Module
+	configError      error
+	validationError  error
+	yamlFile         string
+	jsonFile         string
+	environmentVars  map[string]string
+	originalEnvVars  map[string]string
+	configData       interface{}
+	isValid          bool
+	validationErrors []string
+	fieldTracker     *TestFieldTracker
 }
 
 // Test configuration structures
@@ -42,13 +68,13 @@ type TestModuleConfig struct {
 // ConfigValidator implementation for TestModuleConfig
 func (c *TestModuleConfig) ValidateConfig() error {
 	if c.Port < 1 || c.Port > 65535 {
-		return fmt.Errorf("port must be between 1 and 65535")
+		return errPortOutOfRange
 	}
 	if c.Name == "" {
-		return fmt.Errorf("name cannot be empty")
+		return errNameCannotBeEmpty
 	}
 	if c.Database.Driver == "" {
-		return fmt.Errorf("database driver is required")
+		return errDatabaseDriverRequired
 	}
 	return nil
 }
@@ -132,14 +158,14 @@ func (ctx *ConfigBDDTestContext) iRegisterTheModulesConfiguration() error {
 	if configurable, ok := ctx.module.(Configurable); ok {
 		ctx.configError = configurable.RegisterConfig(ctx.app)
 	} else {
-		return fmt.Errorf("module is not configurable")
+		return errModuleNotConfigurable
 	}
 	return nil
 }
 
 func (ctx *ConfigBDDTestContext) theConfigurationShouldBeRegisteredSuccessfully() error {
 	if ctx.configError != nil {
-		return fmt.Errorf("configuration registration failed: %v", ctx.configError)
+		return fmt.Errorf("configuration registration failed: %w", ctx.configError)
 	}
 	return nil
 }
@@ -148,10 +174,10 @@ func (ctx *ConfigBDDTestContext) theConfigurationShouldBeAvailableForTheModule()
 	// Check that configuration section is available
 	section, err := ctx.app.GetConfigSection(ctx.module.Name())
 	if err != nil {
-		return fmt.Errorf("configuration section not found for module %s: %v", ctx.module.Name(), err)
+		return fmt.Errorf("configuration section not found for module %s: %w", ctx.module.Name(), err)
 	}
 	if section == nil {
-		return fmt.Errorf("configuration section is nil for module %s", ctx.module.Name())
+		return fmt.Errorf("configuration section is nil for module %s: %w", ctx.module.Name(), errModuleNotConfigurable)
 	}
 	return nil
 }
@@ -166,7 +192,7 @@ func (ctx *ConfigBDDTestContext) iHaveEnvironmentVariablesSetForModuleConfigurat
 		"TEST_CONFIG_MODULE_DATABASE_DRIVER": "postgres",
 		"TEST_CONFIG_MODULE_DATABASE_DSN":    "postgres://localhost/testdb",
 	}
-	
+
 	// Store original values and set new ones
 	for key, value := range envVars {
 		ctx.originalEnvVars[key] = os.Getenv(key)
@@ -190,7 +216,7 @@ func (ctx *ConfigBDDTestContext) iLoadConfigurationUsingEnvironmentFeeder() erro
 func (ctx *ConfigBDDTestContext) theModuleConfigurationShouldBePopulatedFromEnvironment() error {
 	// Verify that environment variables would be loaded correctly
 	if len(ctx.environmentVars) == 0 {
-		return fmt.Errorf("no environment variables set")
+		return errNoEnvironmentVariablesSet
 	}
 	return nil
 }
@@ -214,21 +240,21 @@ optional: yaml-optional
 `
 	file, err := os.CreateTemp("", "test-config-*.yaml")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create temporary YAML file: %w", err)
 	}
 	defer file.Close()
-	
+
 	if _, err := file.WriteString(yamlContent); err != nil {
-		return err
+		return fmt.Errorf("failed to write YAML content to file: %w", err)
 	}
-	
+
 	ctx.yamlFile = file.Name()
 	return nil
 }
 
 func (ctx *ConfigBDDTestContext) iLoadConfigurationUsingYAMLFeeder() error {
 	if ctx.yamlFile == "" {
-		return fmt.Errorf("no YAML file available")
+		return errNoYAMLFileAvailable
 	}
 	// This would use the YAML feeder to load configuration
 	ctx.configError = nil
@@ -237,7 +263,7 @@ func (ctx *ConfigBDDTestContext) iLoadConfigurationUsingYAMLFeeder() error {
 
 func (ctx *ConfigBDDTestContext) theModuleConfigurationShouldBePopulatedFromYAML() error {
 	if ctx.yamlFile == "" {
-		return fmt.Errorf("no YAML file was created")
+		return errNoYAMLFileCreated
 	}
 	return nil
 }
@@ -256,21 +282,21 @@ func (ctx *ConfigBDDTestContext) iHaveAJSONConfigurationFile() error {
 }`
 	file, err := os.CreateTemp("", "test-config-*.json")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create temporary JSON file: %w", err)
 	}
 	defer file.Close()
-	
+
 	if _, err := file.WriteString(jsonContent); err != nil {
-		return err
+		return fmt.Errorf("failed to write JSON content to file: %w", err)
 	}
-	
+
 	ctx.jsonFile = file.Name()
 	return nil
 }
 
 func (ctx *ConfigBDDTestContext) iLoadConfigurationUsingJSONFeeder() error {
 	if ctx.jsonFile == "" {
-		return fmt.Errorf("no JSON file available")
+		return errNoJSONFileAvailable
 	}
 	// This would use the JSON feeder to load configuration
 	ctx.configError = nil
@@ -279,7 +305,7 @@ func (ctx *ConfigBDDTestContext) iLoadConfigurationUsingJSONFeeder() error {
 
 func (ctx *ConfigBDDTestContext) theModuleConfigurationShouldBePopulatedFromJSON() error {
 	if ctx.jsonFile == "" {
-		return fmt.Errorf("no JSON file was created")
+		return errNoJSONFileCreated
 	}
 	return nil
 }
@@ -304,14 +330,14 @@ func (ctx *ConfigBDDTestContext) iValidateTheConfiguration() error {
 	if config, ok := ctx.configData.(*TestModuleConfig); ok {
 		ctx.validationError = config.ValidateConfig()
 	} else {
-		ctx.validationError = fmt.Errorf("no configuration data available")
+		ctx.validationError = errNoConfigurationData
 	}
 	return nil
 }
 
 func (ctx *ConfigBDDTestContext) theValidationShouldPass() error {
 	if ctx.validationError != nil {
-		return fmt.Errorf("validation should have passed but failed: %v", ctx.validationError)
+		return fmt.Errorf("validation should have passed but failed: %w", ctx.validationError)
 	}
 	ctx.isValid = true
 	return nil
@@ -319,7 +345,7 @@ func (ctx *ConfigBDDTestContext) theValidationShouldPass() error {
 
 func (ctx *ConfigBDDTestContext) noValidationErrorsShouldBeReported() error {
 	if len(ctx.validationErrors) > 0 {
-		return fmt.Errorf("expected no validation errors, got: %v", ctx.validationErrors)
+		return fmt.Errorf("expected no validation errors, got: %w", errExpectedNoValidationErrors)
 	}
 	return nil
 }
@@ -337,18 +363,18 @@ func (ctx *ConfigBDDTestContext) iHaveInvalidConfigurationData() error {
 
 func (ctx *ConfigBDDTestContext) theValidationShouldFail() error {
 	if ctx.validationError == nil {
-		return fmt.Errorf("validation should have failed but passed")
+		return errValidationShouldHaveFailed
 	}
 	return nil
 }
 
 func (ctx *ConfigBDDTestContext) appropriateValidationErrorsShouldBeReported() error {
 	if ctx.validationError == nil {
-		return fmt.Errorf("no validation error reported")
+		return errNoValidationErrorReported
 	}
 	// Check that the error message contains relevant information
 	if len(ctx.validationError.Error()) == 0 {
-		return fmt.Errorf("validation error message is empty")
+		return errValidationErrorMessageEmpty
 	}
 	return nil
 }
@@ -379,25 +405,25 @@ func (ctx *ConfigBDDTestContext) iHaveAModuleWithRequiredConfigurationFields() e
 
 func (ctx *ConfigBDDTestContext) iLoadConfigurationWithoutRequiredValues() error {
 	// Simulate loading configuration missing required fields
-	ctx.configError = fmt.Errorf("required configuration field 'database.driver' is missing")
+	ctx.configError = errRequiredFieldMissing
 	return nil
 }
 
 func (ctx *ConfigBDDTestContext) theConfigurationLoadingShouldFail() error {
 	if ctx.configError == nil {
-		return fmt.Errorf("configuration loading should have failed")
+		return errConfigLoadingShouldHaveFailed
 	}
 	return nil
 }
 
 func (ctx *ConfigBDDTestContext) theErrorShouldIndicateMissingRequiredFields() error {
 	if ctx.configError == nil {
-		return fmt.Errorf("no error to check")
+		return errNoErrorToCheckConfig
 	}
 	// Check that error mentions required fields
 	errorMsg := ctx.configError.Error()
 	if len(errorMsg) == 0 {
-		return fmt.Errorf("error message is empty")
+		return errErrorMessageEmpty
 	}
 	return nil
 }
@@ -418,7 +444,7 @@ func (ctx *ConfigBDDTestContext) iLoadConfigurationFromMultipleSources() error {
 func (ctx *ConfigBDDTestContext) iShouldBeAbleToTrackWhichFieldsWereSet() error {
 	trackedFields := ctx.fieldTracker.GetTrackedFields()
 	if len(trackedFields) == 0 {
-		return fmt.Errorf("no fields were tracked")
+		return errNoFieldsTracked
 	}
 	return nil
 }
@@ -430,12 +456,12 @@ func (ctx *ConfigBDDTestContext) iShouldKnowTheSourceOfEachConfigurationValue() 
 		"port":            "yaml",
 		"database.driver": "json",
 	}
-	
+
 	for field, expectedSource := range expectedSources {
 		if actualSource, exists := trackedFields[field]; !exists {
-			return fmt.Errorf("field %s was not tracked", field)
+			return fmt.Errorf("field %s: %w", field, errFieldNotTracked)
 		} else if actualSource != expectedSource {
-			return fmt.Errorf("field %s expected source %s, got %s", field, expectedSource, actualSource)
+			return fmt.Errorf("field %s expected source %s, got %s: %w", field, expectedSource, actualSource, errFieldSourceMismatch)
 		}
 	}
 	return nil
@@ -450,7 +476,7 @@ func (ctx *ConfigBDDTestContext) cleanup() {
 	if ctx.jsonFile != "" {
 		os.Remove(ctx.jsonFile)
 	}
-	
+
 	// Restore original environment variables
 	for key, originalValue := range ctx.originalEnvVars {
 		if originalValue == "" {

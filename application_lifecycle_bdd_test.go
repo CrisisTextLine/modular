@@ -9,6 +9,25 @@ import (
 	"github.com/cucumber/godog"
 )
 
+// Static error variables for BDD tests to comply with err113 linting rule
+var (
+	errInitializationFailed           = errors.New("initialization failed")
+	errApplicationNotCreated          = errors.New("application was not created in background")
+	errApplicationIsNil               = errors.New("application is nil")
+	errConfigProviderIsNil            = errors.New("config provider is nil")
+	errNoModulesToRegister            = errors.New("no modules to register")
+	errModuleShouldNotBeInitialized   = errors.New("module should not be initialized yet")
+	errModuleShouldBeInitialized      = errors.New("module should be initialized")
+	errProviderModuleShouldBeInit     = errors.New("provider module should be initialized")
+	errConsumerModuleShouldBeInit     = errors.New("consumer module should be initialized")
+	errConsumerShouldReceiveService   = errors.New("consumer module should have received the service")
+	errStartableModuleShouldBeStarted = errors.New("startable module should be started")
+	errStartableModuleShouldBeStopped = errors.New("startable module should be stopped")
+	errExpectedInitializationToFail   = errors.New("expected initialization to fail")
+	errNoErrorToCheck                 = errors.New("no error to check")
+	errErrorMessageIsEmpty            = errors.New("error message is empty")
+)
+
 // BDDTestContext holds the test context for BDD scenarios
 type BDDTestContext struct {
 	app             Application
@@ -88,7 +107,7 @@ type BDDFailingTestModule struct {
 }
 
 func (m *BDDFailingTestModule) Init(app Application) error {
-	return errors.New("initialization failed")
+	return errInitializationFailed
 }
 
 // Step definitions
@@ -119,17 +138,17 @@ func (ctx *BDDTestContext) iHaveALoggerConfigured() error {
 func (ctx *BDDTestContext) iCreateANewStandardApplication() error {
 	// Application already created in background, just verify it exists
 	if ctx.app == nil {
-		return fmt.Errorf("application was not created in background")
+		return errApplicationNotCreated
 	}
 	return nil
 }
 
 func (ctx *BDDTestContext) theApplicationShouldBeProperlyInitialized() error {
 	if ctx.app == nil {
-		return fmt.Errorf("application is nil")
+		return errApplicationIsNil
 	}
 	if ctx.app.ConfigProvider() == nil {
-		return fmt.Errorf("config provider is nil")
+		return errConfigProviderIsNil
 	}
 	return nil
 }
@@ -154,7 +173,7 @@ func (ctx *BDDTestContext) iHaveASimpleTestModule() error {
 
 func (ctx *BDDTestContext) iRegisterTheModuleWithTheApplication() error {
 	if len(ctx.modules) == 0 {
-		return fmt.Errorf("no modules to register")
+		return errNoModulesToRegister
 	}
 	for _, module := range ctx.modules {
 		ctx.app.RegisterModule(module)
@@ -172,7 +191,7 @@ func (ctx *BDDTestContext) theModuleShouldNotBeInitializedYet() error {
 	for _, module := range ctx.modules {
 		if testModule, ok := module.(*SimpleTestModule); ok {
 			if testModule.initialized {
-				return fmt.Errorf("module %s should not be initialized yet", testModule.name)
+				return fmt.Errorf("module %s: %w", testModule.name, errModuleShouldNotBeInitialized)
 			}
 		}
 	}
@@ -195,7 +214,7 @@ func (ctx *BDDTestContext) theModuleShouldBeInitialized() error {
 	for _, module := range ctx.modules {
 		if testModule, ok := module.(*SimpleTestModule); ok {
 			if !testModule.initialized {
-				return fmt.Errorf("module %s should be initialized", testModule.name)
+				return fmt.Errorf("module %s: %w", testModule.name, errModuleShouldBeInitialized)
 			}
 		}
 	}
@@ -228,17 +247,17 @@ func (ctx *BDDTestContext) bothModulesShouldBeInitializedInDependencyOrder() err
 	for _, module := range ctx.modules {
 		if testModule, ok := module.(*SimpleTestModule); ok {
 			if !testModule.initialized {
-				return fmt.Errorf("module %s should be initialized", testModule.name)
+				return fmt.Errorf("module %s: %w", testModule.name, errModuleShouldBeInitialized)
 			}
 		}
 		if testModule, ok := module.(*ProviderTestModule); ok {
 			if !testModule.initialized {
-				return fmt.Errorf("provider module should be initialized")
+				return errProviderModuleShouldBeInit
 			}
 		}
 		if testModule, ok := module.(*ConsumerTestModule); ok {
 			if !testModule.initialized {
-				return fmt.Errorf("consumer module should be initialized")
+				return errConsumerModuleShouldBeInit
 			}
 		}
 	}
@@ -249,7 +268,7 @@ func (ctx *BDDTestContext) theConsumerModuleShouldReceiveTheServiceFromTheProvid
 	for _, module := range ctx.modules {
 		if consumerModule, ok := module.(*ConsumerTestModule); ok {
 			if consumerModule.receivedService == nil {
-				return fmt.Errorf("consumer module should have received the service")
+				return errConsumerShouldReceiveService
 			}
 		}
 	}
@@ -278,7 +297,7 @@ func (ctx *BDDTestContext) theStartableModuleShouldBeStarted() error {
 	for _, module := range ctx.modules {
 		if startableModule, ok := module.(*StartableTestModule); ok {
 			if !startableModule.started {
-				return fmt.Errorf("startable module should be started")
+				return errStartableModuleShouldBeStarted
 			}
 		}
 	}
@@ -294,7 +313,7 @@ func (ctx *BDDTestContext) theStartableModuleShouldBeStopped() error {
 	for _, module := range ctx.modules {
 		if startableModule, ok := module.(*StartableTestModule); ok {
 			if !startableModule.stopped {
-				return fmt.Errorf("startable module should be stopped")
+				return errStartableModuleShouldBeStopped
 			}
 		}
 	}
@@ -315,18 +334,18 @@ func (ctx *BDDTestContext) iTryToInitializeTheApplication() error {
 
 func (ctx *BDDTestContext) theInitializationShouldFail() error {
 	if ctx.initError == nil {
-		return fmt.Errorf("expected initialization to fail")
+		return errExpectedInitializationToFail
 	}
 	return nil
 }
 
 func (ctx *BDDTestContext) theErrorShouldIncludeDetailsAboutWhichModuleFailed() error {
 	if ctx.initError == nil {
-		return fmt.Errorf("no error to check")
+		return errNoErrorToCheck
 	}
 	// Check that the error message contains relevant information
 	if len(ctx.initError.Error()) == 0 {
-		return fmt.Errorf("error message is empty")
+		return errErrorMessageIsEmpty
 	}
 	return nil
 }
@@ -356,7 +375,7 @@ func (ctx *BDDTestContext) iHaveTwoModulesWithCircularDependencies() error {
 
 func (ctx *BDDTestContext) theErrorShouldIndicateCircularDependency() error {
 	if ctx.initError == nil {
-		return fmt.Errorf("no error to check")
+		return errNoErrorToCheck
 	}
 	// This would check for specific circular dependency error
 	return nil

@@ -150,7 +150,20 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 	if err != nil {
 		return fmt.Errorf("failed to get config section '%s': %w", m.Name(), err)
 	}
-	m.config = cfg.GetConfig().(*ReverseProxyConfig)
+	
+	// Handle both value and pointer types
+	configValue := cfg.GetConfig()
+	fmt.Printf("DEBUG: Module Init got config type: %T\n", configValue)
+	switch v := configValue.(type) {
+	case *ReverseProxyConfig:
+		m.config = v
+		fmt.Printf("DEBUG: Module Init using pointer config, CircuitBreaker enabled: %v\n", m.config.CircuitBreakerConfig.Enabled)
+	case ReverseProxyConfig:
+		m.config = &v
+		fmt.Printf("DEBUG: Module Init using value config, CircuitBreaker enabled: %v\n", m.config.CircuitBreakerConfig.Enabled)
+	default:
+		return fmt.Errorf("unexpected config type: %T", v)
+	}
 
 	// Validate configuration values
 	if err := m.validateConfig(); err != nil {

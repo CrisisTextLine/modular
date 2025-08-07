@@ -96,6 +96,49 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyM
 	return nil
 }
 
+// setupApplicationWithConfig creates a fresh application with the current configuration
+func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
+	// Create application
+	logger := &testLogger{}
+	
+	// Save and clear ConfigFeeders to prevent environment interference during tests
+	originalFeeders := modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{}
+	defer func() {
+		modular.ConfigFeeders = originalFeeders
+	}()
+	
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+	
+	// Create and register a mock router service (required by ReverseProxy)
+	mockRouter := &testRouter{
+		routes: make(map[string]http.HandlerFunc),
+	}
+	ctx.app.RegisterService("router", mockRouter)
+	
+	// Create and register reverse proxy module
+	ctx.module = NewModule()
+	
+	// Register the reverseproxy config section with current configuration
+	reverseproxyConfigProvider := modular.NewStdConfigProvider(*ctx.config)
+	fmt.Printf("DEBUG: Config provider created with CircuitBreaker enabled: %v\n", ctx.config.CircuitBreakerConfig.Enabled)
+	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
+	
+	// Debug: test the config provider immediately after registration
+	testCfg, err := ctx.app.GetConfigSection("reverseproxy")
+	if err == nil {
+		retrievedConfig := testCfg.GetConfig().(ReverseProxyConfig)
+		fmt.Printf("DEBUG: Retrieved config has CircuitBreaker enabled: %v\n", retrievedConfig.CircuitBreakerConfig.Enabled)
+	}
+	
+	// Register the module
+	ctx.app.RegisterModule(ctx.module)
+	
+	// Initialize the application with the complete configuration
+	return ctx.app.Init()
+}
+
 func (ctx *ReverseProxyBDDTestContext) theReverseProxyModuleIsInitialized() error {
 	err := ctx.app.Init()
 	if err != nil {
@@ -165,8 +208,11 @@ func (ctx *ReverseProxyBDDTestContext) theResponseShouldBeReturnedToTheClient() 
 }
 
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredWithMultipleBackends() error {
-	// Create additional test backend servers (we already have one from basic config)
-	for i := 1; i < 3; i++ {
+	// Reset context and set up fresh application for this scenario
+	ctx.resetContext()
+	
+	// Create multiple test backend servers
+	for i := 0; i < 3; i++ {
 		testServer := httptest.NewServer(http.HandlerFunc(func(idx int) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
@@ -176,19 +222,24 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredWithMultipleB
 		ctx.testServers = append(ctx.testServers, testServer)
 	}
 	
-	// Update config with multiple backends (including the original one)
-	ctx.config.BackendServices = map[string]string{
-		"backend-1": ctx.testServers[0].URL, // Original from basic config
-		"backend-2": ctx.testServers[1].URL,
-		"backend-3": ctx.testServers[2].URL,
+	// Create configuration with multiple backends
+	ctx.config = &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"backend-1": ctx.testServers[0].URL,
+			"backend-2": ctx.testServers[1].URL,
+			"backend-3": ctx.testServers[2].URL,
+		},
+		Routes: map[string]string{
+			"/api/*": "backend-1",
+		},
+		BackendConfigs: map[string]BackendServiceConfig{
+			"backend-1": {URL: ctx.testServers[0].URL},
+			"backend-2": {URL: ctx.testServers[1].URL},
+			"backend-3": {URL: ctx.testServers[2].URL},
+		},
 	}
 	
-	// Re-register the config section with the updated configuration
-	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
-	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
-	
-	// Re-initialize the module with the new configuration
-	return ctx.app.Init()
+	return ctx.setupApplicationWithConfig()
 }
 
 func (ctx *ReverseProxyBDDTestContext) iSendMultipleRequestsToTheProxy() error {
@@ -255,16 +306,36 @@ func (ctx *ReverseProxyBDDTestContext) routeTrafficOnlyToHealthyBackends() error
 }
 
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCircuitBreakerEnabled() error {
-	// Ensure circuit breaker is enabled
-	ctx.config.CircuitBreakerConfig.Enabled = true
-	ctx.config.CircuitBreakerConfig.FailureThreshold = 3
+	// Reset context and set up fresh application for this scenario
+	ctx.resetContext()
 	
-	// Re-register the config section with the updated configuration
-	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
-	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
+	// Create a test backend server
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test backend response"))
+	}))
+	ctx.testServers = append(ctx.testServers, testServer)
 	
-	// Initialize the module with the updated configuration
-	return ctx.app.Init()
+	// Create configuration with circuit breaker enabled
+	ctx.config = &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"test-backend": testServer.URL,
+		},
+		Routes: map[string]string{
+			"/api/*": "test-backend",
+		},
+		BackendConfigs: map[string]BackendServiceConfig{
+			"test-backend": {
+				URL: testServer.URL,
+			},
+		},
+		CircuitBreakerConfig: CircuitBreakerConfig{
+			Enabled:          true,
+			FailureThreshold: 3,
+		},
+	}
+	
+	return ctx.setupApplicationWithConfig()
 }
 
 func (ctx *ReverseProxyBDDTestContext) aBackendFailsRepeatedly() error {
@@ -285,9 +356,13 @@ func (ctx *ReverseProxyBDDTestContext) theCircuitBreakerShouldOpen() error {
 		return fmt.Errorf("service or config not available")
 	}
 	
-	// Debug: print the actual config values
-	fmt.Printf("DEBUG: CircuitBreaker enabled in service config: %v\n", ctx.service.config.CircuitBreakerConfig.Enabled)
-	fmt.Printf("DEBUG: CircuitBreaker enabled in context config: %v\n", ctx.config.CircuitBreakerConfig.Enabled)
+	// Debug: compare more fields to see what's different
+	fmt.Printf("DEBUG: Service backend services: %v\n", ctx.service.config.BackendServices)
+	fmt.Printf("DEBUG: Context backend services: %v\n", ctx.config.BackendServices)
+	fmt.Printf("DEBUG: Service CircuitBreaker enabled: %v\n", ctx.service.config.CircuitBreakerConfig.Enabled)
+	fmt.Printf("DEBUG: Context CircuitBreaker enabled: %v\n", ctx.config.CircuitBreakerConfig.Enabled)
+	fmt.Printf("DEBUG: Service CircuitBreaker threshold: %v\n", ctx.service.config.CircuitBreakerConfig.FailureThreshold)
+	fmt.Printf("DEBUG: Context CircuitBreaker threshold: %v\n", ctx.config.CircuitBreakerConfig.FailureThreshold)
 	
 	// Verify circuit breaker configuration
 	if !ctx.service.config.CircuitBreakerConfig.Enabled {
@@ -302,16 +377,34 @@ func (ctx *ReverseProxyBDDTestContext) requestsShouldBeHandledGracefully() error
 }
 
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCachingEnabled() error {
-	// Ensure caching is enabled
-	ctx.config.CacheEnabled = true
-	ctx.config.CacheTTL = 300 * time.Second
+	// Reset context and set up fresh application for this scenario
+	ctx.resetContext()
 	
-	// Re-register the config section with the updated configuration
-	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
-	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
+	// Create a test backend server
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test backend response"))
+	}))
+	ctx.testServers = append(ctx.testServers, testServer)
 	
-	// Initialize the module with the updated configuration
-	return ctx.app.Init()
+	// Create configuration with caching enabled
+	ctx.config = &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"test-backend": testServer.URL,
+		},
+		Routes: map[string]string{
+			"/api/*": "test-backend",
+		},
+		BackendConfigs: map[string]BackendServiceConfig{
+			"test-backend": {
+				URL: testServer.URL,
+			},
+		},
+		CacheEnabled: true,
+		CacheTTL:     300 * time.Second,
+	}
+	
+	return ctx.setupApplicationWithConfig()
 }
 
 func (ctx *ReverseProxyBDDTestContext) iSendTheSameRequestMultipleTimes() error {

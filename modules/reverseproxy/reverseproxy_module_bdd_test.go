@@ -67,12 +67,12 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyM
 	// Create application
 	logger := &testLogger{}
 
-	// Save and clear ConfigFeeders to prevent environment interference during tests
-	originalFeeders := modular.ConfigFeeders
+	// Clear ConfigFeeders and disable AppConfigLoader to prevent environment interference during tests
 	modular.ConfigFeeders = []modular.Feeder{}
-	defer func() {
-		modular.ConfigFeeders = originalFeeders
-	}()
+	originalLoader := modular.AppConfigLoader
+	modular.AppConfigLoader = func(app *modular.StdApplication) error { return nil }
+	// Don't restore them - let them stay disabled throughout all BDD tests
+	_ = originalLoader
 
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
@@ -101,12 +101,9 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 	// Create application
 	logger := &testLogger{}
 
-	// Save and clear ConfigFeeders to prevent environment interference during tests
-	originalFeeders := modular.ConfigFeeders
+	// Clear ConfigFeeders and disable AppConfigLoader to prevent environment interference during tests
 	modular.ConfigFeeders = []modular.Feeder{}
-	defer func() {
-		modular.ConfigFeeders = originalFeeders
-	}()
+	modular.AppConfigLoader = func(app *modular.StdApplication) error { return nil }
 
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
@@ -121,16 +118,8 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 	ctx.module = NewModule()
 
 	// Register the reverseproxy config section with current configuration
-	reverseproxyConfigProvider := modular.NewStdConfigProvider(*ctx.config)
-	fmt.Printf("DEBUG: Config provider created with CircuitBreaker enabled: %v\n", ctx.config.CircuitBreakerConfig.Enabled)
+	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
 	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
-
-	// Debug: test the config provider immediately after registration
-	testCfg, err := ctx.app.GetConfigSection("reverseproxy")
-	if err == nil {
-		retrievedConfig := testCfg.GetConfig().(ReverseProxyConfig)
-		fmt.Printf("DEBUG: Retrieved config has CircuitBreaker enabled: %v\n", retrievedConfig.CircuitBreakerConfig.Enabled)
-	}
 
 	// Register the module
 	ctx.app.RegisterModule(ctx.module)
@@ -355,14 +344,6 @@ func (ctx *ReverseProxyBDDTestContext) theCircuitBreakerShouldOpen() error {
 	if ctx.service == nil || ctx.service.config == nil {
 		return fmt.Errorf("service or config not available")
 	}
-
-	// Debug: compare more fields to see what's different
-	fmt.Printf("DEBUG: Service backend services: %v\n", ctx.service.config.BackendServices)
-	fmt.Printf("DEBUG: Context backend services: %v\n", ctx.config.BackendServices)
-	fmt.Printf("DEBUG: Service CircuitBreaker enabled: %v\n", ctx.service.config.CircuitBreakerConfig.Enabled)
-	fmt.Printf("DEBUG: Context CircuitBreaker enabled: %v\n", ctx.config.CircuitBreakerConfig.Enabled)
-	fmt.Printf("DEBUG: Service CircuitBreaker threshold: %v\n", ctx.service.config.CircuitBreakerConfig.FailureThreshold)
-	fmt.Printf("DEBUG: Context CircuitBreaker threshold: %v\n", ctx.config.CircuitBreakerConfig.FailureThreshold)
 
 	// Verify circuit breaker configuration
 	if !ctx.service.config.CircuitBreakerConfig.Enabled {

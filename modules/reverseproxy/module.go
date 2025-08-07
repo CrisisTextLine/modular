@@ -135,8 +135,11 @@ func (m *ReverseProxyModule) Name() string {
 // tenant-specific functionality.
 func (m *ReverseProxyModule) RegisterConfig(app modular.Application) error {
 	m.app = app.(modular.TenantApplication)
-	// Register the config section
-	app.RegisterConfigSection(m.Name(), modular.NewStdConfigProvider(&ReverseProxyConfig{}))
+	// Register the config section only if it doesn't already exist (for BDD tests)
+	if _, err := app.GetConfigSection(m.Name()); err != nil {
+		// Config section doesn't exist, register a default one
+		app.RegisterConfigSection(m.Name(), modular.NewStdConfigProvider(&ReverseProxyConfig{}))
+	}
 
 	return nil
 }
@@ -153,14 +156,11 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 
 	// Handle both value and pointer types
 	configValue := cfg.GetConfig()
-	fmt.Printf("DEBUG: Module Init got config type: %T\n", configValue)
 	switch v := configValue.(type) {
 	case *ReverseProxyConfig:
 		m.config = v
-		fmt.Printf("DEBUG: Module Init using pointer config, CircuitBreaker enabled: %v\n", m.config.CircuitBreakerConfig.Enabled)
 	case ReverseProxyConfig:
 		m.config = &v
-		fmt.Printf("DEBUG: Module Init using value config, CircuitBreaker enabled: %v\n", m.config.CircuitBreakerConfig.Enabled)
 	default:
 		return fmt.Errorf("%w: %T", ErrUnexpectedConfigType, v)
 	}

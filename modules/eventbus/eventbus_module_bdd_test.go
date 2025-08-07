@@ -56,6 +56,13 @@ func (ctx *EventBusBDDTestContext) iHaveAModularApplicationWithEventbusModuleCon
 	// Create application with eventbus config
 	logger := &testLogger{}
 	
+	// Save and clear ConfigFeeders to prevent environment interference during tests
+	originalFeeders := modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{}
+	defer func() {
+		modular.ConfigFeeders = originalFeeders
+	}()
+	
 	// Create basic eventbus configuration for testing
 	ctx.eventbusConfig = &EventBusConfig{
 		Engine:                 "memory",
@@ -676,6 +683,13 @@ func (ctx *EventBusBDDTestContext) noMemoryLeaksShouldOccur() error {
 
 func (ctx *EventBusBDDTestContext) setupApplicationWithConfig() error {
 	logger := &testLogger{}
+	
+	// Save and clear ConfigFeeders to prevent environment interference during tests
+	originalFeeders := modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{}
+	defer func() {
+		modular.ConfigFeeders = originalFeeders
+	}()
 	
 	// Create provider with the eventbus config
 	eventbusConfigProvider := modular.NewStdConfigProvider(ctx.eventbusConfig)

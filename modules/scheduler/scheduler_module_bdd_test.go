@@ -49,6 +49,14 @@ func (ctx *SchedulerBDDTestContext) iHaveAModularApplicationWithSchedulerModuleC
 
 	// Create application
 	logger := &testLogger{}
+	
+	// Save and clear ConfigFeeders to prevent environment interference during tests
+	originalFeeders := modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{}
+	defer func() {
+		modular.ConfigFeeders = originalFeeders
+	}()
+	
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
 

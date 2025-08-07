@@ -264,6 +264,13 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 	
 	logger := &testLogger{}
 
+	// Save and clear ConfigFeeders to prevent environment interference during tests
+	originalFeeders := modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{}
+	defer func() {
+		modular.ConfigFeeders = originalFeeders
+	}()
+
 	// Create a copy of the config to avoid the original being modified
 	// during the configuration loading process
 	configCopy := &HTTPServerConfig{

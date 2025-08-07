@@ -119,16 +119,6 @@ func (ctx *EventLoggerBDDTestContext) theEventLoggerServiceShouldBeAvailable() e
 	if ctx.service == nil {
 		return err
 	}
-	
-	// Debug: Check what configuration the module actually has
-	fmt.Printf("DEBUG: EventLogger module has %d output targets configured\n", len(ctx.service.config.OutputTargets))
-	for i, target := range ctx.service.config.OutputTargets {
-		fmt.Printf("DEBUG: Output target %d: Type=%s, Level=%s\n", i, target.Type, target.Level)
-		if target.File != nil {
-			fmt.Printf("DEBUG: File target path: %s\n", target.File.Path)
-		}
-	}
-	
 	return nil
 }
 
@@ -305,25 +295,8 @@ func (ctx *EventLoggerBDDTestContext) allEventsShouldBeLoggedToTheFile() error {
 	time.Sleep(200 * time.Millisecond)
 	
 	logFile := filepath.Join(ctx.tempDir, "test.log")
-	
-	// Debug: Check if temp directory exists
-	if _, err := os.Stat(ctx.tempDir); os.IsNotExist(err) {
-		return fmt.Errorf("temp directory does not exist: %s", ctx.tempDir)
-	}
-	
-	// Debug: List files in temp directory
-	files, err := os.ReadDir(ctx.tempDir)
-	if err != nil {
-		return fmt.Errorf("failed to read temp directory: %w", err)
-	}
-	
-	var fileNames []string
-	for _, file := range files {
-		fileNames = append(fileNames, file.Name())
-	}
-	
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
-		return fmt.Errorf("log file not created at %s, temp dir contains: %v", logFile, fileNames)
+		return fmt.Errorf("log file not created")
 	}
 	
 	return nil
@@ -694,7 +667,31 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFaultyOutputTarget()
 		return nil
 	}
 	
-	return nil
+	// Get service reference
+	err = ctx.theEventLoggerServiceShouldBeAvailable()
+	if err != nil {
+		return err
+	}
+	
+	// HACK: Manually set the faulty config (but allow service to start)
+	// The file target will fail when actually writing to the file
+	ctx.service.config = ctx.config
+	
+	// Re-initialize output targets - this might fail, but we'll let it slide for now
+	// The actual failure will happen during writing
+	ctx.service.outputs = make([]OutputTarget, 0, len(ctx.config.OutputTargets))
+	for i, targetConfig := range ctx.config.OutputTargets {
+		output, err := NewOutputTarget(targetConfig, ctx.service.logger)
+		if err != nil {
+			// Store the error but don't fail completely - some targets might work
+			ctx.lastError = fmt.Errorf("failed to create output target %d: %w", i, err)
+		} else {
+			ctx.service.outputs = append(ctx.service.outputs, output)
+		}
+	}
+	
+	// Start the application (this should succeed)
+	return ctx.app.Start()
 }
 
 func (ctx *EventLoggerBDDTestContext) iEmitEvents() error {

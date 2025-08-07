@@ -108,7 +108,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 		Help:    "If yes, sample configuration files will be generated in the selected formats.",
 	}
 	if err := survey.AskOne(samplePrompt, &options.GenerateSample, configSurveyIO.WithStdio()); err != nil {
-		return err
+		return fmt.Errorf("failed to get sample config preference: %w", err)
 	}
 
 	// Collect field information
@@ -124,7 +124,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 			Help:    "The name of the configuration field (e.g., ServerAddress)",
 		}
 		if err := survey.AskOne(namePrompt, &field.Name, survey.WithValidator(survey.Required), configSurveyIO.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field name: %w", err)
 		}
 
 		// Ask for the field type
@@ -137,7 +137,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 
 		var fieldType string
 		if err := survey.AskOne(typePrompt, &fieldType, configSurveyIO.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field type: %w", err)
 		}
 
 		// Set field type and additional properties based on selection
@@ -155,7 +155,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 				Help:    "If yes, you'll be prompted to add fields to the nested struct.",
 			}
 			if err := survey.AskOne(nestedPrompt, &defineNested, configSurveyIO.WithStdio()); err != nil {
-				return err
+				return fmt.Errorf("failed to get nested struct preference: %w", err)
 			}
 
 			if defineNested {
@@ -176,7 +176,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 						Help:    "The name of the nested configuration field.",
 					}
 					if err := survey.AskOne(nestedNamePrompt, &nestedField.Name, survey.WithValidator(survey.Required), configSurveyIO.WithStdio()); err != nil {
-						return err
+						return fmt.Errorf("failed to get nested field name: %w", err)
 					}
 
 					// Ask for the nested field type
@@ -189,7 +189,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 
 					var nestedFieldType string
 					if err := survey.AskOne(nestedTypePrompt, &nestedFieldType, configSurveyIO.WithStdio()); err != nil {
-						return err
+						return fmt.Errorf("failed to get nested field type: %w", err)
 					}
 
 					// Set nested field type
@@ -214,7 +214,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 						Help:    "A brief description of what this nested field is used for.",
 					}
 					if err := survey.AskOne(descPrompt, &nestedField.Description, configSurveyIO.WithStdio()); err != nil {
-						return err
+						return fmt.Errorf("failed to get nested field description: %w", err)
 					}
 
 					// Add the nested field
@@ -227,7 +227,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 						Help:    "If yes, you'll be prompted for another nested field.",
 					}
 					if err := survey.AskOne(moreNestedPrompt, &addNestedFields, configSurveyIO.WithStdio()); err != nil {
-						return err
+						return fmt.Errorf("failed to get add more nested fields preference: %w", err)
 					}
 				}
 
@@ -256,7 +256,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 			Help:    "If yes, validation will ensure this field is provided.",
 		}
 		if err := survey.AskOne(requiredPrompt, &field.IsRequired, configSurveyIO.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get add another field preference: %w", err)
 		}
 
 		// Ask for a default value
@@ -265,7 +265,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 			Help:    "The default value for this field, if any.",
 		}
 		if err := survey.AskOne(defaultPrompt, &field.DefaultValue, configSurveyIO.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field required preference: %w", err)
 		}
 
 		// Ask for a description
@@ -274,7 +274,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 			Help:    "A brief description of what this field is used for.",
 		}
 		if err := survey.AskOne(descPrompt, &field.Description, configSurveyIO.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field default value: %w", err)
 		}
 
 		// Add the field
@@ -287,7 +287,7 @@ func promptForConfigFields(options *ConfigOptions) error {
 			Help:    "If yes, you'll be prompted for another configuration field.",
 		}
 		if err := survey.AskOne(morePrompt, &addFields, configSurveyIO.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field description: %w", err)
 		}
 	}
 

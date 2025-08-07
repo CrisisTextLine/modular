@@ -252,7 +252,7 @@ func promptForModuleInfo(options *ModuleOptions) error {
 			Help:    "This will be used as the unique identifier for your module.",
 		}
 		if err := survey.AskOne(namePrompt, &options.ModuleName, survey.WithValidator(survey.Required), SurveyStdio.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get module name: %w", err)
 		}
 	}
 
@@ -359,7 +359,7 @@ func promptForModuleInfo(options *ModuleOptions) error {
 	}, &answers, SurveyStdio.WithStdio())
 
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to collect module options: %w", err)
 	}
 
 	// Copy the answers to our options struct
@@ -393,7 +393,7 @@ func promptForModuleConfigInfo(configOptions *ConfigOptions) error {
 	}
 
 	if err := survey.AskOne(formatQuestion, &configOptions.TagTypes, SurveyStdio.WithStdio()); err != nil {
-		return err
+		return fmt.Errorf("failed to get config tag types: %w", err)
 	}
 
 	// Ask if sample config files should be generated
@@ -403,7 +403,7 @@ func promptForModuleConfigInfo(configOptions *ConfigOptions) error {
 	}
 
 	if err := survey.AskOne(generateSampleQuestion, &configOptions.GenerateSample, SurveyStdio.WithStdio()); err != nil {
-		return err
+		return fmt.Errorf("failed to get sample config preference: %w", err)
 	}
 
 	// Collect configuration fields
@@ -419,7 +419,7 @@ func promptForModuleConfigInfo(configOptions *ConfigOptions) error {
 			Help:    "The name of the configuration field (e.g., ServerAddress)",
 		}
 		if err := survey.AskOne(nameQuestion, &field.Name, survey.WithValidator(survey.Required), SurveyStdio.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field name: %w", err)
 		}
 
 		// Ask for the field type
@@ -431,7 +431,7 @@ func promptForModuleConfigInfo(configOptions *ConfigOptions) error {
 
 		var fieldType string
 		if err := survey.AskOne(typeQuestion, &fieldType, SurveyStdio.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field type: %w", err)
 		}
 
 		// Set field type and special flags based on selection
@@ -458,7 +458,7 @@ func promptForModuleConfigInfo(configOptions *ConfigOptions) error {
 			Default: false,
 		}
 		if err := survey.AskOne(requiredQuestion, &field.IsRequired, SurveyStdio.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field required preference: %w", err)
 		}
 
 		// Ask for a default value
@@ -467,7 +467,7 @@ func promptForModuleConfigInfo(configOptions *ConfigOptions) error {
 			Help:    "The default value for this field, if any",
 		}
 		if err := survey.AskOne(defaultQuestion, &field.DefaultValue, SurveyStdio.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field default value: %w", err)
 		}
 
 		// Ask for a description
@@ -476,7 +476,7 @@ func promptForModuleConfigInfo(configOptions *ConfigOptions) error {
 			Help:    "A brief description of what this field is used for",
 		}
 		if err := survey.AskOne(descQuestion, &field.Description, SurveyStdio.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get field description: %w", err)
 		}
 
 		// Add the field
@@ -488,7 +488,7 @@ func promptForModuleConfigInfo(configOptions *ConfigOptions) error {
 			Default: true,
 		}
 		if err := survey.AskOne(addMoreQuestion, &addFields, SurveyStdio.WithStdio()); err != nil {
-			return err
+			return fmt.Errorf("failed to get add another field preference: %w", err)
 		}
 	}
 

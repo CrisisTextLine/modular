@@ -70,6 +70,12 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyM
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
 	
+	// Create and register a mock router service (required by ReverseProxy)
+	mockRouter := &testRouter{
+		routes: make(map[string]http.HandlerFunc),
+	}
+	ctx.app.RegisterService("router", mockRouter)
+	
 	// Create and register reverse proxy module
 	ctx.module = NewModule()
 	

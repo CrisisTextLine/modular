@@ -64,7 +64,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAModularApplicationWithHTTPServerModul
 	// Create basic HTTP server configuration for testing
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
-		Port:         0, // Use dynamic port for testing
+		Port:         8090, // Use fixed port for testing
 		ReadTimeout:  30,
 		WriteTimeout: 30,
 		IdleTimeout:  30,
@@ -150,7 +150,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerConfiguration() error {
 	// Create specific HTTP server configuration
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
-		Port:         0, // Dynamic port
+		Port:         8080, // Use fixed port for testing
 		ReadTimeout:  15,
 		WriteTimeout: 15,
 		IdleTimeout:  60,
@@ -166,7 +166,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPSServerConfigurationWithTLSEnabl
 	// Create HTTPS server configuration
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
-		Port:         0, // Dynamic port
+		Port:         8443, // Fixed HTTPS port for testing
 		ReadTimeout:  30,
 		WriteTimeout: 30,
 		IdleTimeout:  30,
@@ -187,7 +187,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithCustomTimeoutSettings(
 	// Create HTTP server configuration with custom timeouts
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
-		Port:         0,
+		Port:         8081, // Fixed port for timeout testing
 		ReadTimeout:  5, // Short timeout for testing
 		WriteTimeout: 5,
 		IdleTimeout:  10,
@@ -202,7 +202,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithHealthChecksEnabled() 
 
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
-		Port:         0,
+		Port:         8082, // Fixed port for health check testing
 		ReadTimeout:  30,
 		WriteTimeout: 30,
 		IdleTimeout:  30,
@@ -352,7 +352,7 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 	err = ctx.app.Init()
 	if err != nil {
 		ctx.lastError = err
-		return nil
+		return err
 	}
 
 	// Debug: check TLS config after app.Init()
@@ -395,11 +395,13 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerIsStarted() error {
 		})
 	}
 
-	// Start the server
-	err := ctx.service.Start(context.Background())
+	// Start the server with a timeout context
+	startCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := ctx.service.Start(startCtx)
 	if err != nil {
 		ctx.lastError = err
-		return nil
+		return err
 	}
 
 	// Get the actual server address for testing
@@ -665,7 +667,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFil
 
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
-		Port:         0,
+		Port:         8444, // Fixed port for TLS testing
 		ReadTimeout:  30,
 		WriteTimeout: 30,
 		IdleTimeout:  30,
@@ -782,7 +784,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithMonitoringEnabled() er
 
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
-		Port:         0,
+		Port:         8083, // Fixed port for monitoring testing
 		ReadTimeout:  30,
 		WriteTimeout: 30,
 		IdleTimeout:  30,

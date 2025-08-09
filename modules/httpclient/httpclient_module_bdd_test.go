@@ -1,8 +1,11 @@
 package httpclient
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,17 +127,20 @@ func (ctx *HTTPClientBDDTestContext) iMakeAGETRequestToATestEndpoint() error {
 		return fmt.Errorf("httpclient service not available")
 	}
 	
-	// Make a GET request to a mock endpoint
-	// In a real test, this would be to a test server
-	// For BDD purposes, we'll simulate a successful request
-	_ = ctx.service.Client()
+	// Create a real test server for actual HTTP requests
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write([]byte(`{"status":"success","method":"GET"}`))
+	}))
+	defer testServer.Close()
 	
-	// Simulate making a request (would be to actual endpoint in real test)
-	resp := &http.Response{
-		StatusCode: 200,
-		Status:     "200 OK",
-		Header:     make(http.Header),
-		Body:       http.NoBody,
+	// Make a real HTTP GET request to the test server
+	client := ctx.service.Client()
+	resp, err := client.Get(testServer.URL)
+	if err != nil {
+		ctx.lastError = err
+		return nil
 	}
 	
 	ctx.lastResponse = resp
@@ -265,16 +271,25 @@ func (ctx *HTTPClientBDDTestContext) iMakeAPOSTRequestWithJSONData() error {
 		return fmt.Errorf("httpclient service not available")
 	}
 	
-	// Simulate making a POST request with JSON data
-	_ = []byte(`{"test": "data"}`)
+	// Create a real test server for actual HTTP POST requests
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			w.WriteHeader(405)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(201)
+		w.Write([]byte(`{"status":"created","method":"POST"}`))
+	}))
+	defer testServer.Close()
 	
-	// In a real test, this would make an actual HTTP request
-	// For BDD purposes, we'll simulate a successful POST
-	resp := &http.Response{
-		StatusCode: 201,
-		Status:     "201 Created",
-		Header:     make(http.Header),
-		Body:       http.NoBody,
+	// Make a real HTTP POST request with JSON data
+	jsonData := []byte(`{"test": "data"}`)
+	client := ctx.service.Client()
+	resp, err := client.Post(testServer.URL, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		ctx.lastError = err
+		return nil
 	}
 	
 	ctx.lastResponse = resp
@@ -317,12 +332,36 @@ func (ctx *HTTPClientBDDTestContext) iMakeARequestWithTheModifiedClient() error 
 		return fmt.Errorf("httpclient service not available")
 	}
 	
-	// Simulate making a request with the modified client
-	resp := &http.Response{
-		StatusCode: 200,
-		Status:     "200 OK",
-		Header:     make(http.Header),
-		Body:       http.NoBody,
+	// Create a test server that captures and echoes headers
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Echo custom headers back in response
+		for key, values := range r.Header {
+			if key == "X-Custom-Header" {
+				w.Header().Set("X-Echoed-Header", values[0])
+			}
+		}
+		w.WriteHeader(200)
+		w.Write([]byte(`{"headers":"captured"}`))
+	}))
+	defer testServer.Close()
+	
+	// Create a request and apply modifier if set
+	req, err := http.NewRequest("GET", testServer.URL, nil)
+	if err != nil {
+		ctx.lastError = err
+		return nil
+	}
+	
+	if ctx.requestModifier != nil {
+		ctx.requestModifier(req)
+	}
+	
+	// Make the request with the modified client
+	client := ctx.service.Client()
+	resp, err := client.Do(req)
+	if err != nil {
+		ctx.lastError = err
+		return nil
 	}
 	
 	ctx.lastResponse = resp
@@ -330,11 +369,15 @@ func (ctx *HTTPClientBDDTestContext) iMakeARequestWithTheModifiedClient() error 
 }
 
 func (ctx *HTTPClientBDDTestContext) theCustomHeadersShouldBeIncludedInTheRequest() error {
-	if ctx.requestModifier == nil {
-		return fmt.Errorf("request modifier not set")
+	if ctx.lastResponse == nil {
+		return fmt.Errorf("no response available")
 	}
 	
-	// For BDD purposes, validate that modifier was set
+	// Check if custom headers were echoed back by the test server
+	if ctx.lastResponse.Header.Get("X-Echoed-Header") == "" {
+		return fmt.Errorf("custom headers were not included in the request")
+	}
+	
 	return nil
 }
 
@@ -436,22 +479,65 @@ func (ctx *HTTPClientBDDTestContext) iMakeARequestWithACustomTimeout() error {
 }
 
 func (ctx *HTTPClientBDDTestContext) theRequestTakesLongerThanTheTimeout() error {
-	// For BDD purposes, simulate a timeout scenario
+	// Create a slow test server that takes longer than our timeout
+	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(10 * time.Second) // Sleep longer than timeout
+		w.WriteHeader(200)
+		w.Write([]byte("slow response"))
+	}))
+	defer slowServer.Close()
+	
+	// Create client with very short timeout
+	timeoutClient := ctx.service.WithTimeout(1) // 1 second timeout
+	if timeoutClient == nil {
+		return fmt.Errorf("failed to create client with timeout")
+	}
+	
+	// Make request that should timeout
+	_, err := timeoutClient.Get(slowServer.URL)
+	if err != nil {
+		ctx.lastError = err
+	}
+	
 	return nil
 }
 
 func (ctx *HTTPClientBDDTestContext) theRequestShouldTimeoutAppropriately() error {
-	// For BDD purposes, validate timeout was configured
-	if ctx.customTimeout == 0 {
-		return fmt.Errorf("custom timeout not set")
+	if ctx.lastError == nil {
+		return fmt.Errorf("request should have timed out but didn't")
+	}
+	
+	// Check if the error indicates a timeout
+	if !isTimeoutError(ctx.lastError) {
+		return fmt.Errorf("error was not a timeout error: %v", ctx.lastError)
 	}
 	
 	return nil
 }
 
 func (ctx *HTTPClientBDDTestContext) aTimeoutErrorShouldBeReturned() error {
-	// For BDD purposes, validate timeout handling mechanism
+	if ctx.lastError == nil {
+		return fmt.Errorf("no timeout error was returned")
+	}
+	
 	return nil
+}
+
+// Helper function to check if error is timeout related
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return errStr != "" && (
+		err.Error() == "context deadline exceeded" ||
+		err.Error() == "timeout" ||
+		err.Error() == "i/o timeout" ||
+		err.Error() == "request timeout" ||
+		// Additional timeout patterns from Go's net/http
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "deadline exceeded") ||
+		strings.Contains(errStr, "Client.Timeout"))
 }
 
 func (ctx *HTTPClientBDDTestContext) iHaveAnHTTPClientConfigurationWithCompressionEnabled() error {

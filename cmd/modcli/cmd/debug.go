@@ -39,7 +39,7 @@ func NewDebugCommand() *cobra.Command {
 These tools help diagnose common issues like interface matching failures,
 missing dependencies, and circular dependencies.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Help()
+			_ = cmd.Help()
 		},
 	}
 
@@ -74,8 +74,8 @@ Examples:
 	cmd.Flags().StringP("interface", "i", "", "The interface to check against (e.g., 'http.Handler')")
 	cmd.Flags().BoolP("verbose", "v", false, "Show detailed reflection information")
 
-	cmd.MarkFlagRequired("type")
-	cmd.MarkFlagRequired("interface")
+	_ = cmd.MarkFlagRequired("type")
+	_ = cmd.MarkFlagRequired("interface")
 
 	return cmd
 }
@@ -391,7 +391,7 @@ func analyzeProjectDependencies(projectPath string) (*ProjectAnalysis, error) {
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to read file %s: %w", path, err)
 		}
 
 		contentStr := string(content)
@@ -436,7 +436,10 @@ func analyzeProjectDependencies(projectPath string) (*ProjectAnalysis, error) {
 		return nil
 	})
 
-	return analysis, err
+	if err != nil {
+		return analysis, fmt.Errorf("failed to walk project directory: %w", err)
+	}
+	return analysis, nil
 }
 
 // generateDependencyGraph creates a visual representation of module dependencies
@@ -790,20 +793,20 @@ func runDebugServices(cmd *cobra.Command, args []string) error {
 
 	err := filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || !strings.HasSuffix(path, ".go") || strings.Contains(path, "vendor/") || strings.HasSuffix(path, "_test.go") {
-			return nil
+			return nil //nolint:nilerr // Intentionally skip files with errors
 		}
 
 		// Parse the Go file using AST
 		fset := token.NewFileSet()
 		node, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if err != nil {
-			return nil // Skip files with parse errors
+			return nil //nolint:nilerr // Skip files with parse errors
 		}
 
 		// Read file content for text-based fallback parsing
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Skip files that cannot be read
 		}
 		lines := strings.Split(string(content), "\n")
 
@@ -884,7 +887,7 @@ func runDebugServices(cmd *cobra.Command, args []string) error {
 
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "❌ Error walking project directory: %v\n", err)
-		return err
+		return fmt.Errorf("failed to walk project directory: %w", err)
 	}
 
 	// Print summary
@@ -1082,7 +1085,7 @@ func detectCircularDependencies(provided, required []ServiceInfo) []string {
 				if cycleStart != -1 {
 					cyclePath := path[cycleStart:]
 					cyclePath = append(cyclePath, dep) // Complete the cycle
-					cycles = append(cycles, fmt.Sprintf("%s", strings.Join(cyclePath, " → ")))
+					cycles = append(cycles, strings.Join(cyclePath, " → "))
 				}
 				return true
 			}
@@ -1135,14 +1138,14 @@ func runDebugConfig(cmd *cobra.Command, args []string) error {
 
 	err := filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || !strings.HasSuffix(path, ".go") || strings.Contains(path, "vendor/") || strings.HasSuffix(path, "_test.go") {
-			return nil
+			return nil //nolint:nilerr // Skip files with errors
 		}
 
 		// Parse the Go file using AST
 		fset := token.NewFileSet()
 		node, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if err != nil {
-			return nil // Skip files with parse errors
+			return nil //nolint:nilerr // Skip files with parse errors
 		}
 
 		// Look for Config struct definitions
@@ -1328,20 +1331,20 @@ func scanForServices(projectPath string) ([]*ServiceInfo, error) {
 
 	err := filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || !strings.HasSuffix(path, ".go") || strings.Contains(path, "vendor/") || strings.HasSuffix(path, "_test.go") {
-			return nil
+			return nil //nolint:nilerr // Skip files with errors
 		}
 
 		// Parse the Go file using AST
 		fset := token.NewFileSet()
 		node, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if err != nil {
-			return nil // Skip files with parse errors
+			return nil //nolint:nilerr // Skip files with parse errors
 		}
 
 		// Read file content for text-based fallback parsing
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Skip files that cannot be read
 		}
 		lines := strings.Split(string(content), "\n")
 
@@ -2117,7 +2120,7 @@ func findTenantConfigurations(path string) ([]string, error) {
 
 	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Continue walking
+			return nil //nolint:nilerr // Continue walking
 		}
 
 		if info.IsDir() {
@@ -2143,5 +2146,8 @@ func findTenantConfigurations(path string) ([]string, error) {
 		return nil
 	})
 
-	return configs, err
+	if err != nil {
+		return configs, fmt.Errorf("failed to walk directory for tenant configs: %w", err)
+	}
+	return configs, nil
 }

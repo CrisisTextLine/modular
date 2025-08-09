@@ -2,8 +2,17 @@
 package httpserver
 
 import (
+	"errors"
 	"fmt"
 	"time"
+)
+
+// Static errors for configuration validation
+var (
+	ErrInvalidPort           = errors.New("invalid port number")
+	ErrTLSNoDomainsSpecified = errors.New("TLS auto-generation is enabled but no domains specified")
+	ErrTLSNoCertificateFile  = errors.New("TLS is enabled but no certificate file specified")
+	ErrTLSNoKeyFile          = errors.New("TLS is enabled but no key file specified")
 )
 
 // DefaultTimeoutSeconds is the default timeout value in seconds
@@ -75,7 +84,7 @@ func (c *HTTPServerConfig) Validate() error {
 
 	// Check if port is within valid range
 	if c.Port < 0 || c.Port > 65535 {
-		return fmt.Errorf("invalid port number: %d", c.Port)
+		return fmt.Errorf("%w: %d", ErrInvalidPort, c.Port)
 	}
 
 	// Set default timeouts if not specified
@@ -107,17 +116,17 @@ func (c *HTTPServerConfig) Validate() error {
 		if c.TLS.AutoGenerate {
 			// Make sure we have at least one domain for auto-generated certs
 			if len(c.TLS.Domains) == 0 {
-				return fmt.Errorf("TLS auto-generation is enabled but no domains specified")
+				return ErrTLSNoDomainsSpecified
 			}
 			return nil
 		}
 
 		// Otherwise, we need cert/key files
 		if c.TLS.CertFile == "" {
-			return fmt.Errorf("TLS is enabled but no certificate file specified")
+			return ErrTLSNoCertificateFile
 		}
 		if c.TLS.KeyFile == "" {
-			return fmt.Errorf("TLS is enabled but no key file specified")
+			return ErrTLSNoKeyFile
 		}
 	}
 

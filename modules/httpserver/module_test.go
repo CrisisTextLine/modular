@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -171,6 +172,8 @@ func TestRegisterConfig(t *testing.T) {
 	module := NewHTTPServerModule()
 	mockApp := new(MockApplication)
 
+	// Mock the GetConfigSection call that checks if config exists
+	mockApp.On("GetConfigSection", "httpserver").Return(nil, errors.New("config not found"))
 	mockApp.On("RegisterConfigSection", "httpserver", mock.AnythingOfType("*modular.StdConfigProvider")).Return()
 
 	// Use type assertion to call RegisterConfig

@@ -792,20 +792,32 @@ func runDebugServices(cmd *cobra.Command, args []string) error {
 	var provided, required []ServiceInfo
 
 	err := filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil || !strings.HasSuffix(path, ".go") || strings.Contains(path, "vendor/") || strings.HasSuffix(path, "_test.go") {
+		if err != nil {
+			if verbose {
+				fmt.Fprintf(cmd.OutOrStdout(), "⚠️  Skipping %s: %v\n", path, err)
+			}
 			return nil //nolint:nilerr // Intentionally skip files with errors
+		}
+		if !strings.HasSuffix(path, ".go") || strings.Contains(path, "vendor/") || strings.HasSuffix(path, "_test.go") {
+			return nil
 		}
 
 		// Parse the Go file using AST
 		fset := token.NewFileSet()
 		node, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if err != nil {
+			if verbose {
+				fmt.Fprintf(cmd.OutOrStdout(), "⚠️  Parse error in %s: %v\n", path, err)
+			}
 			return nil //nolint:nilerr // Skip files with parse errors
 		}
 
 		// Read file content for text-based fallback parsing
 		content, err := os.ReadFile(path)
 		if err != nil {
+			if verbose {
+				fmt.Fprintf(cmd.OutOrStdout(), "⚠️  Cannot read %s: %v\n", path, err)
+			}
 			return nil //nolint:nilerr // Skip files that cannot be read
 		}
 		lines := strings.Split(string(content), "\n")

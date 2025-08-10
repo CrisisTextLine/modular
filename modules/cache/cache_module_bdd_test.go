@@ -45,8 +45,8 @@ func (ctx *CacheBDDTestContext) iHaveAModularApplicationWithCacheModuleConfigure
 	// Create basic cache configuration for testing
 	ctx.cacheConfig = &CacheConfig{
 		Engine:           "memory",
-		DefaultTTL:       300,
-		CleanupInterval:  60,
+		DefaultTTL:       300 * time.Second,
+		CleanupInterval:  60 * time.Second,
 		MaxItems:         1000,
 	}
 	
@@ -77,8 +77,8 @@ func (ctx *CacheBDDTestContext) iHaveAModularApplicationWithCacheModuleConfigure
 func (ctx *CacheBDDTestContext) iHaveACacheConfigurationWithMemoryEngine() error {
 	ctx.cacheConfig = &CacheConfig{
 		Engine:           "memory",
-		DefaultTTL:       300,
-		CleanupInterval:  60,
+		DefaultTTL:       300 * time.Second,
+		CleanupInterval:  60 * time.Second,
 		MaxItems:         1000,
 	}
 	
@@ -92,8 +92,8 @@ func (ctx *CacheBDDTestContext) iHaveACacheConfigurationWithMemoryEngine() error
 func (ctx *CacheBDDTestContext) iHaveACacheConfigurationWithRedisEngine() error {
 	ctx.cacheConfig = &CacheConfig{
 		Engine:           "redis",
-		DefaultTTL:       300,
-		CleanupInterval:  60,
+		DefaultTTL:       300 * time.Second,
+		CleanupInterval:  60 * time.Second,
 		RedisURL:         "redis://localhost:6379",
 		RedisDB:          0,
 	}
@@ -433,8 +433,8 @@ func (ctx *CacheBDDTestContext) theItemShouldUseTheDefaultTTLFromConfiguration()
 func (ctx *CacheBDDTestContext) iHaveACacheConfigurationWithInvalidRedisSettings() error {
 	ctx.cacheConfig = &CacheConfig{
 		Engine:           "redis",
-		DefaultTTL:       300,
-		CleanupInterval:  60,  // Add non-zero cleanup interval
+		DefaultTTL:       300 * time.Second,
+		CleanupInterval:  60 * time.Second,  // Add non-zero cleanup interval
 		RedisURL:         "redis://invalid-host:9999",
 	}
 	return nil

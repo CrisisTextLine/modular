@@ -330,16 +330,6 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 	if ctx.serverConfig.TLS != nil {
 	} else {
 	}
-	
-	// Debug: Check what config the app actually has registered
-	if testConfigSection, err := ctx.app.GetConfigSection("httpserver"); err != nil {
-	} else {
-		testActualConfig := testConfigSection.GetConfig().(*HTTPServerConfig)
-		if testActualConfig.TLS != nil {
-				testActualConfig.TLS.Enabled, testActualConfig.TLS.AutoGenerate)
-		} else {
-		}
-	}
 
 	// Initialize
 	err = ctx.app.Init()
@@ -668,19 +658,14 @@ func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFil
 		},
 	}
 
-	// Debug: confirm TLS config is set
-	if ctx.serverConfig.TLS != nil {
-			ctx.serverConfig.TLS.Enabled, ctx.serverConfig.TLS.AutoGenerate)
-	} else {
-	}
-
 	ctx.isHTTPS = true
 	err := ctx.setupApplicationWithConfig()
 	
 	// Debug: check if our test config is still intact after setup
 	if ctx.serverConfig.TLS != nil {
-			ctx.serverConfig.TLS.Enabled, ctx.serverConfig.TLS.AutoGenerate)
+		// TLS configuration is available
 	} else {
+		// No TLS configuration
 	}
 	
 	return err

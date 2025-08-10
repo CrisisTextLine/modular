@@ -33,7 +33,7 @@ type CacheConfig struct {
 	// Engine specifies the cache engine to use.
 	// Supported values: "memory", "redis"
 	// Default: "memory"
-	Engine string `json:"engine" yaml:"engine" env:"ENGINE" validate:"oneof=memory redis"`
+	Engine string `json:"engine" yaml:"engine" env:"ENGINE" default:"memory" validate:"oneof=memory redis"`
 
 	// DefaultTTL is the default time-to-live for cache entries.
 	// Used when no explicit TTL is provided in cache operations.
@@ -47,7 +47,7 @@ type CacheConfig struct {
 	// When this limit is reached, least recently used items are evicted.
 	// Only applicable to memory cache engine.
 	// Must be at least 1.
-	MaxItems int `json:"maxItems" yaml:"maxItems" env:"MAX_ITEMS" validate:"min=1"`
+	MaxItems int `json:"maxItems" yaml:"maxItems" env:"MAX_ITEMS" default:"10000" validate:"min=1"`
 
 	// RedisURL is the connection URL for Redis server.
 	// Format: redis://[username:password@]host:port[/database]

@@ -144,7 +144,7 @@ func (c *MemoryCache) DeleteMulti(ctx context.Context, keys []string) error {
 
 // startCleanupTimer starts the cleanup timer for expired items
 func (c *MemoryCache) startCleanupTimer(ctx context.Context) {
-	ticker := time.NewTicker(time.Duration(c.config.CleanupInterval) * time.Second)
+	ticker := time.NewTicker(c.config.CleanupInterval)
 	defer ticker.Stop()
 
 	for {

@@ -20,8 +20,8 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				JWT: JWTConfig{
 					Secret:            "test-secret",
-					Expiration:        3600,
-					RefreshExpiration: 86400,
+					Expiration:        1 * time.Hour,
+					RefreshExpiration: 24 * time.Hour,
 				},
 				Password: PasswordConfig{
 					MinLength:  8,
@@ -35,8 +35,8 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				JWT: JWTConfig{
 					Secret:            "",
-					Expiration:        3600,
-					RefreshExpiration: 86400,
+					Expiration:        1 * time.Hour,
+					RefreshExpiration: 24 * time.Hour,
 				},
 				Password: PasswordConfig{
 					MinLength:  8,
@@ -51,7 +51,7 @@ func TestConfig_Validate(t *testing.T) {
 				JWT: JWTConfig{
 					Secret:            "test-secret",
 					Expiration:        0,
-					RefreshExpiration: 86400,
+					RefreshExpiration: 24 * time.Hour,
 				},
 				Password: PasswordConfig{
 					MinLength:  8,
@@ -65,8 +65,8 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				JWT: JWTConfig{
 					Secret:            "test-secret",
-					Expiration:        3600,
-					RefreshExpiration: 86400,
+					Expiration:        1 * time.Hour,
+					RefreshExpiration: 24 * time.Hour,
 				},
 				Password: PasswordConfig{
 					MinLength:  0,
@@ -80,8 +80,8 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				JWT: JWTConfig{
 					Secret:            "test-secret",
-					Expiration:        3600,
-					RefreshExpiration: 86400,
+					Expiration:        1 * time.Hour,
+					RefreshExpiration: 24 * time.Hour,
 				},
 				Password: PasswordConfig{
 					MinLength:  8,
@@ -108,8 +108,8 @@ func TestService_GenerateToken(t *testing.T) {
 	config := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret",
-			Expiration:        3600,
-			RefreshExpiration: 86400,
+			Expiration:        1 * time.Hour,
+			RefreshExpiration: 24 * time.Hour,
 			Issuer:            "test-issuer",
 		},
 	}
@@ -131,7 +131,7 @@ func TestService_GenerateToken(t *testing.T) {
 	assert.NotEmpty(t, tokenPair.AccessToken)
 	assert.NotEmpty(t, tokenPair.RefreshToken)
 	assert.Equal(t, "Bearer", tokenPair.TokenType)
-	assert.Equal(t, int64(config.JWT.Expiration), tokenPair.ExpiresIn)
+	assert.Equal(t, int64(config.JWT.Expiration.Seconds()), tokenPair.ExpiresIn)
 	assert.True(t, time.Now().Before(tokenPair.ExpiresAt))
 }
 
@@ -139,8 +139,8 @@ func TestService_ValidateToken(t *testing.T) {
 	config := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret",
-			Expiration:        3600,
-			RefreshExpiration: 86400,
+			Expiration:        1 * time.Hour,
+			RefreshExpiration: 24 * time.Hour,
 			Issuer:            "test-issuer",
 		},
 	}
@@ -179,8 +179,8 @@ func TestService_ValidateToken_Invalid(t *testing.T) {
 	config := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret",
-			Expiration:        3600,
-			RefreshExpiration: 86400,
+			Expiration:        1 * time.Hour,
+			RefreshExpiration: 24 * time.Hour,
 		},
 	}
 
@@ -222,8 +222,8 @@ func TestService_RefreshToken(t *testing.T) {
 	config := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret",
-			Expiration:        3600,
-			RefreshExpiration: 86400,
+			Expiration:        1 * time.Hour,
+			RefreshExpiration: 24 * time.Hour,
 		},
 	}
 
@@ -397,7 +397,7 @@ func TestService_ValidatePasswordStrength(t *testing.T) {
 func TestService_Sessions(t *testing.T) {
 	config := &Config{
 		Session: SessionConfig{
-			MaxAge: 3600,
+			MaxAge: 1 * time.Hour,
 		},
 	}
 

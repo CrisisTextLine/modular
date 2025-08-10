@@ -14,23 +14,23 @@ type Config struct {
 
 // JWTConfig contains JWT-related configuration
 type JWTConfig struct {
-	Secret            string `yaml:"secret" required:"true" env:"SECRET"`
-	Expiration        int    `yaml:"expiration" default:"86400" env:"EXPIRATION"`                  // 24 hours in seconds
-	RefreshExpiration int    `yaml:"refresh_expiration" default:"604800" env:"REFRESH_EXPIRATION"` // 7 days in seconds
-	Issuer            string `yaml:"issuer" default:"modular-auth" env:"ISSUER"`
-	Algorithm         string `yaml:"algorithm" default:"HS256" env:"ALGORITHM"`
+	Secret            string        `yaml:"secret" required:"true" env:"SECRET"`
+	Expiration        time.Duration `yaml:"expiration" default:"24h" env:"EXPIRATION"`
+	RefreshExpiration time.Duration `yaml:"refresh_expiration" default:"168h" env:"REFRESH_EXPIRATION"` // 7 days
+	Issuer            string        `yaml:"issuer" default:"modular-auth" env:"ISSUER"`
+	Algorithm         string        `yaml:"algorithm" default:"HS256" env:"ALGORITHM"`
 }
 
 // SessionConfig contains session-related configuration
 type SessionConfig struct {
-	Store      string `yaml:"store" default:"memory" env:"STORE"` // memory, redis, database
-	CookieName string `yaml:"cookie_name" default:"session_id" env:"COOKIE_NAME"`
-	MaxAge     int    `yaml:"max_age" default:"86400" env:"MAX_AGE"` // 24 hours in seconds
-	Secure     bool   `yaml:"secure" default:"true" env:"SECURE"`
-	HTTPOnly   bool   `yaml:"http_only" default:"true" env:"HTTP_ONLY"`
-	SameSite   string `yaml:"same_site" default:"strict" env:"SAME_SITE"` // strict, lax, none
-	Domain     string `yaml:"domain" env:"DOMAIN"`
-	Path       string `yaml:"path" default:"/" env:"PATH"`
+	Store      string        `yaml:"store" default:"memory" env:"STORE"` // memory, redis, database
+	CookieName string        `yaml:"cookie_name" default:"session_id" env:"COOKIE_NAME"`
+	MaxAge     time.Duration `yaml:"max_age" default:"24h" env:"MAX_AGE"`
+	Secure     bool          `yaml:"secure" default:"true" env:"SECURE"`
+	HTTPOnly   bool          `yaml:"http_only" default:"true" env:"HTTP_ONLY"`
+	SameSite   string        `yaml:"same_site" default:"strict" env:"SAME_SITE"` // strict, lax, none
+	Domain     string        `yaml:"domain" env:"DOMAIN"`
+	Path       string        `yaml:"path" default:"/" env:"PATH"`
 }
 
 // OAuth2Config contains OAuth2/OIDC configuration
@@ -87,15 +87,15 @@ func (c *Config) Validate() error {
 
 // GetJWTExpiration returns the JWT expiration as time.Duration
 func (c *JWTConfig) GetJWTExpiration() time.Duration {
-	return time.Duration(c.Expiration) * time.Second
+	return c.Expiration
 }
 
 // GetJWTRefreshExpiration returns the JWT refresh expiration as time.Duration
 func (c *JWTConfig) GetJWTRefreshExpiration() time.Duration {
-	return time.Duration(c.RefreshExpiration) * time.Second
+	return c.RefreshExpiration
 }
 
 // GetSessionMaxAge returns the session max age as time.Duration
 func (c *SessionConfig) GetSessionMaxAge() time.Duration {
-	return time.Duration(c.MaxAge) * time.Second
+	return c.MaxAge
 }

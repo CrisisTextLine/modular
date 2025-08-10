@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/cucumber/godog"
@@ -80,15 +81,15 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 	authConfig := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret-key-for-bdd-tests",
-			Expiration:        3600,  // 1 hour in seconds
-			RefreshExpiration: 86400, // 24 hours in seconds
+			Expiration:        1 * time.Hour,  // 1 hour
+			RefreshExpiration: 24 * time.Hour, // 24 hours
 			Issuer:            "bdd-test",
 			Algorithm:         "HS256",
 		},
 		Session: SessionConfig{
 			Store:      "memory",
 			CookieName: "test_session",
-			MaxAge:     3600, // 1 hour in seconds
+			MaxAge:     1 * time.Hour, // 1 hour
 			Secure:     false,
 			HTTPOnly:   true,
 			SameSite:   "strict",

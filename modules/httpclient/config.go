@@ -58,19 +58,19 @@ type Config struct {
 	// before closing itself. This helps prevent stale connections and
 	// reduces server-side resource usage.
 	// Default: 90 seconds
-	IdleConnTimeout time.Duration `yaml:"idle_conn_timeout" json:"idle_conn_timeout" env:"IDLE_CONN_TIMEOUT" default:"90s"`
+	IdleConnTimeout time.Duration `yaml:"idle_conn_timeout" json:"idle_conn_timeout" env:"IDLE_CONN_TIMEOUT"`
 
 	// RequestTimeout is the maximum time for a request to complete.
 	// This includes connection time, any redirects, and reading the response body.
 	// Use WithTimeout() method for per-request timeout overrides.
 	// Default: 30 seconds
-	RequestTimeout time.Duration `yaml:"request_timeout" json:"request_timeout" env:"REQUEST_TIMEOUT" default:"30s"`
+	RequestTimeout time.Duration `yaml:"request_timeout" json:"request_timeout" env:"REQUEST_TIMEOUT"`
 
 	// TLSTimeout is the maximum time waiting for TLS handshake.
 	// This only affects HTTPS connections and should be set based on expected
 	// network latency and certificate chain complexity.
 	// Default: 10 seconds
-	TLSTimeout time.Duration `yaml:"tls_timeout" json:"tls_timeout" env:"TLS_TIMEOUT" default:"10s"`
+	TLSTimeout time.Duration `yaml:"tls_timeout" json:"tls_timeout" env:"TLS_TIMEOUT"`
 
 	// DisableCompression disables decompressing response bodies.
 	// When false (default), the client automatically handles gzip compression.

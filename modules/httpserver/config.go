@@ -28,17 +28,17 @@ type HTTPServerConfig struct {
 
 	// ReadTimeout is the maximum duration for reading the entire request,
 	// including the body.
-	ReadTimeout time.Duration `yaml:"read_timeout" json:"read_timeout" env:"READ_TIMEOUT" default:"15s"`
+	ReadTimeout time.Duration `yaml:"read_timeout" json:"read_timeout" env:"READ_TIMEOUT"`
 
 	// WriteTimeout is the maximum duration before timing out writes of the response.
-	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout" env:"WRITE_TIMEOUT" default:"15s"`
+	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout" env:"WRITE_TIMEOUT"`
 
 	// IdleTimeout is the maximum amount of time to wait for the next request.
-	IdleTimeout time.Duration `yaml:"idle_timeout" json:"idle_timeout" env:"IDLE_TIMEOUT" default:"60s"`
+	IdleTimeout time.Duration `yaml:"idle_timeout" json:"idle_timeout" env:"IDLE_TIMEOUT"`
 
 	// ShutdownTimeout is the maximum amount of time to wait during graceful
 	// shutdown.
-	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" json:"shutdown_timeout" env:"SHUTDOWN_TIMEOUT" default:"30s"`
+	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" json:"shutdown_timeout" env:"SHUTDOWN_TIMEOUT"`
 
 	// TLS configuration if HTTPS is enabled
 	TLS *TLSConfig `yaml:"tls" json:"tls"`

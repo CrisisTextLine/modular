@@ -49,9 +49,9 @@ func (ctx *HTTPClientBDDTestContext) iHaveAModularApplicationWithHTTPClientModul
 	ctx.clientConfig = &Config{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90,
-		RequestTimeout:      30,
-		TLSTimeout:          10,
+		IdleConnTimeout:     90 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		TLSTimeout:          10 * time.Second,
 		DisableCompression:  false,
 		DisableKeepAlives:   false,
 		Verbose:             false,
@@ -174,9 +174,9 @@ func (ctx *HTTPClientBDDTestContext) iHaveAnHTTPClientConfigurationWithCustomTim
 	ctx.clientConfig = &Config{
 		MaxIdleConns:        50,
 		MaxIdleConnsPerHost: 5,
-		IdleConnTimeout:     60,
-		RequestTimeout:      15,  // Custom timeout
-		TLSTimeout:          5,   // Custom TLS timeout
+		IdleConnTimeout:     60 * time.Second,
+		RequestTimeout:      15 * time.Second,  // Custom timeout
+		TLSTimeout:          5 * time.Second,   // Custom TLS timeout
 		DisableCompression:  false,
 		DisableKeepAlives:   false,
 		Verbose:             false,
@@ -191,7 +191,7 @@ func (ctx *HTTPClientBDDTestContext) theClientShouldHaveTheConfiguredRequestTime
 	}
 	
 	// Validate timeout configuration
-	if ctx.clientConfig.RequestTimeout != 15 {
+	if ctx.clientConfig.RequestTimeout != 15*time.Second {
 		return fmt.Errorf("request timeout not configured correctly")
 	}
 	
@@ -204,7 +204,7 @@ func (ctx *HTTPClientBDDTestContext) theClientShouldHaveTheConfiguredTLSTimeout(
 	}
 	
 	// Validate TLS timeout configuration
-	if ctx.clientConfig.TLSTimeout != 5 {
+	if ctx.clientConfig.TLSTimeout != 5*time.Second {
 		return fmt.Errorf("TLS timeout not configured correctly")
 	}
 	
@@ -217,7 +217,7 @@ func (ctx *HTTPClientBDDTestContext) theClientShouldHaveTheConfiguredIdleConnect
 	}
 	
 	// Validate idle connection timeout configuration
-	if ctx.clientConfig.IdleConnTimeout != 60 {
+	if ctx.clientConfig.IdleConnTimeout != 60*time.Second {
 		return fmt.Errorf("idle connection timeout not configured correctly")
 	}
 	
@@ -231,9 +231,9 @@ func (ctx *HTTPClientBDDTestContext) iHaveAnHTTPClientConfigurationWithConnectio
 	ctx.clientConfig = &Config{
 		MaxIdleConns:        200,  // Custom pool size
 		MaxIdleConnsPerHost: 20,   // Custom per-host pool size
-		IdleConnTimeout:     120,
-		RequestTimeout:      30,
-		TLSTimeout:          10,
+		IdleConnTimeout:     120 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		TLSTimeout:          10 * time.Second,
 		DisableCompression:  false,
 		DisableKeepAlives:   false, // Keep-alive enabled for pooling
 		Verbose:             false,
@@ -426,9 +426,9 @@ func (ctx *HTTPClientBDDTestContext) iHaveAnHTTPClientConfigurationWithVerboseLo
 	ctx.clientConfig = &Config{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90,
-		RequestTimeout:      30,
-		TLSTimeout:          10,
+		IdleConnTimeout:     90 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		TLSTimeout:          10 * time.Second,
 		DisableCompression:  false,
 		DisableKeepAlives:   false,
 		Verbose:             true, // Enable verbose logging
@@ -547,9 +547,9 @@ func (ctx *HTTPClientBDDTestContext) iHaveAnHTTPClientConfigurationWithCompressi
 	ctx.clientConfig = &Config{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90,
-		RequestTimeout:      30,
-		TLSTimeout:          10,
+		IdleConnTimeout:     90 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		TLSTimeout:          10 * time.Second,
 		DisableCompression:  false, // Compression enabled
 		DisableKeepAlives:   false,
 		Verbose:             false,
@@ -582,9 +582,9 @@ func (ctx *HTTPClientBDDTestContext) iHaveAnHTTPClientConfigurationWithKeepAlive
 	ctx.clientConfig = &Config{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90,
-		RequestTimeout:      30,
-		TLSTimeout:          10,
+		IdleConnTimeout:     90 * time.Second,
+		RequestTimeout:      30 * time.Second,
+		TLSTimeout:          10 * time.Second,
 		DisableCompression:  false,
 		DisableKeepAlives:   true, // Keep-alive disabled
 		Verbose:             false,

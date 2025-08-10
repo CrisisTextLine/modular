@@ -65,9 +65,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveAModularApplicationWithHTTPServerModul
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         8090, // Use fixed port for testing
-		ReadTimeout:  30,
-		WriteTimeout: 30,
-		IdleTimeout:  30,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  30 * time.Second,
 		TLS:          nil, // No TLS for basic test
 	}
 
@@ -114,9 +114,17 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerModuleIsInitialized() error {
 		return nil
 	}
 
-	// The HTTP server module doesn't provide services, so we access it directly
-	ctx.service = ctx.module
+	// The module uses a Constructor, so the service should be available
+	// Try to get it as a service
+	var serverService *HTTPServerModule
+	if err := ctx.app.GetService("httpserver", &serverService); err == nil {
+		ctx.service = serverService
+		return nil
+	}
 
+	// If service lookup fails, something is wrong with our service registration
+	// Use the fallback
+	ctx.service = ctx.module
 	return nil
 }
 
@@ -151,9 +159,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerConfiguration() error {
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         8080, // Use fixed port for testing
-		ReadTimeout:  15,
-		WriteTimeout: 15,
-		IdleTimeout:  60,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 		TLS:          nil, // No TLS for basic HTTP
 	}
 
@@ -167,9 +175,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPSServerConfigurationWithTLSEnabl
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         8443, // Fixed HTTPS port for testing
-		ReadTimeout:  30,
-		WriteTimeout: 30,
-		IdleTimeout:  30,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  30 * time.Second,
 		TLS: &TLSConfig{
 			Enabled:      true,
 			AutoGenerate: true,
@@ -188,9 +196,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithCustomTimeoutSettings(
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         8081, // Fixed port for timeout testing
-		ReadTimeout:  5, // Short timeout for testing
-		WriteTimeout: 5,
-		IdleTimeout:  10,
+		ReadTimeout:  5 * time.Second, // Short timeout for testing
+		WriteTimeout: 5 * time.Second,
+		IdleTimeout:  10 * time.Second,
 		TLS:          nil,
 	}
 
@@ -203,9 +211,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithHealthChecksEnabled() 
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         8082, // Fixed port for health check testing
-		ReadTimeout:  30,
-		WriteTimeout: 30,
-		IdleTimeout:  30,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  30 * time.Second,
 		TLS:          nil,
 	}
 
@@ -462,7 +470,7 @@ func (ctx *HTTPServerBDDTestContext) theReadTimeoutShouldBeRespected() error {
 	expectedTimeout := ctx.serverConfig.ReadTimeout
 	actualTimeout := ctx.service.config.ReadTimeout
 	if actualTimeout != expectedTimeout {
-		return fmt.Errorf("read timeout not configured correctly: expected %ds, got %ds",
+		return fmt.Errorf("read timeout not configured correctly: expected %v, got %v",
 			expectedTimeout, actualTimeout)
 	}
 
@@ -481,7 +489,7 @@ func (ctx *HTTPServerBDDTestContext) theWriteTimeoutShouldBeRespected() error {
 	expectedTimeout := ctx.serverConfig.WriteTimeout
 	actualTimeout := ctx.service.config.WriteTimeout
 	if actualTimeout != expectedTimeout {
-		return fmt.Errorf("write timeout not configured correctly: expected %ds, got %ds",
+		return fmt.Errorf("write timeout not configured correctly: expected %v, got %v",
 			expectedTimeout, actualTimeout)
 	}
 
@@ -500,7 +508,7 @@ func (ctx *HTTPServerBDDTestContext) theIdleTimeoutShouldBeRespected() error {
 	expectedTimeout := ctx.serverConfig.IdleTimeout
 	actualTimeout := ctx.service.config.IdleTimeout
 	if actualTimeout != expectedTimeout {
-		return fmt.Errorf("idle timeout not configured correctly: expected %ds, got %ds",
+		return fmt.Errorf("idle timeout not configured correctly: expected %v, got %v",
 			expectedTimeout, actualTimeout)
 	}
 
@@ -646,9 +654,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFil
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         8444, // Fixed port for TLS testing
-		ReadTimeout:  30,
-		WriteTimeout: 30,
-		IdleTimeout:  30,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  30 * time.Second,
 		TLS: &TLSConfig{
 			Enabled:      true,
 			AutoGenerate: true,
@@ -752,9 +760,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithMonitoringEnabled() er
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:         "127.0.0.1",
 		Port:         8083, // Fixed port for monitoring testing
-		ReadTimeout:  30,
-		WriteTimeout: 30,
-		IdleTimeout:  30,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  30 * time.Second,
 		TLS:          nil,
 		// Monitoring would be configured here
 	}

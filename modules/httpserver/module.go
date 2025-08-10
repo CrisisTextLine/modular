@@ -123,10 +123,10 @@ func (m *HTTPServerModule) RegisterConfig(app modular.Application) error {
 	defaultConfig := &HTTPServerConfig{
 		Host:            "0.0.0.0",
 		Port:            8080,
-		ReadTimeout:     15,
-		WriteTimeout:    15,
-		IdleTimeout:     60,
-		ShutdownTimeout: 30,
+		ReadTimeout:     15 * time.Second,
+		WriteTimeout:    15 * time.Second,
+		IdleTimeout:     60 * time.Second,
+		ShutdownTimeout: 30 * time.Second,
 	}
 
 	app.RegisterConfigSection(m.Name(), modular.NewStdConfigProvider(defaultConfig))
@@ -367,8 +367,13 @@ func (m *HTTPServerModule) Stop(ctx context.Context) error {
 
 // ProvidesServices returns the services provided by this module
 func (m *HTTPServerModule) ProvidesServices() []modular.ServiceProvider {
-	// This module doesn't provide any services
-	return nil
+	return []modular.ServiceProvider{
+		{
+			Name:        "httpserver",
+			Description: "HTTP server module for handling HTTP requests and providing web services",
+			Instance:    m,
+		},
+	}
 }
 
 // RequiresServices returns the services required by this module

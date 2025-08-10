@@ -9,13 +9,13 @@ type SchedulerConfig struct {
 	QueueSize int `json:"queueSize" yaml:"queueSize" validate:"min=1" env:"QUEUE_SIZE"`
 
 	// ShutdownTimeout is the time in seconds to wait for graceful shutdown
-	ShutdownTimeout int `json:"shutdownTimeout" yaml:"shutdownTimeout" validate:"min=1" env:"SHUTDOWN_TIMEOUT"`
+	ShutdownTimeout int `json:"shutdownTimeout" yaml:"shutdownTimeout" validate:"min=1" env:"SHUTDOWN_TIMEOUT" default:"30"`
 
 	// StorageType is the type of job storage to use (memory, file, etc.)
 	StorageType string `json:"storageType" yaml:"storageType" validate:"oneof=memory file" env:"STORAGE_TYPE"`
 
 	// CheckInterval is how often to check for scheduled jobs (in seconds)
-	CheckInterval int `json:"checkInterval" yaml:"checkInterval" validate:"min=1" env:"CHECK_INTERVAL"`
+	CheckInterval int `json:"checkInterval" yaml:"checkInterval" validate:"min=1" env:"CHECK_INTERVAL" default:"10"`
 
 	// RetentionDays is how many days to retain job history
 	RetentionDays int `json:"retentionDays" yaml:"retentionDays" validate:"min=1" env:"RETENTION_DAYS"`

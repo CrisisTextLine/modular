@@ -68,7 +68,7 @@ type ChiMuxConfig struct {
 	// This sets a default timeout for request processing, though individual
 	// handlers may override this with their own timeout logic.
 	// Default: 60000 (60 seconds)
-	Timeout int `yaml:"timeout" default:"60000" desc:"Default request timeout." env:"TIMEOUT"`
+	Timeout int `yaml:"timeout" default:"60000" desc:"Default request timeout in milliseconds." env:"TIMEOUT"`
 
 	// BasePath specifies a base path prefix for all routes registered through this module.
 	// When set, all routes will be prefixed with this path. Useful for mounting

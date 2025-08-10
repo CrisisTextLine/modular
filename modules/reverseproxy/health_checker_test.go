@@ -24,8 +24,8 @@ func TestHealthChecker_NewHealthChecker(t *testing.T) {
 	}
 
 	backends := map[string]string{
-		"backend1": "http://backend1.example.com",
-		"backend2": "http://backend2.example.com",
+		"backend1": "http://127.0.0.1:9003",
+		"backend2": "http://127.0.0.1:9004",
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -352,8 +352,8 @@ func TestHealthChecker_UpdateBackends(t *testing.T) {
 	}
 
 	initialBackends := map[string]string{
-		"backend1": "http://backend1.example.com",
-		"backend2": "http://backend2.example.com",
+		"backend1": "http://127.0.0.1:9003",
+		"backend2": "http://127.0.0.1:9004",
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -362,8 +362,8 @@ func TestHealthChecker_UpdateBackends(t *testing.T) {
 	hc := NewHealthChecker(config, initialBackends, client, logger)
 
 	// Initialize backend status
-	hc.initializeBackendStatus("backend1", "http://backend1.example.com")
-	hc.initializeBackendStatus("backend2", "http://backend2.example.com")
+	hc.initializeBackendStatus("backend1", "http://127.0.0.1:9003")
+	hc.initializeBackendStatus("backend2", "http://127.0.0.1:9004")
 
 	// Check initial status
 	status := hc.GetHealthStatus()
@@ -373,7 +373,7 @@ func TestHealthChecker_UpdateBackends(t *testing.T) {
 
 	// Update backends - remove backend2, add backend3
 	updatedBackends := map[string]string{
-		"backend1": "http://backend1.example.com",
+		"backend1": "http://127.0.0.1:9003",
 		"backend3": "http://backend3.example.com",
 	}
 
@@ -399,7 +399,7 @@ func TestHealthChecker_GetHealthStatus(t *testing.T) {
 	}
 
 	backends := map[string]string{
-		"backend1": "http://backend1.example.com",
+		"backend1": "http://127.0.0.1:9003",
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -408,7 +408,7 @@ func TestHealthChecker_GetHealthStatus(t *testing.T) {
 	hc := NewHealthChecker(config, backends, client, logger)
 
 	// Initialize backend status
-	hc.initializeBackendStatus("backend1", "http://backend1.example.com")
+	hc.initializeBackendStatus("backend1", "http://127.0.0.1:9003")
 
 	// Test GetHealthStatus
 	status := hc.GetHealthStatus()
@@ -417,7 +417,7 @@ func TestHealthChecker_GetHealthStatus(t *testing.T) {
 
 	backend1Status := status["backend1"]
 	assert.Equal(t, "backend1", backend1Status.BackendID)
-	assert.Equal(t, "http://backend1.example.com", backend1Status.URL)
+	assert.Equal(t, "http://127.0.0.1:9003", backend1Status.URL)
 	assert.False(t, backend1Status.Healthy) // Initially unhealthy
 
 	// Test GetBackendHealthStatus

@@ -141,10 +141,10 @@ func (s *databaseServiceImpl) Connect() error {
 		db.SetMaxIdleConns(s.config.MaxIdleConnections)
 	}
 	if s.config.ConnectionMaxLifetime > 0 {
-		db.SetConnMaxLifetime(time.Duration(s.config.ConnectionMaxLifetime) * time.Second)
+		db.SetConnMaxLifetime(s.config.ConnectionMaxLifetime)
 	}
 	if s.config.ConnectionMaxIdleTime > 0 {
-		db.SetConnMaxIdleTime(time.Duration(s.config.ConnectionMaxIdleTime) * time.Second)
+		db.SetConnMaxIdleTime(s.config.ConnectionMaxIdleTime)
 	}
 
 	// Test connection

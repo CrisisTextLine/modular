@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/cucumber/godog"
@@ -72,7 +73,7 @@ func (ctx *ChiMuxBDDTestContext) iHaveAModularApplicationWithChimuxModuleConfigu
 		AllowedHeaders:   []string{"Origin", "Accept", "Content-Type", "Authorization"},
 		AllowCredentials: false,
 		MaxAge:           300,
-		Timeout:          60000,
+		Timeout:          60 * time.Second,
 		BasePath:         "",
 	}
 	
@@ -178,7 +179,7 @@ func (ctx *ChiMuxBDDTestContext) iHaveAChimuxConfigurationWithCORSSettings() err
 		AllowedHeaders:   []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
 		MaxAge:           3600,
-		Timeout:          30000,
+		Timeout:          30 * time.Second,
 	}
 	return nil
 }
@@ -268,7 +269,7 @@ func (ctx *ChiMuxBDDTestContext) iHaveAChimuxConfigurationWithBasePath(basePath 
 		AllowedHeaders:   []string{"Origin", "Content-Type"},
 		AllowCredentials: false,
 		MaxAge:           300,
-		Timeout:          60000,
+		Timeout:          60 * time.Second,
 		BasePath:         basePath,
 	}
 	return nil
@@ -337,7 +338,7 @@ func (ctx *ChiMuxBDDTestContext) iHaveAChimuxConfigurationWithTimeoutSettings() 
 		AllowedHeaders:   []string{"Origin", "Content-Type"},
 		AllowCredentials: false,
 		MaxAge:           300,
-		Timeout:          5000, // 5 second timeout
+		Timeout:          5 * time.Second, // 5 second timeout
 		BasePath:         "",
 	}
 	return nil

@@ -41,8 +41,8 @@ func (ctx *SchedulerBDDTestContext) iHaveAModularApplicationWithSchedulerModuleC
 	ctx.config = &SchedulerConfig{
 		WorkerCount:       3,
 		QueueSize:         100,
-		CheckInterval:     1,
-		ShutdownTimeout:   30,
+		CheckInterval:     1 * time.Second,
+		ShutdownTimeout:   30 * time.Second,
 		StorageType:       "memory",
 		RetentionDays:     1,
 		EnablePersistence: false,
@@ -151,7 +151,7 @@ func (ctx *SchedulerBDDTestContext) iHaveASchedulerConfiguredForImmediateExecuti
 	}
 
 	// Configure for immediate execution
-	ctx.config.CheckInterval = 1 // Fast check interval for testing (1 second)
+	ctx.config.CheckInterval = 1 * time.Second // Fast check interval for testing (1 second)
 
 	return ctx.theSchedulerModuleIsInitialized()
 }
@@ -346,10 +346,10 @@ func (ctx *SchedulerBDDTestContext) iHaveASchedulerWithConfigurableWorkerPool() 
 
 	// Create scheduler configuration with worker pool settings
 	ctx.config = &SchedulerConfig{
-		WorkerCount:       5,  // Specific worker count for this test
-		QueueSize:         50, // Specific queue size for this test
-		CheckInterval:     1,
-		ShutdownTimeout:   30,
+		WorkerCount:       5,                  // Specific worker count for this test
+		QueueSize:         50,                 // Specific queue size for this test
+		CheckInterval:     1 * time.Second,
+		ShutdownTimeout:   30 * time.Second,
 		StorageType:       "memory",
 		RetentionDays:     1,
 		EnablePersistence: false,
@@ -411,8 +411,8 @@ func (ctx *SchedulerBDDTestContext) iHaveASchedulerWithCleanupPoliciesConfigured
 	ctx.config = &SchedulerConfig{
 		WorkerCount:       3,
 		QueueSize:         100,
-		CheckInterval:     10, // 10 seconds for faster cleanup testing
-		ShutdownTimeout:   30,
+		CheckInterval:     10 * time.Second, // 10 seconds for faster cleanup testing
+		ShutdownTimeout:   30 * time.Second,
 		StorageType:       "memory",
 		RetentionDays:     1, // 1 day retention for testing
 		EnablePersistence: false,
@@ -454,8 +454,8 @@ func (ctx *SchedulerBDDTestContext) iHaveASchedulerWithRetryConfiguration() erro
 	ctx.config = &SchedulerConfig{
 		WorkerCount:       1, // Single worker for predictable testing
 		QueueSize:         100,
-		CheckInterval:     1,
-		ShutdownTimeout:   30,
+		CheckInterval:     1 * time.Second,
+		ShutdownTimeout:   30 * time.Second,
 		StorageType:       "memory",
 		RetentionDays:     1,
 		EnablePersistence: false,

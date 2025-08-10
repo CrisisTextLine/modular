@@ -257,7 +257,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerRunning() error {
 func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 	// Debug: check TLS config at start of setupApplicationWithConfig
 	if ctx.serverConfig.TLS != nil {
+		fmt.Printf("DEBUG: setupApplicationWithConfig() start - TLS config valid\n")
 	} else {
+		fmt.Printf("DEBUG: setupApplicationWithConfig() start - TLS config is nil\n")
 	}
 	
 	logger := &testLogger{}
@@ -328,16 +330,21 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 
 	// Debug: check TLS config before app.Init()
 	if ctx.serverConfig.TLS != nil {
+		fmt.Printf("DEBUG: setupApplicationWithConfig() before Init - TLS config valid\n")
 	} else {
+		fmt.Printf("DEBUG: setupApplicationWithConfig() before Init - TLS config is nil\n")
 	}
 	
 	// Debug: Check what config the app actually has registered
 	if testConfigSection, err := ctx.app.GetConfigSection("httpserver"); err != nil {
+		fmt.Printf("DEBUG: Cannot get registered config section before Init: %v\n", err)
 	} else {
 		testActualConfig := testConfigSection.GetConfig().(*HTTPServerConfig)
 		if testActualConfig.TLS != nil {
+			fmt.Printf("DEBUG: Before Init, registered config has TLS - Enabled: %v, AutoGenerate: %v\n", 
 				testActualConfig.TLS.Enabled, testActualConfig.TLS.AutoGenerate)
 		} else {
+			fmt.Printf("DEBUG: Before Init, registered config has no TLS\n")
 		}
 	}
 
@@ -350,7 +357,9 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 
 	// Debug: check TLS config after app.Init()
 	if ctx.serverConfig.TLS != nil {
+		fmt.Printf("DEBUG: setupApplicationWithConfig() after Init - TLS config valid\n")
 	} else {
+		fmt.Printf("DEBUG: setupApplicationWithConfig() after Init - TLS config is nil\n")
 	}
 
 	// The HTTP server module doesn't provide services, so we access it directly
@@ -358,7 +367,9 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 
 	// Debug: check module's config
 	if ctx.service.config.TLS != nil {
+		fmt.Printf("DEBUG: setupApplicationWithConfig() end - module TLS config valid\n")
 	} else {
+		fmt.Printf("DEBUG: setupApplicationWithConfig() end - module TLS config is nil\n")
 	}
 
 	return nil
@@ -650,6 +661,7 @@ func (ctx *HTTPServerBDDTestContext) theMiddlewareChainShouldExecuteInOrder() er
 
 func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFiles() error {
 	// Debug: print that this method is being called
+	fmt.Printf("DEBUG: iHaveATLSConfigurationWithoutCertificateFiles() called\n")
 	
 	ctx.resetContext()
 
@@ -670,8 +682,10 @@ func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFil
 
 	// Debug: confirm TLS config is set
 	if ctx.serverConfig.TLS != nil {
+		fmt.Printf("DEBUG: TLS config set - Enabled: %v, AutoGenerate: %v\n", 
 			ctx.serverConfig.TLS.Enabled, ctx.serverConfig.TLS.AutoGenerate)
 	} else {
+		fmt.Printf("DEBUG: TLS config is nil after setup!\n")
 	}
 
 	ctx.isHTTPS = true
@@ -679,8 +693,10 @@ func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFil
 	
 	// Debug: check if our test config is still intact after setup
 	if ctx.serverConfig.TLS != nil {
+		fmt.Printf("DEBUG: After setupApplicationWithConfig, test config still has TLS - Enabled: %v, AutoGenerate: %v\n", 
 			ctx.serverConfig.TLS.Enabled, ctx.serverConfig.TLS.AutoGenerate)
 	} else {
+		fmt.Printf("DEBUG: After setupApplicationWithConfig, test config lost TLS!\n")
 	}
 	
 	return err
@@ -689,7 +705,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveATLSConfigurationWithoutCertificateFil
 func (ctx *HTTPServerBDDTestContext) theHTTPSServerIsStartedWithAutoGeneration() error {
 	// Debug: check TLS config before calling theHTTPServerIsStarted
 	if ctx.serverConfig.TLS != nil {
+		fmt.Printf("DEBUG: theHTTPSServerIsStartedWithAutoGeneration() - TLS config still valid\n")
 	} else {
+		fmt.Printf("DEBUG: theHTTPSServerIsStartedWithAutoGeneration() - TLS config is nil!\n")
 	}
 	
 	return ctx.theHTTPServerIsStarted()

@@ -60,7 +60,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAModularApplicationWithEventLoggerMod
 		LogLevel:          "INFO",
 		Format:            "structured",
 		BufferSize:        10,
-		FlushInterval:     "1s",
+		FlushInterval:     1 * time.Second,
 		IncludeMetadata:   true,
 		IncludeStackTrace: false,
 		OutputTargets: []OutputTargetConfig{

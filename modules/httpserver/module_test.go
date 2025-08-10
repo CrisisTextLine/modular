@@ -451,19 +451,22 @@ func TestTLSSupport(t *testing.T) {
 
 func TestTimeoutConfig(t *testing.T) {
 	config := &HTTPServerConfig{
-		ReadTimeout:     15,
-		WriteTimeout:    20,
-		IdleTimeout:     60,
-		ShutdownTimeout: 30,
+		ReadTimeout:     15 * time.Second,
+		WriteTimeout:    20 * time.Second,
+		IdleTimeout:     60 * time.Second,
+		ShutdownTimeout: 30 * time.Second,
 	}
 
-	assert.Equal(t, 15*time.Second, config.GetTimeout(config.ReadTimeout))
-	assert.Equal(t, 20*time.Second, config.GetTimeout(config.WriteTimeout))
-	assert.Equal(t, 60*time.Second, config.GetTimeout(config.IdleTimeout))
-	assert.Equal(t, 30*time.Second, config.GetTimeout(config.ShutdownTimeout))
+	assert.Equal(t, 15*time.Second, config.ReadTimeout)
+	assert.Equal(t, 20*time.Second, config.WriteTimeout)
+	assert.Equal(t, 60*time.Second, config.IdleTimeout)
+	assert.Equal(t, 30*time.Second, config.ShutdownTimeout)
 
-	// Test with zero value (should use DefaultTimeoutSeconds, which is 15)
-	assert.Equal(t, time.Duration(DefaultTimeoutSeconds)*time.Second, config.GetTimeout(0))
+	// Test with zero value (should use defaults from struct tags or validation)
+	configZero := &HTTPServerConfig{}
+	err := configZero.Validate()
+	assert.NoError(t, err)
+	assert.Equal(t, 15*time.Second, configZero.ReadTimeout)
 }
 
 // Helper function to generate a self-signed certificate for TLS testing

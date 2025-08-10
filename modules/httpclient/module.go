@@ -245,8 +245,8 @@ func (m *HTTPClientModule) Init(app modular.Application) error {
 	m.transport = &http.Transport{
 		MaxIdleConns:        m.config.MaxIdleConns,
 		MaxIdleConnsPerHost: m.config.MaxIdleConnsPerHost,
-		IdleConnTimeout:     m.config.GetTimeout(m.config.IdleConnTimeout),
-		TLSHandshakeTimeout: m.config.GetTimeout(m.config.TLSTimeout),
+		IdleConnTimeout:     m.config.IdleConnTimeout,
+		TLSHandshakeTimeout: m.config.TLSTimeout,
 		DisableCompression:  m.config.DisableCompression,
 		DisableKeepAlives:   m.config.DisableKeepAlives,
 	}
@@ -296,7 +296,7 @@ func (m *HTTPClientModule) Init(app modular.Application) error {
 
 	m.httpClient = &http.Client{
 		Transport: baseTransport,
-		Timeout:   m.config.GetTimeout(m.config.RequestTimeout),
+		Timeout:   m.config.RequestTimeout,
 	}
 
 	return nil

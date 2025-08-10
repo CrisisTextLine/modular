@@ -206,9 +206,9 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 	m.server = &http.Server{
 		Addr:         addr,
 		Handler:      m.handler,
-		ReadTimeout:  m.config.ReadTimeout,
-		WriteTimeout: m.config.WriteTimeout,
-		IdleTimeout:  m.config.IdleTimeout,
+		ReadTimeout:  m.config.GetTimeout(m.config.ReadTimeout),
+		WriteTimeout: m.config.GetTimeout(m.config.WriteTimeout),
+		IdleTimeout:  m.config.GetTimeout(m.config.IdleTimeout),
 	}
 
 	// Start the server in a goroutine
@@ -350,7 +350,7 @@ func (m *HTTPServerModule) Stop(ctx context.Context) error {
 	// Create a context with timeout for shutdown
 	shutdownCtx, cancel := context.WithTimeout(
 		ctx,
-		m.config.ShutdownTimeout,
+		m.config.GetTimeout(m.config.ShutdownTimeout),
 	)
 	defer cancel()
 

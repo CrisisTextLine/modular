@@ -141,7 +141,7 @@ func (c *Config) Validate() error {
 		c.MaxIdleConnsPerHost = 10
 	}
 
-	// Set default timeout values (defaults handled by struct tags now)
+	// Set default timeout values (handled by struct defaults now)
 	if c.IdleConnTimeout <= 0 {
 		c.IdleConnTimeout = 90 * time.Second
 	}

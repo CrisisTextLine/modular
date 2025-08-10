@@ -1,9 +1,5 @@
 package cache
 
-import (
-	"time"
-)
-
 // CacheConfig defines the configuration for the cache module.
 // This structure contains all the settings needed to configure both
 // memory and Redis cache engines.
@@ -35,13 +31,15 @@ type CacheConfig struct {
 	// Default: "memory"
 	Engine string `json:"engine" yaml:"engine" env:"ENGINE" validate:"oneof=memory redis"`
 
-	// DefaultTTL is the default time-to-live for cache entries.
+	// DefaultTTL is the default time-to-live for cache entries in seconds.
 	// Used when no explicit TTL is provided in cache operations.
-	DefaultTTL time.Duration `json:"defaultTTL" yaml:"defaultTTL" env:"DEFAULT_TTL" default:"300s"`
+	// Must be at least 1 second.
+	DefaultTTL int `json:"defaultTTL" yaml:"defaultTTL" env:"DEFAULT_TTL" validate:"min=1"`
 
-	// CleanupInterval is how often to clean up expired items.
+	// CleanupInterval is how often to clean up expired items (in seconds).
 	// Only applicable to memory cache engine.
-	CleanupInterval time.Duration `json:"cleanupInterval" yaml:"cleanupInterval" env:"CLEANUP_INTERVAL" default:"60s"`
+	// Must be at least 1 second.
+	CleanupInterval int `json:"cleanupInterval" yaml:"cleanupInterval" env:"CLEANUP_INTERVAL" validate:"min=1"`
 
 	// MaxItems is the maximum number of items to store in memory cache.
 	// When this limit is reached, least recently used items are evicted.
@@ -64,8 +62,9 @@ type CacheConfig struct {
 	// Must be non-negative.
 	RedisDB int `json:"redisDB" yaml:"redisDB" env:"REDIS_DB" validate:"min=0"`
 
-	// ConnectionMaxAge is the maximum age of a connection.
+	// ConnectionMaxAge is the maximum age of a connection in seconds.
 	// Connections older than this will be closed and recreated.
 	// Helps prevent connection staleness in long-running applications.
-	ConnectionMaxAge time.Duration `json:"connectionMaxAge" yaml:"connectionMaxAge" env:"CONNECTION_MAX_AGE" default:"3600s"`
+	// Must be at least 1 second.
+	ConnectionMaxAge int `json:"connectionMaxAge" yaml:"connectionMaxAge" env:"CONNECTION_MAX_AGE" validate:"min=1"`
 }

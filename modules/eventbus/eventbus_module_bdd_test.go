@@ -108,14 +108,11 @@ func (ctx *EventBusBDDTestContext) theEventbusModuleIsInitialized() error {
 		ctx.service = eventbusService
 		// Start the eventbus service
 		ctx.service.Start(context.Background())
-		fmt.Printf("DEBUG: EventBus service started successfully\n")
 	} else {
-		fmt.Printf("DEBUG: Failed to get EventBus service: %v\n", err)
 		// Fallback: use the module directly as the service
 		ctx.service = ctx.module
 		// Start the eventbus service
 		ctx.service.Start(context.Background())
-		fmt.Printf("DEBUG: Using module directly as service and started\n")
 	}
 
 	return nil
@@ -171,11 +168,9 @@ func (ctx *EventBusBDDTestContext) iSubscribeToTopicWithAHandler(topic string) e
 
 	// Create a handler that captures events
 	handler := func(handlerCtx context.Context, event Event) error {
-		fmt.Printf("DEBUG: Handler called with event - Topic: %s, Payload: %v\n", event.Topic, event.Payload)
 		ctx.mutex.Lock()
 		defer ctx.mutex.Unlock()
 		ctx.receivedEvents = append(ctx.receivedEvents, event)
-		fmt.Printf("DEBUG: Total received events now: %d\n", len(ctx.receivedEvents))
 		return nil
 	}
 
@@ -189,7 +184,6 @@ func (ctx *EventBusBDDTestContext) iSubscribeToTopicWithAHandler(topic string) e
 		return fmt.Errorf("failed to subscribe to topic %s: %v", topic, err)
 	}
 
-	fmt.Printf("DEBUG: Successfully subscribed to topic %s\n", topic)
 
 	ctx.subscriptions[topic] = subscription
 	ctx.lastSubscription = subscription
@@ -202,7 +196,6 @@ func (ctx *EventBusBDDTestContext) iPublishAnEventToTopicWithPayload(topic, payl
 		return fmt.Errorf("eventbus service not available")
 	}
 
-	fmt.Printf("DEBUG: Publishing event to topic %s with payload %s\n", topic, payload)
 
 	err := ctx.service.Publish(context.Background(), topic, payload)
 	if err != nil {
@@ -210,7 +203,6 @@ func (ctx *EventBusBDDTestContext) iPublishAnEventToTopicWithPayload(topic, payl
 		return fmt.Errorf("failed to publish event: %v", err)
 	}
 
-	fmt.Printf("DEBUG: Event published successfully\n")
 
 	// Give more time for event processing
 	time.Sleep(500 * time.Millisecond)

@@ -126,7 +126,7 @@ func (m *CacheModule) Name() string {
 // Default configuration (from struct tags):
 //   - Engine: "memory"
 //   - DefaultTTL: 300s (5 minutes)
-//   - CleanupInterval: 60s (1 minute)  
+//   - CleanupInterval: 60s (1 minute)
 //   - MaxItems: 10000
 //   - ConnectionMaxAge: 3600s (1 hour)
 //   - Redis settings: empty/default values

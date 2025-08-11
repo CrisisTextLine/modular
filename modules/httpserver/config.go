@@ -85,20 +85,20 @@ func (c *HTTPServerConfig) Validate() error {
 		return fmt.Errorf("%w: %d", ErrInvalidPort, c.Port)
 	}
 
-	// Set default timeouts if not specified (handled by struct defaults now)
-	if c.ReadTimeout <= 0 {
+	// Set timeout defaults if zero values (programmatic defaults work reliably)
+	if c.ReadTimeout == 0 {
 		c.ReadTimeout = 15 * time.Second
 	}
 
-	if c.WriteTimeout <= 0 {
+	if c.WriteTimeout == 0 {
 		c.WriteTimeout = 15 * time.Second
 	}
 
-	if c.IdleTimeout <= 0 {
+	if c.IdleTimeout == 0 {
 		c.IdleTimeout = 60 * time.Second
 	}
 
-	if c.ShutdownTimeout <= 0 {
+	if c.ShutdownTimeout == 0 {
 		c.ShutdownTimeout = 30 * time.Second
 	}
 

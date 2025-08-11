@@ -141,16 +141,16 @@ func (c *Config) Validate() error {
 		c.MaxIdleConnsPerHost = 10
 	}
 
-	// Set default timeout values (handled by struct defaults now)
-	if c.IdleConnTimeout <= 0 {
+	// Set timeout defaults if zero values (programmatic defaults work reliably)
+	if c.IdleConnTimeout == 0 {
 		c.IdleConnTimeout = 90 * time.Second
 	}
 
-	if c.RequestTimeout <= 0 {
+	if c.RequestTimeout == 0 {
 		c.RequestTimeout = 30 * time.Second
 	}
 
-	if c.TLSTimeout <= 0 {
+	if c.TLSTimeout == 0 {
 		c.TLSTimeout = 10 * time.Second
 	}
 

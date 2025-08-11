@@ -200,12 +200,10 @@ func (m *HTTPClientModule) RegisterConfig(app modular.Application) error {
 	defaultConfig := &Config{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		RequestTimeout:      30 * time.Second,
-		TLSTimeout:          10 * time.Second,
-		DisableCompression:  false,
-		DisableKeepAlives:   false,
-		Verbose:             false,
+		// Duration defaults handled by Validate method
+		DisableCompression: false,
+		DisableKeepAlives:  false,
+		Verbose:            false,
 	}
 
 	app.RegisterConfigSection(m.Name(), modular.NewStdConfigProvider(defaultConfig))

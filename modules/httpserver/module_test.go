@@ -351,7 +351,10 @@ func TestProvidesServices(t *testing.T) {
 	module := &HTTPServerModule{}
 	services := module.ProvidesServices()
 
-	assert.Empty(t, services)
+	require.Len(t, services, 1)
+	assert.Equal(t, "httpserver", services[0].Name)
+	assert.Equal(t, "HTTP server module for handling HTTP requests and providing web services", services[0].Description)
+	assert.Equal(t, module, services[0].Instance)
 }
 
 func TestTLSSupport(t *testing.T) {
@@ -385,16 +388,21 @@ func TestTLSSupport(t *testing.T) {
 		ResponseBody:   "TLS OK",
 	}
 
-	// Use a random available port for testing
-	port := 8091
+	// Use an available port for testing
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skip("Could not get available port:", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close() // Close immediately to release the port for the server
 
 	config := &HTTPServerConfig{
 		Host:            "127.0.0.1",
 		Port:            port,
-		ReadTimeout:     15,
-		WriteTimeout:    15,
-		IdleTimeout:     60,
-		ShutdownTimeout: 30,
+		ReadTimeout:     15 * time.Second,
+		WriteTimeout:    15 * time.Second,
+		IdleTimeout:     60 * time.Second,
+		ShutdownTimeout: 30 * time.Second,
 		TLS: &TLSConfig{
 			Enabled:  true,
 			CertFile: certFile,

@@ -30,6 +30,12 @@ func NewMemoryCache(config *CacheConfig) *MemoryCache {
 
 // Connect initializes the memory cache
 func (c *MemoryCache) Connect(ctx context.Context) error {
+	// Validate configuration before use
+	if c.config.CleanupInterval <= 0 {
+		// Set a sensible default if CleanupInterval is invalid
+		c.config.CleanupInterval = 60 * time.Second
+	}
+
 	// Start cleanup goroutine with derived context
 	c.cleanupCtx, c.cancelFunc = context.WithCancel(ctx)
 	go func() {

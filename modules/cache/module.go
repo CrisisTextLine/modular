@@ -159,7 +159,7 @@ func (m *CacheModule) RegisterConfig(app modular.Application) error {
 //   - fallback: defaults to memory cache for unknown engines
 func (m *CacheModule) Init(app modular.Application) error {
 	// Retrieve the registered config section for access
-	cfg, err := app.GetConfigSection(m.name)
+	cfg, err := app.GetConfigSection(m.Name())
 	if err != nil {
 		return fmt.Errorf("failed to get config section for cache module: %w", err)
 	}

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -33,7 +34,11 @@ func (a *mockApp) RegisterConfigSection(name string, provider modular.ConfigProv
 }
 
 func (a *mockApp) GetConfigSection(name string) (modular.ConfigProvider, error) {
-	return a.configSections[name], nil
+	provider, exists := a.configSections[name]
+	if !exists {
+		return nil, fmt.Errorf("config section '%s' not found", name)
+	}
+	return provider, nil
 }
 
 func (a *mockApp) ConfigSections() map[string]modular.ConfigProvider {
@@ -96,7 +101,13 @@ func (a *mockApp) SetVerboseConfig(verbose bool) {
 type mockConfigProvider struct{}
 
 func (m *mockConfigProvider) GetConfig() interface{} {
-	return nil
+	return &CacheConfig{
+		Engine:          "memory",
+		DefaultTTL:      300 * time.Second,
+		CleanupInterval: 60 * time.Second,  // Non-zero to avoid ticker panic
+		MaxItems:        10000,
+		ConnectionMaxAge: 3600 * time.Second,
+	}
 }
 
 type mockLogger struct{}

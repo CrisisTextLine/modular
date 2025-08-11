@@ -261,10 +261,10 @@ func TestStartStop(t *testing.T) {
 	config := &HTTPServerConfig{
 		Host:            "127.0.0.1",
 		Port:            port,
-		ReadTimeout:     15,
-		WriteTimeout:    15,
-		IdleTimeout:     60,
-		ShutdownTimeout: 30,
+		ReadTimeout:     15 * time.Second,
+		WriteTimeout:    15 * time.Second,
+		IdleTimeout:     60 * time.Second,
+		ShutdownTimeout: 30 * time.Second,
 	}
 
 	module.app = mockApp
@@ -287,17 +287,18 @@ func TestStartStop(t *testing.T) {
 	// Make a test request to the server
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
-	assert.NoError(t, err)
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			t.Logf("Failed to close response body: %v", closeErr)
-		}
-	}()
+	if assert.NoError(t, err) && resp != nil {
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				t.Logf("Failed to close response body: %v", closeErr)
+			}
+		}()
 
-	body, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, "Hello, World!", string(body))
+		body, err := io.ReadAll(resp.Body)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "Hello, World!", string(body))
+	}
 
 	// Stop the server
 	err = module.Stop(ctx)
@@ -429,17 +430,18 @@ func TestTLSSupport(t *testing.T) {
 	}
 
 	resp, err := client.Get(fmt.Sprintf("https://127.0.0.1:%d", port))
-	assert.NoError(t, err)
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			t.Logf("Failed to close response body: %v", closeErr)
-		}
-	}()
+	if assert.NoError(t, err) && resp != nil {
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				t.Logf("Failed to close response body: %v", closeErr)
+			}
+		}()
 
-	body, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, "TLS OK", string(body))
+		body, err := io.ReadAll(resp.Body)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "TLS OK", string(body))
+	}
 
 	// Stop the server
 	err = module.Stop(ctx)

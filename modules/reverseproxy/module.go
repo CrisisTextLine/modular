@@ -2569,6 +2569,15 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 
 	// Now perform dry run comparison in the background (async)
 	go func(requestCtx context.Context) {
+		// Add panic recovery for background goroutine
+		defer func() {
+			if r := recover(); r != nil {
+				if m.app != nil && m.app.Logger() != nil {
+					m.app.Logger().Error("Background dry run goroutine panicked", "panic", r)
+				}
+			}
+		}()
+
 		// Use the passed context for background processing
 		// Create a copy of the request for background comparison with preserved body
 		reqCopy := r.Clone(requestCtx)

@@ -1356,6 +1356,7 @@ func scanForServices(projectPath string) ([]*ServiceInfo, error) {
 		// Read file content for text-based fallback parsing
 		content, err := os.ReadFile(path)
 		if err != nil {
+			fmt.Printf("Warning: Cannot read file %s: %v\n", path, err)
 			return nil //nolint:nilerr // Skip files that cannot be read
 		}
 		lines := strings.Split(string(content), "\n")

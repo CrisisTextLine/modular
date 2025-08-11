@@ -3,7 +3,7 @@ module github.com/CrisisTextLine/modular/modules/chimux
 go 1.24.2
 
 require (
-	github.com/CrisisTextLine/modular v1.4.0
+	github.com/CrisisTextLine/modular v1.5.0
 	github.com/cucumber/godog v0.15.1
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/stretchr/testify v1.10.0

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/CrisisTextLine/modular"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
@@ -67,19 +68,9 @@ func (s *Service) SetEventEmitter(emitter EventEmitter) {
 // emitEvent is a helper method to emit events if an emitter is available
 func (s *Service) emitEvent(ctx context.Context, eventType string, data interface{}, metadata map[string]interface{}) {
 	if s.eventEmitter != nil {
-		event := cloudevents.NewEvent()
-		event.SetType(eventType)
-		event.SetSource("auth-service")
-		event.SetTime(time.Now())
-		if err := event.SetData(cloudevents.ApplicationJSON, data); err == nil {
-			fmt.Printf("DEBUG: Emitting event: %s\n", eventType)
-			_ = s.eventEmitter.EmitEvent(ctx, event)
-		} else {
-			fmt.Printf("DEBUG: Failed to set event data for %s: %v\n", eventType, err)
-		}
-	} else {
-		// Debug: log when event emitter is nil
-		fmt.Printf("DEBUG: eventEmitter is nil for event type %s\n", eventType)
+		// Use the modular framework's NewCloudEvent to ensure proper CloudEvent format
+		event := modular.NewCloudEvent(eventType, "auth-service", data, metadata)
+		_ = s.eventEmitter.EmitEvent(ctx, event)
 	}
 }
 

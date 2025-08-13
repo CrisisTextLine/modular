@@ -44,7 +44,6 @@ type testObserver struct {
 }
 
 func (o *testObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
-	fmt.Printf("DEBUG: Observer received event: %s\n", event.Type())
 	o.events = append(o.events, event)
 	return nil
 }
@@ -934,8 +933,7 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 
 	// Debug: check the type
 	_, implements := interface{}(ctx.observableApp).(modular.Subject)
-	fmt.Printf("DEBUG: ObservableApp type: %T, implements Subject: %t\n", 
-		ctx.observableApp, implements)
+	_ = implements // Avoid unused variable warning
 
 	// Create test observer to capture events
 	ctx.testObserver = &testObserver{
@@ -948,7 +946,6 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 	if err != nil {
 		return fmt.Errorf("failed to register test observer: %w", err)
 	}
-	fmt.Printf("DEBUG: Registered test observer with ID: %s\n", ctx.testObserver.ObserverID())
 
 	// Create and configure auth module
 	ctx.module = NewModule().(*Module)
@@ -968,8 +965,6 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 	// This ensures the module has the correct subject reference for event emission
 	ctx.module.subject = ctx.observableApp
 	ctx.module.service.SetEventEmitter(ctx.module)
-	fmt.Printf("DEBUG: Manually set event emitter in BDD setup\n")
-	fmt.Printf("DEBUG: Module subject: %p, ObservableApp: %p\n", ctx.module.subject, ctx.observableApp)
 
 	// Use the service from the module directly instead of getting it from the service registry
 	// This ensures we're using the same instance that has the event emitter set up

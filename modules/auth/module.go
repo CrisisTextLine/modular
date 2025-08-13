@@ -26,6 +26,7 @@ import (
 	"fmt"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 const (
@@ -44,6 +45,7 @@ type Module struct {
 	config  *Config
 	service *Service
 	logger  modular.Logger
+	subject modular.Subject // For event emission
 }
 
 // NewModule creates a new authentication module.
@@ -107,6 +109,12 @@ func (m *Module) Init(app modular.Application) error {
 	userStore := NewMemoryUserStore()
 	sessionStore := NewMemorySessionStore()
 	m.service = NewService(m.config, userStore, sessionStore)
+
+	// Set the event emitter in the service so it can emit events
+	if observableApp, ok := app.(modular.Subject); ok {
+		m.subject = observableApp
+		m.service.SetEventEmitter(m)
+	}
 
 	m.logger.Info("Authentication module initialized", "module", m.Name())
 	return nil
@@ -217,6 +225,40 @@ func (m *Module) Constructor() modular.ModuleConstructor {
 			}, userStore, sessionStore)
 		}
 
+		// Set the event emitter in the service
+		m.service.SetEventEmitter(m)
+
 		return m, nil
 	}
+}
+
+// RegisterObservers implements the ObservableModule interface.
+// This allows the auth module to register as an observer for events it's interested in.
+func (m *Module) RegisterObservers(subject modular.Subject) error {
+	// The auth module currently does not need to observe other events,
+	// but this method is required by the ObservableModule interface.
+	// Future implementations might want to observe user-related events 
+	// from other modules.
+	return nil
+}
+
+// EmitEvent implements the ObservableModule interface.
+// This allows the auth module to emit events to registered observers.
+func (m *Module) EmitEvent(ctx context.Context, event cloudevents.Event) error {
+	if m.subject == nil {
+		return fmt.Errorf("no subject available for event emission")
+	}
+	return m.subject.NotifyObservers(ctx, event)
+}
+
+// emitEvent is a helper method to create and emit CloudEvents with proper source information
+func (m *Module) emitEvent(ctx context.Context, eventType string, data interface{}, metadata map[string]interface{}) {
+	event := modular.NewCloudEvent(eventType, "auth-module", data, metadata)
+	
+	// Use a separate goroutine to avoid blocking authentication operations
+	go func() {
+		if err := m.EmitEvent(ctx, event); err != nil {
+			m.logger.Error("Failed to emit auth event", "event", eventType, "error", err)
+		}
+	}()
 }

@@ -105,3 +105,33 @@ Feature: Authentication Module
     When I authenticate with incorrect credentials
     Then the authentication should fail
     And an error should be returned
+
+  Scenario: Emit events during token generation
+    Given I have an auth module with event observation enabled
+    When I generate a JWT token for a user
+    Then a token generated event should be emitted
+    And the event should contain user and token information
+
+  Scenario: Emit events during token validation
+    Given I have an auth module with event observation enabled
+    And I have a valid JWT token
+    When I validate the token
+    Then a token validated event should be emitted
+    And the event should contain validation information
+
+  Scenario: Emit events during session management
+    Given I have an auth module with event observation enabled
+    When I create a session for a user
+    Then a session created event should be emitted
+    When I access the session
+    Then a session accessed event should be emitted
+    When I delete the session
+    Then a session destroyed event should be emitted
+
+  Scenario: Emit events during OAuth2 flow
+    Given I have an auth module with event observation enabled
+    And I have OAuth2 providers configured
+    When I get an OAuth2 authorization URL
+    Then an OAuth2 auth URL event should be emitted
+    When I exchange an OAuth2 code for tokens
+    Then an OAuth2 exchange event should be emitted

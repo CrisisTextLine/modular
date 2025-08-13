@@ -13,7 +13,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
+
+// EventEmitter interface for emitting auth events
+type EventEmitter interface {
+	EmitEvent(ctx context.Context, event cloudevents.Event) error
+}
 
 // Service implements the AuthService interface
 type Service struct {
@@ -22,6 +28,7 @@ type Service struct {
 	sessionStore  SessionStore
 	oauth2Configs map[string]*oauth2.Config
 	tokenCounter  int64 // Add counter to ensure unique tokens
+	eventEmitter  EventEmitter // For emitting events
 }
 
 // NewService creates a new authentication service
@@ -50,6 +57,26 @@ func NewService(config *Config, userStore UserStore, sessionStore SessionStore) 
 	}
 
 	return s
+}
+
+// SetEventEmitter sets the event emitter for this service
+func (s *Service) SetEventEmitter(emitter EventEmitter) {
+	s.eventEmitter = emitter
+}
+
+// emitEvent is a helper method to emit events if an emitter is available
+func (s *Service) emitEvent(ctx context.Context, eventType string, data interface{}, metadata map[string]interface{}) {
+	if s.eventEmitter != nil {
+		go func() {
+			event := cloudevents.NewEvent()
+			event.SetType(eventType)
+			event.SetSource("auth-service")
+			event.SetTime(time.Now())
+			if err := event.SetData(cloudevents.ApplicationJSON, data); err == nil {
+				_ = s.eventEmitter.EmitEvent(ctx, event)
+			}
+		}()
+	}
 }
 
 // GenerateToken creates a new JWT token pair
@@ -106,13 +133,23 @@ func (s *Service) GenerateToken(userID string, customClaims map[string]interface
 
 	expiresAt := now.Add(s.config.JWT.GetJWTExpiration())
 
-	return &TokenPair{
+	tokenPair := &TokenPair{
 		AccessToken:  accessTokenString,
 		RefreshToken: refreshTokenString,
 		TokenType:    "Bearer",
 		ExpiresIn:    int64(s.config.JWT.GetJWTExpiration().Seconds()),
 		ExpiresAt:    expiresAt,
-	}, nil
+	}
+
+	// Emit token generated event
+	s.emitEvent(context.Background(), EventTypeTokenGenerated, map[string]interface{}{
+		"userID":    userID,
+		"expiresAt": expiresAt,
+	}, map[string]interface{}{
+		"counter": counter,
+	})
+
+	return tokenPair, nil
 }
 
 // ValidateToken validates a JWT token and returns the claims
@@ -189,7 +226,7 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 		}
 	}
 
-	return &Claims{
+	claimsResult := &Claims{
 		UserID:      userID,
 		Email:       email,
 		Roles:       roles,
@@ -199,7 +236,15 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 		Issuer:      issuer,
 		Subject:     subject,
 		Custom:      custom,
-	}, nil
+	}
+
+	// Emit token validated event
+	s.emitEvent(context.Background(), EventTypeTokenValidated, map[string]interface{}{
+		"userID":    userID,
+		"tokenType": claims["type"],
+	}, nil)
+
+	return claimsResult, nil
 }
 
 // RefreshToken creates a new token pair using a refresh token
@@ -339,6 +384,13 @@ func (s *Service) CreateSession(userID string, metadata map[string]interface{}) 
 		return nil, fmt.Errorf("failed to store session: %w", err)
 	}
 
+	// Emit session created event
+	s.emitEvent(context.Background(), EventTypeSessionCreated, map[string]interface{}{
+		"sessionID": sessionID,
+		"userID":    userID,
+		"expiresAt": session.ExpiresAt,
+	}, metadata)
+
 	return session, nil
 }
 
@@ -351,6 +403,13 @@ func (s *Service) GetSession(sessionID string) (*Session, error) {
 
 	if time.Now().After(session.ExpiresAt) {
 		_ = s.sessionStore.Delete(context.Background(), sessionID) // Ignore error for expired session cleanup
+		
+		// Emit session expired event
+		s.emitEvent(context.Background(), EventTypeSessionExpired, map[string]interface{}{
+			"sessionID": sessionID,
+			"userID":    session.UserID,
+		}, nil)
+		
 		return nil, ErrSessionExpired
 	}
 
@@ -358,15 +417,35 @@ func (s *Service) GetSession(sessionID string) (*Session, error) {
 		return nil, ErrSessionNotFound
 	}
 
+	// Emit session accessed event
+	s.emitEvent(context.Background(), EventTypeSessionAccessed, map[string]interface{}{
+		"sessionID": sessionID,
+		"userID":    session.UserID,
+	}, nil)
+
 	return session, nil
 }
 
 // DeleteSession removes a session
 func (s *Service) DeleteSession(sessionID string) error {
-	err := s.sessionStore.Delete(context.Background(), sessionID)
+	// Get session first to get userID for event
+	session, err := s.sessionStore.Get(context.Background(), sessionID)
+	var userID string
+	if err == nil && session != nil {
+		userID = session.UserID
+	}
+
+	err = s.sessionStore.Delete(context.Background(), sessionID)
 	if err != nil {
 		return fmt.Errorf("deleting session: %w", err)
 	}
+
+	// Emit session destroyed event
+	s.emitEvent(context.Background(), EventTypeSessionDestroyed, map[string]interface{}{
+		"sessionID": sessionID,
+		"userID":    userID,
+	}, nil)
+
 	return nil
 }
 
@@ -412,7 +491,15 @@ func (s *Service) GetOAuth2AuthURL(provider, state string) (string, error) {
 		return "", ErrProviderNotFound
 	}
 
-	return config.AuthCodeURL(state), nil
+	authURL := config.AuthCodeURL(state)
+
+	// Emit OAuth2 auth URL generated event
+	s.emitEvent(context.Background(), EventTypeOAuth2AuthURL, map[string]interface{}{
+		"provider": provider,
+		"state":    state,
+	}, nil)
+
+	return authURL, nil
 }
 
 // ExchangeOAuth2Code exchanges an OAuth2 authorization code for user info
@@ -433,13 +520,23 @@ func (s *Service) ExchangeOAuth2Code(provider, code, state string) (*OAuth2Resul
 		return nil, fmt.Errorf("failed to fetch user info: %w", err)
 	}
 
-	return &OAuth2Result{
+	result := &OAuth2Result{
 		Provider:     provider,
 		UserInfo:     userInfo,
 		AccessToken:  token.AccessToken,
 		RefreshToken: token.RefreshToken,
 		ExpiresAt:    token.Expiry,
-	}, nil
+	}
+
+	// Emit OAuth2 exchange successful event
+	s.emitEvent(context.Background(), EventTypeOAuth2Exchange, map[string]interface{}{
+		"provider": provider,
+		"userInfo": userInfo,
+	}, map[string]interface{}{
+		"expiresAt": token.Expiry,
+	})
+
+	return result, nil
 }
 
 // fetchOAuth2UserInfo fetches user information from OAuth2 provider

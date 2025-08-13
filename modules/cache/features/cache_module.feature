@@ -70,3 +70,22 @@ Feature: Cache Module
     Given I have a cache service with default TTL configured
     When I set a cache item without specifying TTL
     Then the item should use the default TTL from configuration
+
+  Scenario: Emit events during cache operations
+    Given I have a cache service with event observation enabled
+    When I set a cache item with key "event-key" and value "event-value"
+    Then a cache set event should be emitted
+    And the event should contain the cache key "event-key"
+    When I get the cache item with key "event-key"
+    Then a cache hit event should be emitted
+    When I get a non-existent key "missing-key"
+    Then a cache miss event should be emitted
+    When I delete the cache item with key "event-key"
+    Then a cache delete event should be emitted
+
+  Scenario: Emit events during cache lifecycle
+    Given I have a cache service with event observation enabled
+    When the cache module starts
+    Then a cache connected event should be emitted
+    When I flush all cache items
+    Then a cache flush event should be emitted

@@ -184,7 +184,6 @@ func (ctx *EventBusBDDTestContext) iSubscribeToTopicWithAHandler(topic string) e
 		return fmt.Errorf("failed to subscribe to topic %s: %v", topic, err)
 	}
 
-
 	ctx.subscriptions[topic] = subscription
 	ctx.lastSubscription = subscription
 
@@ -196,13 +195,11 @@ func (ctx *EventBusBDDTestContext) iPublishAnEventToTopicWithPayload(topic, payl
 		return fmt.Errorf("eventbus service not available")
 	}
 
-
 	err := ctx.service.Publish(context.Background(), topic, payload)
 	if err != nil {
 		ctx.lastError = err
 		return fmt.Errorf("failed to publish event: %v", err)
 	}
-
 
 	// Give more time for event processing
 	time.Sleep(500 * time.Millisecond)

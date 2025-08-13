@@ -380,8 +380,15 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseModuleConfigured() error {
 func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnabled() error {
 	ctx.resetContext()
 
+	// Save original feeders and disable env feeder for BDD tests
+	// This ensures BDD tests have full control over configuration
+	ctx.originalFeeders = modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
+
 	// Create observable application with database config
 	logger := &testLogger{}
+
+	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 
@@ -390,22 +397,31 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnab
 
 	// Create database module
 	ctx.module = NewModule()
+	
+	// Register module first (this will call RegisterConfig)
 	ctx.app.RegisterModule(ctx.module)
 
-	// Set up basic SQLite configuration for testing
-	databaseConfig := &Config{
-		Default: "test",
+	// Now OVERRIDE the configuration section with our test config
+	// This should override the instance-aware provider
+	dbConfig := &Config{
 		Connections: map[string]*ConnectionConfig{
-			"test": {
-				Driver: "sqlite3",
-				DSN:    ":memory:",
+			"default": {
+				Driver:             "sqlite3",
+				DSN:                ":memory:",
+				MaxOpenConnections: 10,
+				MaxIdleConnections: 5,
 			},
 		},
+		Default: "default",
 	}
+	
+	fmt.Printf("Setting up database config: %+v\n", dbConfig)
 
-	// Configure the database section
-	configProvider := modular.NewStdConfigProvider(databaseConfig)
-	ctx.app.RegisterConfigSection("database", configProvider)
+	// Create provider with the database config - bypass instance-aware setup
+	dbConfigProvider := modular.NewStdConfigProvider(dbConfig)
+
+	// Override the database config section AFTER module registration
+	ctx.app.RegisterConfigSection("database", dbConfigProvider)
 
 	// Initialize the application
 	if err := ctx.app.Init(); err != nil {
@@ -428,11 +444,21 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnab
 	}
 
 	// Get the database service
-	var service DatabaseService
+	fmt.Printf("Getting database service from app...\n")
+	var service interface{}
 	if err := ctx.app.GetService("database.service", &service); err != nil {
 		return fmt.Errorf("failed to get database service: %w", err)
 	}
-	ctx.service = service
+	
+	fmt.Printf("Got service: %T = %+v\n", service, service)
+	
+	// Try to cast to DatabaseService
+	dbService, ok := service.(DatabaseService)
+	if !ok {
+		return fmt.Errorf("service is not a DatabaseService, got: %T", service)
+	}
+	
+	ctx.service = dbService
 
 	return nil
 }
@@ -443,11 +469,12 @@ func (ctx *DatabaseBDDTestContext) iExecuteADatabaseQuery() error {
 	}
 
 	// Execute a simple query - make sure to capture the service being used
-	// Debug: Print the service type for troubleshooting
-	fmt.Printf("Service type: %T\n", ctx.service)
+	fmt.Printf("About to call ExecContext on service: %T\n", ctx.service)
 	
 	// Execute a simple query
 	ctx.queryResult, ctx.queryError = ctx.service.ExecContext(context.Background(), "CREATE TABLE test (id INTEGER, name TEXT)")
+	
+	fmt.Printf("ExecContext returned result: %v, error: %v\n", ctx.queryResult, ctx.queryError)
 	
 	// Give more time for event emission
 	time.Sleep(200 * time.Millisecond)

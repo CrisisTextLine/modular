@@ -114,8 +114,10 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // ModuleName is the unique identifier for the eventbus module.
@@ -135,6 +137,7 @@ const ServiceName = "eventbus.provider"
 //   - modular.ServiceAware: Service dependency management
 //   - modular.Startable: Startup logic
 //   - modular.Stoppable: Shutdown logic
+//   - modular.ObservableModule: Event observation and emission
 //   - EventBus: Event publishing and subscription interface
 //
 // Event processing is thread-safe and supports concurrent publishers and subscribers.
@@ -145,6 +148,7 @@ type EventBusModule struct {
 	eventbus  EventBus
 	mutex     sync.RWMutex
 	isStarted bool
+	subject   modular.Subject // For event observation
 }
 
 // NewModule creates a new instance of the event bus module.
@@ -230,6 +234,21 @@ func (m *EventBusModule) Init(app modular.Application) error {
 		m.logger.Warn("Unknown event bus engine specified, using memory engine", "specified", m.config.Engine)
 	}
 
+	// Emit config loaded event
+	event := modular.NewCloudEvent(EventTypeConfigLoaded, "eventbus-module", map[string]interface{}{
+		"engine":         m.config.Engine,
+		"max_queue_size": m.config.MaxEventQueueSize,
+		"worker_count":   m.config.WorkerCount,
+		"event_ttl":      m.config.EventTTL,
+		"retention_days": m.config.RetentionDays,
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+			// Log error but don't fail initialization
+		}
+	}()
+
 	m.logger.Info("Event bus module initialized")
 	return nil
 }
@@ -258,11 +277,35 @@ func (m *EventBusModule) Start(ctx context.Context) error {
 	// Start the event bus
 	err := m.eventbus.Start(ctx)
 	if err != nil {
+		m.logger.Error("Failed to start event bus", "error", err)
 		return fmt.Errorf("starting event bus: %w", err)
 	}
 
 	m.isStarted = true
 	m.logger.Info("Event bus started")
+
+	// Emit bus started event
+	event := modular.NewCloudEvent(EventTypeBusStarted, "eventbus-service", map[string]interface{}{
+		"engine": func() string {
+			if m.config != nil {
+				return m.config.Engine
+			}
+			return "unknown"
+		}(),
+		"workers": func() int {
+			if m.config != nil {
+				return m.config.WorkerCount
+			}
+			return 0
+		}(),
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			// Log error but don't fail startup
+		}
+	}()
+
 	return nil
 }
 
@@ -292,11 +335,29 @@ func (m *EventBusModule) Stop(ctx context.Context) error {
 	// Stop the event bus
 	err := m.eventbus.Stop(ctx)
 	if err != nil {
+		m.logger.Error("Failed to stop event bus", "error", err)
 		return fmt.Errorf("stopping event bus: %w", err)
 	}
 
 	m.isStarted = false
 	m.logger.Info("Event bus stopped")
+
+	// Emit bus stopped event
+	event := modular.NewCloudEvent(EventTypeBusStopped, "eventbus-service", map[string]interface{}{
+		"engine": func() string {
+			if m.config != nil {
+				return m.config.Engine
+			}
+			return "unknown"
+		}(),
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			// Log error but don't fail shutdown
+		}
+	}()
+
 	return nil
 }
 
@@ -353,10 +414,40 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 		Topic:   topic,
 		Payload: payload,
 	}
+
+	startTime := time.Now()
 	err := m.eventbus.Publish(ctx, event)
+	duration := time.Since(startTime)
+
 	if err != nil {
+		// Emit message failed event
+		emitEvent := modular.NewCloudEvent(EventTypeMessageFailed, "eventbus-service", map[string]interface{}{
+			"topic":       topic,
+			"error":       err.Error(),
+			"duration_ms": duration.Milliseconds(),
+		}, nil)
+
+		go func() {
+			if emitErr := m.EmitEvent(ctx, emitEvent); emitErr != nil {
+				// Log error but don't fail the publish
+			}
+		}()
+
 		return fmt.Errorf("publishing event to topic %s: %w", topic, err)
 	}
+
+	// Emit message published event
+	emitEvent := modular.NewCloudEvent(EventTypeMessagePublished, "eventbus-service", map[string]interface{}{
+		"topic":       topic,
+		"duration_ms": duration.Milliseconds(),
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, emitEvent); emitErr != nil {
+			// Log error but don't fail the publish
+		}
+	}()
+
 	return nil
 }
 
@@ -380,6 +471,20 @@ func (m *EventBusModule) Subscribe(ctx context.Context, topic string, handler Ev
 	if err != nil {
 		return nil, fmt.Errorf("subscribing to topic %s: %w", topic, err)
 	}
+
+	// Emit subscription created event
+	event := modular.NewCloudEvent(EventTypeSubscriptionCreated, "eventbus-service", map[string]interface{}{
+		"topic":           topic,
+		"subscription_id": sub.ID(),
+		"async":           false,
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			// Log error but don't fail subscription
+		}
+	}()
+
 	return sub, nil
 }
 
@@ -404,6 +509,20 @@ func (m *EventBusModule) SubscribeAsync(ctx context.Context, topic string, handl
 	if err != nil {
 		return nil, fmt.Errorf("subscribing async to topic %s: %w", topic, err)
 	}
+
+	// Emit subscription created event
+	event := modular.NewCloudEvent(EventTypeSubscriptionCreated, "eventbus-service", map[string]interface{}{
+		"topic":           topic,
+		"subscription_id": sub.ID(),
+		"async":           true,
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			// Log error but don't fail subscription
+		}
+	}()
+
 	return sub, nil
 }
 
@@ -418,10 +537,27 @@ func (m *EventBusModule) SubscribeAsync(ctx context.Context, topic string, handl
 //
 //	err := eventBus.Unsubscribe(ctx, subscription)
 func (m *EventBusModule) Unsubscribe(ctx context.Context, subscription Subscription) error {
+	// Store subscription info before unsubscribing
+	topic := subscription.Topic()
+	subscriptionID := subscription.ID()
+
 	err := m.eventbus.Unsubscribe(ctx, subscription)
 	if err != nil {
 		return fmt.Errorf("unsubscribing: %w", err)
 	}
+
+	// Emit subscription removed event
+	event := modular.NewCloudEvent(EventTypeSubscriptionRemoved, "eventbus-service", map[string]interface{}{
+		"topic":           topic,
+		"subscription_id": subscriptionID,
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			// Log error but don't fail unsubscribe
+		}
+	}()
+
 	return nil
 }
 
@@ -452,4 +588,37 @@ func (m *EventBusModule) Topics() []string {
 //	}
 func (m *EventBusModule) SubscriberCount(topic string) int {
 	return m.eventbus.SubscriberCount(topic)
+}
+
+// Static errors for err113 compliance
+var (
+	ErrNoSubjectForEventEmission = modular.ErrNoSubjectForEventEmission
+)
+
+// RegisterObservers implements the ObservableModule interface.
+// This allows the eventbus module to register as an observer for events it's interested in.
+func (m *EventBusModule) RegisterObservers(subject modular.Subject) error {
+	m.subject = subject
+	// The eventbus module currently does not need to observe other events,
+	// but this method stores the subject for event emission.
+	return nil
+}
+
+// EmitEvent implements the ObservableModule interface.
+// This allows the eventbus module to emit events to registered observers.
+func (m *EventBusModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
+	if m.subject == nil {
+		return ErrNoSubjectForEventEmission
+	}
+	// Use a goroutine to prevent blocking eventbus operations with event emission
+	go func() {
+		if err := m.subject.NotifyObservers(ctx, event); err != nil {
+			// Log error but don't fail the operation
+			// This ensures event emission issues don't affect eventbus functionality
+			if m.logger != nil {
+				m.logger.Debug("Failed to notify observers", "error", err, "event_type", event.Type())
+			}
+		}
+	}()
+	return nil
 }

@@ -598,19 +598,27 @@ func (m *Module) GetConnections() []string {
 // Similar to GetDefaultConnection, but returns a DatabaseService
 // interface that provides additional functionality beyond the raw sql.DB.
 func (m *Module) GetDefaultService() DatabaseService {
+	fmt.Printf("GetDefaultService called - config: %+v, services: %+v\n", m.config, m.services)
+	
 	if m.config == nil || m.config.Default == "" {
+		fmt.Printf("GetDefaultService: config is nil or default is empty\n")
 		return nil
 	}
 
 	if service, exists := m.services[m.config.Default]; exists {
+		fmt.Printf("GetDefaultService: found service for default '%s'\n", m.config.Default)
 		return service
 	}
 
+	fmt.Printf("GetDefaultService: default service '%s' not found, trying any available\n", m.config.Default)
+	
 	// If default connection name doesn't exist, try to return any available service
-	for _, service := range m.services {
+	for name, service := range m.services {
+		fmt.Printf("GetDefaultService: returning service '%s' as fallback\n", name)
 		return service
 	}
 
+	fmt.Printf("GetDefaultService: no services available\n")
 	return nil
 }
 

@@ -4,8 +4,8 @@ package database
 // Following CloudEvents specification reverse domain notation.
 const (
 	// Connection events
-	EventTypeConnected    = "com.modular.database.connected"
-	EventTypeDisconnected = "com.modular.database.disconnected"
+	EventTypeConnected       = "com.modular.database.connected"
+	EventTypeDisconnected    = "com.modular.database.disconnected"
 	EventTypeConnectionError = "com.modular.database.connection.error"
 
 	// Query events

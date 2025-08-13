@@ -67,15 +67,19 @@ func (s *Service) SetEventEmitter(emitter EventEmitter) {
 // emitEvent is a helper method to emit events if an emitter is available
 func (s *Service) emitEvent(ctx context.Context, eventType string, data interface{}, metadata map[string]interface{}) {
 	if s.eventEmitter != nil {
-		go func() {
-			event := cloudevents.NewEvent()
-			event.SetType(eventType)
-			event.SetSource("auth-service")
-			event.SetTime(time.Now())
-			if err := event.SetData(cloudevents.ApplicationJSON, data); err == nil {
-				_ = s.eventEmitter.EmitEvent(ctx, event)
-			}
-		}()
+		event := cloudevents.NewEvent()
+		event.SetType(eventType)
+		event.SetSource("auth-service")
+		event.SetTime(time.Now())
+		if err := event.SetData(cloudevents.ApplicationJSON, data); err == nil {
+			fmt.Printf("DEBUG: Emitting event: %s\n", eventType)
+			_ = s.eventEmitter.EmitEvent(ctx, event)
+		} else {
+			fmt.Printf("DEBUG: Failed to set event data for %s: %v\n", eventType, err)
+		}
+	} else {
+		// Debug: log when event emitter is nil
+		fmt.Printf("DEBUG: eventEmitter is nil for event type %s\n", eventType)
 	}
 }
 

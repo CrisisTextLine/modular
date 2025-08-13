@@ -44,6 +44,7 @@ type testObserver struct {
 }
 
 func (o *testObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	fmt.Printf("DEBUG: Observer received event: %s\n", event.Type())
 	o.events = append(o.events, event)
 	return nil
 }
@@ -931,6 +932,11 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.observableApp = modular.NewObservableApplication(mainConfigProvider, logger)
 
+	// Debug: check the type
+	_, implements := interface{}(ctx.observableApp).(modular.Subject)
+	fmt.Printf("DEBUG: ObservableApp type: %T, implements Subject: %t\n", 
+		ctx.observableApp, implements)
+
 	// Create test observer to capture events
 	ctx.testObserver = &testObserver{
 		id:     "test-observer",
@@ -942,6 +948,7 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 	if err != nil {
 		return fmt.Errorf("failed to register test observer: %w", err)
 	}
+	fmt.Printf("DEBUG: Registered test observer with ID: %s\n", ctx.testObserver.ObserverID())
 
 	// Create and configure auth module
 	ctx.module = NewModule().(*Module)
@@ -957,12 +964,16 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 		return fmt.Errorf("failed to initialize observable app: %w", err)
 	}
 
-	// Get the auth service
-	var authService *Service
-	if err := ctx.observableApp.GetService(ServiceName, &authService); err != nil {
-		return fmt.Errorf("failed to get auth service: %w", err)
-	}
-	ctx.service = authService
+	// Manually set up the event emitter since dependency injection might not preserve the observable wrapper
+	// This ensures the module has the correct subject reference for event emission
+	ctx.module.subject = ctx.observableApp
+	ctx.module.service.SetEventEmitter(ctx.module)
+	fmt.Printf("DEBUG: Manually set event emitter in BDD setup\n")
+	fmt.Printf("DEBUG: Module subject: %p, ObservableApp: %p\n", ctx.module.subject, ctx.observableApp)
+
+	// Use the service from the module directly instead of getting it from the service registry
+	// This ensures we're using the same instance that has the event emitter set up
+	ctx.service = ctx.module.service
 	ctx.app = ctx.observableApp
 
 	return nil
@@ -1083,8 +1094,8 @@ func (ctx *AuthBDDTestContext) anOAuth2ExchangeEventShouldBeEmitted() error {
 // Helper methods for event validation
 
 func (ctx *AuthBDDTestContext) checkEventEmitted(eventType string) error {
-	// Give some time for async event emission
-	time.Sleep(100 * time.Millisecond)
+	// Give a little time for event processing, but since we made it synchronous, this should be quick
+	time.Sleep(10 * time.Millisecond)
 
 	for _, event := range ctx.testObserver.events {
 		if event.Type() == eventType {

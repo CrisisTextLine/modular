@@ -114,7 +114,8 @@ Feature: Authentication Module
 
   Scenario: Emit events during token validation
     Given I have an auth module with event observation enabled
-    And I have a valid JWT token
+    And I have user credentials and JWT configuration
+    And I generate a JWT token for the user
     When I validate the token
     Then a token validated event should be emitted
     And the event should contain validation information

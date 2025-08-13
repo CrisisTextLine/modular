@@ -114,6 +114,9 @@ func (m *Module) Init(app modular.Application) error {
 	if observableApp, ok := app.(modular.Subject); ok {
 		m.subject = observableApp
 		m.service.SetEventEmitter(m)
+		fmt.Printf("DEBUG: Set event emitter in auth module Init()\n")
+	} else {
+		fmt.Printf("DEBUG: App is not observable in auth module Init()\n")
 	}
 
 	m.logger.Info("Authentication module initialized", "module", m.Name())
@@ -227,6 +230,7 @@ func (m *Module) Constructor() modular.ModuleConstructor {
 
 		// Set the event emitter in the service
 		m.service.SetEventEmitter(m)
+		fmt.Printf("DEBUG: Set event emitter in auth module Constructor()\n")
 
 		return m, nil
 	}
@@ -248,6 +252,7 @@ func (m *Module) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 	if m.subject == nil {
 		return fmt.Errorf("no subject available for event emission")
 	}
+	fmt.Printf("DEBUG: Module EmitEvent called for event type: %s, subject: %p\n", event.Type(), m.subject)
 	return m.subject.NotifyObservers(ctx, event)
 }
 

@@ -11,10 +11,10 @@ import (
 	"unicode"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // EventEmitter interface for emitting auth events
@@ -28,7 +28,7 @@ type Service struct {
 	userStore     UserStore
 	sessionStore  SessionStore
 	oauth2Configs map[string]*oauth2.Config
-	tokenCounter  int64 // Add counter to ensure unique tokens
+	tokenCounter  int64        // Add counter to ensure unique tokens
 	eventEmitter  EventEmitter // For emitting events
 }
 
@@ -384,7 +384,8 @@ func (s *Service) CreateSession(userID string, metadata map[string]interface{}) 
 		"sessionID": sessionID,
 		"userID":    userID,
 		"expiresAt": session.ExpiresAt,
-	}, metadata)
+		"metadata":  metadata, // Include metadata in data instead of extensions
+	}, nil)
 
 	return session, nil
 }
@@ -398,13 +399,13 @@ func (s *Service) GetSession(sessionID string) (*Session, error) {
 
 	if time.Now().After(session.ExpiresAt) {
 		_ = s.sessionStore.Delete(context.Background(), sessionID) // Ignore error for expired session cleanup
-		
+
 		// Emit session expired event
 		s.emitEvent(context.Background(), EventTypeSessionExpired, map[string]interface{}{
 			"sessionID": sessionID,
 			"userID":    session.UserID,
 		}, nil)
-		
+
 		return nil, ErrSessionExpired
 	}
 

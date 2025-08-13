@@ -237,7 +237,7 @@ func (m *Module) Constructor() modular.ModuleConstructor {
 func (m *Module) RegisterObservers(subject modular.Subject) error {
 	// The auth module currently does not need to observe other events,
 	// but this method is required by the ObservableModule interface.
-	// Future implementations might want to observe user-related events 
+	// Future implementations might want to observe user-related events
 	// from other modules.
 	return nil
 }
@@ -246,19 +246,10 @@ func (m *Module) RegisterObservers(subject modular.Subject) error {
 // This allows the auth module to emit events to registered observers.
 func (m *Module) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 	if m.subject == nil {
-		return fmt.Errorf("no subject available for event emission")
+		return ErrNoSubjectForEventEmission
 	}
-	return m.subject.NotifyObservers(ctx, event)
-}
-
-// emitEvent is a helper method to create and emit CloudEvents with proper source information
-func (m *Module) emitEvent(ctx context.Context, eventType string, data interface{}, metadata map[string]interface{}) {
-	event := modular.NewCloudEvent(eventType, "auth-module", data, metadata)
-	
-	// Use a separate goroutine to avoid blocking authentication operations
-	go func() {
-		if err := m.EmitEvent(ctx, event); err != nil {
-			m.logger.Error("Failed to emit auth event", "event", eventType, "error", err)
-		}
-	}()
+	if err := m.subject.NotifyObservers(ctx, event); err != nil {
+		return fmt.Errorf("failed to notify observers: %w", err)
+	}
+	return nil
 }

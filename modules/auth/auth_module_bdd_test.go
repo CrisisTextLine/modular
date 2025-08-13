@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/cucumber/godog"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/cucumber/godog"
 )
 
 // Auth BDD Test Context
@@ -32,9 +32,9 @@ type AuthBDDTestContext struct {
 	lastError       error
 	originalFeeders []modular.Feeder
 	// Event observation fields
-	observableApp   *modular.ObservableApplication
-	capturedEvents  []cloudevents.Event
-	testObserver    *testObserver
+	observableApp  *modular.ObservableApplication
+	capturedEvents []cloudevents.Event
+	testObserver   *testObserver
 }
 
 // testObserver captures events for testing
@@ -312,13 +312,13 @@ func (ctx *AuthBDDTestContext) iRefreshTheToken() error {
 
 	// First, create a user in the user store for refresh functionality
 	refreshUser := &User{
-		ID:       "refresh-user",
-		Email:    "refresh@example.com",
-		Active:   true,
-		Roles:    []string{"user"},
+		ID:          "refresh-user",
+		Email:       "refresh@example.com",
+		Active:      true,
+		Roles:       []string{"user"},
 		Permissions: []string{"read"},
 	}
-	
+
 	// Create the user in the store
 	if err := ctx.service.userStore.CreateUser(context.Background(), refreshUser); err != nil {
 		// If user already exists, that's fine
@@ -894,15 +894,15 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 			Secret:            "test-secret-key-for-event-tests",
 			Expiration:        1 * time.Hour,
 			RefreshExpiration: 24 * time.Hour,
-			Issuer:           "test-issuer",
+			Issuer:            "test-issuer",
 		},
 		Password: PasswordConfig{
-			MinLength:    8,
-			RequireUpper: true,
-			RequireLower: true,
-			RequireDigit: true,
+			MinLength:      8,
+			RequireUpper:   true,
+			RequireLower:   true,
+			RequireDigit:   true,
 			RequireSpecial: true,
-			BcryptCost:   10,
+			BcryptCost:     10,
 		},
 		Session: SessionConfig{
 			MaxAge:   1 * time.Hour,
@@ -1098,7 +1098,7 @@ func (ctx *AuthBDDTestContext) checkEventEmitted(eventType string) error {
 		}
 	}
 
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", 
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v",
 		eventType, ctx.getEmittedEventTypes())
 }
 

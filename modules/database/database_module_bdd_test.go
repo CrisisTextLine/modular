@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/cucumber/godog"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/cucumber/godog"
 	_ "github.com/mattn/go-sqlite3" // Import SQLite driver for BDD tests
 )
 
@@ -397,7 +397,7 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnab
 
 	// Create database module
 	ctx.module = NewModule()
-	
+
 	// Register module first (this will call RegisterConfig)
 	ctx.app.RegisterModule(ctx.module)
 
@@ -414,7 +414,7 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnab
 		},
 		Default: "default",
 	}
-	
+
 	fmt.Printf("Setting up database config: %+v\n", dbConfig)
 
 	// Create provider with the database config - bypass instance-aware setup
@@ -449,15 +449,15 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnab
 	if err := ctx.app.GetService("database.service", &service); err != nil {
 		return fmt.Errorf("failed to get database service: %w", err)
 	}
-	
+
 	fmt.Printf("Got service: %T = %+v\n", service, service)
-	
+
 	// Try to cast to DatabaseService
 	dbService, ok := service.(DatabaseService)
 	if !ok {
 		return fmt.Errorf("service is not a DatabaseService, got: %T", service)
 	}
-	
+
 	ctx.service = dbService
 
 	return nil
@@ -470,15 +470,15 @@ func (ctx *DatabaseBDDTestContext) iExecuteADatabaseQuery() error {
 
 	// Execute a simple query - make sure to capture the service being used
 	fmt.Printf("About to call ExecContext on service: %T\n", ctx.service)
-	
+
 	// Execute a simple query
 	ctx.queryResult, ctx.queryError = ctx.service.ExecContext(context.Background(), "CREATE TABLE test (id INTEGER, name TEXT)")
-	
+
 	fmt.Printf("ExecContext returned result: %v, error: %v\n", ctx.queryResult, ctx.queryError)
-	
+
 	// Give more time for event emission
 	time.Sleep(200 * time.Millisecond)
-	
+
 	return nil
 }
 
@@ -506,12 +506,12 @@ func (ctx *DatabaseBDDTestContext) theEventShouldContainQueryPerformanceMetrics(
 		if event.Type() == EventTypeQueryExecuted {
 			data := event.Data()
 			dataString := string(data)
-			
+
 			// Check if the data contains duration_ms field (basic string search)
 			if !contains(dataString, "duration_ms") {
 				return fmt.Errorf("event does not contain duration_ms field")
 			}
-			
+
 			return nil
 		}
 	}
@@ -585,12 +585,12 @@ func (ctx *DatabaseBDDTestContext) theEventShouldContainErrorDetails() error {
 		if event.Type() == EventTypeQueryError {
 			data := event.Data()
 			dataString := string(data)
-			
+
 			// Check if the data contains error field (basic string search)
 			if !contains(dataString, "error") {
 				return fmt.Errorf("event does not contain error field")
 			}
-			
+
 			return nil
 		}
 	}

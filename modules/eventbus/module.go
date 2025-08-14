@@ -245,7 +245,7 @@ func (m *EventBusModule) Init(app modular.Application) error {
 
 	go func() {
 		if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
-			// Log error but don't fail initialization
+			fmt.Printf("Failed to emit eventbus config loaded event: %v\n", emitErr)
 		}
 	}()
 
@@ -302,7 +302,7 @@ func (m *EventBusModule) Start(ctx context.Context) error {
 
 	go func() {
 		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			// Log error but don't fail startup
+			fmt.Printf("Failed to emit eventbus started event: %v\n", emitErr)
 		}
 	}()
 
@@ -354,7 +354,7 @@ func (m *EventBusModule) Stop(ctx context.Context) error {
 
 	go func() {
 		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			// Log error but don't fail shutdown
+			fmt.Printf("Failed to emit eventbus stopped event: %v\n", emitErr)
 		}
 	}()
 
@@ -429,7 +429,7 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 
 		go func() {
 			if emitErr := m.EmitEvent(ctx, emitEvent); emitErr != nil {
-				// Log error but don't fail the publish
+				fmt.Printf("Failed to emit message failed event: %v\n", emitErr)
 			}
 		}()
 
@@ -444,7 +444,7 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 
 	go func() {
 		if emitErr := m.EmitEvent(ctx, emitEvent); emitErr != nil {
-			// Log error but don't fail the publish
+			fmt.Printf("Failed to emit message published event: %v\n", emitErr)
 		}
 	}()
 
@@ -481,7 +481,7 @@ func (m *EventBusModule) Subscribe(ctx context.Context, topic string, handler Ev
 
 	go func() {
 		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			// Log error but don't fail subscription
+			fmt.Printf("Failed to emit subscription created event: %v\n", emitErr)
 		}
 	}()
 
@@ -519,7 +519,7 @@ func (m *EventBusModule) SubscribeAsync(ctx context.Context, topic string, handl
 
 	go func() {
 		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			// Log error but don't fail subscription
+			fmt.Printf("Failed to emit async subscription created event: %v\n", emitErr)
 		}
 	}()
 
@@ -554,7 +554,7 @@ func (m *EventBusModule) Unsubscribe(ctx context.Context, subscription Subscript
 
 	go func() {
 		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			// Log error but don't fail unsubscribe
+			fmt.Printf("Failed to emit subscription removed event: %v\n", emitErr)
 		}
 	}()
 
@@ -592,7 +592,7 @@ func (m *EventBusModule) SubscriberCount(topic string) int {
 
 // Static errors for err113 compliance
 var (
-	ErrNoSubjectForEventEmission = modular.ErrNoSubjectForEventEmission
+	_ = ErrNoSubjectForEventEmission // Reference the local error
 )
 
 // RegisterObservers implements the ObservableModule interface.

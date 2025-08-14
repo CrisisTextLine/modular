@@ -62,9 +62,6 @@ var (
 
 	// ErrServerStartTimeout is returned when the server fails to start within the timeout period.
 	ErrServerStartTimeout = errors.New("context cancelled while waiting for server to start")
-
-	// ErrNoSubjectForEventEmission is returned when trying to emit events without a subject.
-	ErrNoSubjectForEventEmission = errors.New("no subject available for event emission")
 )
 
 // HTTPServerModule represents the HTTP server module and implements the modular.Module interface.
@@ -171,14 +168,14 @@ func (m *HTTPServerModule) Init(app modular.Application) error {
 
 	// Emit config loaded event
 	event := modular.NewCloudEvent(EventTypeConfigLoaded, "httpserver-module", map[string]interface{}{
-		"address":     m.config.Address,
+		"host":        m.config.Host,
 		"port":        m.config.Port,
-		"tls_enabled": m.config.TLSEnabled,
+		"tls_enabled": m.config.TLS != nil && m.config.TLS.Enabled,
 	}, nil)
 
 	go func() {
 		if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
-			// Log error but don't fail initialization
+			fmt.Printf("Failed to emit httpserver config loaded event: %v\n", emitErr)
 		}
 	}()
 
@@ -262,7 +259,7 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 					}, nil)
 					go func() {
 						if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
-							// Log error but don't fail startup
+							fmt.Printf("Failed to emit TLS enabled event: %v\n", emitErr)
 						}
 					}()
 
@@ -297,7 +294,7 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 				}, nil)
 				go func() {
 					if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
-						// Log error but don't fail startup
+						fmt.Printf("Failed to emit TLS auto-generate event: %v\n", emitErr)
 					}
 				}()
 
@@ -325,7 +322,7 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 				}, nil)
 				go func() {
 					if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
-						// Log error but don't fail startup
+						fmt.Printf("Failed to emit TLS configured event: %v\n", emitErr)
 					}
 				}()
 
@@ -399,7 +396,7 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 
 	go func() {
 		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			// Log error but don't fail startup
+			fmt.Printf("Failed to emit server started event: %v\n", emitErr)
 		}
 	}()
 
@@ -449,7 +446,7 @@ func (m *HTTPServerModule) Stop(ctx context.Context) error {
 
 	go func() {
 		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			// Log error but don't fail shutdown
+			fmt.Printf("Failed to emit server stopped event: %v\n", emitErr)
 		}
 	}()
 

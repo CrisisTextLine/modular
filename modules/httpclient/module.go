@@ -299,18 +299,18 @@ func (m *HTTPClientModule) Init(app modular.Application) error {
 		Transport: baseTransport,
 		Timeout:   m.config.RequestTimeout,
 	}
-	
+
 	// Emit configuration loaded event
 	ctx := context.Background()
 	m.emitEvent(ctx, EventTypeConfigLoaded, map[string]interface{}{
-		"timeout_seconds":         m.config.TimeoutSeconds,
+		"request_timeout_seconds": m.config.RequestTimeout.Seconds(),
 		"max_idle_conns":          m.config.MaxIdleConns,
 		"max_idle_conns_per_host": m.config.MaxIdleConnsPerHost,
-		"compression_enabled":     m.config.CompressionEnabled,
-		"keep_alive_enabled":      m.config.KeepAliveEnabled,
-		"verbose_enabled":         m.config.VerboseOptions.Enabled,
+		"compression_disabled":    m.config.DisableCompression,
+		"keep_alive_disabled":     m.config.DisableKeepAlives,
+		"verbose_enabled":         m.config.Verbose,
 	})
-	
+
 	// Emit client created event
 	m.emitEvent(ctx, EventTypeClientCreated, map[string]interface{}{
 		"timeout_seconds": m.config.RequestTimeout.Seconds(),
@@ -322,13 +322,13 @@ func (m *HTTPClientModule) Init(app modular.Application) error {
 // Start performs startup logic for the module.
 func (m *HTTPClientModule) Start(ctx context.Context) error {
 	m.logger.Info("Starting HTTP client module")
-	
+
 	// Emit module started event
 	m.emitEvent(ctx, EventTypeModuleStarted, map[string]interface{}{
-		"timeout_seconds": m.config.TimeoutSeconds,
-		"max_idle_conns":  m.config.MaxIdleConns,
+		"request_timeout_seconds": m.config.RequestTimeout.Seconds(),
+		"max_idle_conns":          m.config.MaxIdleConns,
 	})
-	
+
 	return nil
 }
 
@@ -343,7 +343,7 @@ func (m *HTTPClientModule) Stop(ctx context.Context) error {
 			m.logger.Warn("Failed to close file logger", "error", closeErr)
 		}
 	}
-	
+
 	// Emit module stopped event
 	m.emitEvent(ctx, EventTypeModuleStopped, map[string]interface{}{})
 
@@ -397,14 +397,14 @@ func (m *HTTPClientModule) WithTimeout(timeoutSeconds int) *http.Client {
 		Transport: m.httpClient.Transport,
 		Timeout:   time.Duration(timeoutSeconds) * time.Second,
 	}
-	
+
 	// Emit client configured event
 	ctx := context.Background()
 	m.emitEvent(ctx, EventTypeClientConfigured, map[string]interface{}{
 		"timeout_seconds": timeoutSeconds,
 		"custom_timeout":  true,
 	})
-	
+
 	return client
 }
 
@@ -412,7 +412,7 @@ func (m *HTTPClientModule) WithTimeout(timeoutSeconds int) *http.Client {
 func (m *HTTPClientModule) SetRequestModifier(modifier RequestModifierFunc) {
 	if modifier != nil {
 		m.modifier = modifier
-		
+
 		// Emit modifier set event
 		ctx := context.Background()
 		m.emitEvent(ctx, EventTypeModifierSet, map[string]interface{}{})
@@ -445,9 +445,9 @@ func (m *HTTPClientModule) emitEvent(ctx context.Context, eventType string, data
 	if m.subject == nil {
 		return // No subject available, skip event emission
 	}
-	
+
 	event := modular.NewCloudEvent(eventType, "httpclient-module", data, nil)
-	
+
 	// Emit in background to avoid blocking HTTP operations
 	go func() {
 		if err := m.EmitEvent(ctx, event); err != nil {

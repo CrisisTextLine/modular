@@ -218,24 +218,6 @@ func (m *EventLoggerModule) Init(app modular.Application) error {
 
 	m.logger.Info("Event logger module initialized", "targets", len(m.outputs))
 
-	// Emit configuration loaded event
-	ctx := context.Background()
-	m.emitOperationalEvent(ctx, EventTypeConfigLoaded, map[string]interface{}{
-		"enabled":              m.config.Enabled,
-		"buffer_size":          m.config.BufferSize,
-		"output_targets_count": len(m.config.OutputTargets),
-		"log_level":            m.config.LogLevel,
-	})
-
-	// Emit output registered events
-	for i, targetConfig := range m.config.OutputTargets {
-		m.emitOperationalEvent(ctx, EventTypeOutputRegistered, map[string]interface{}{
-			"output_index": i,
-			"output_type":  targetConfig.Type,
-			"output_level": targetConfig.Level,
-		})
-	}
-
 	return nil
 }
 
@@ -266,6 +248,23 @@ func (m *EventLoggerModule) Start(ctx context.Context) error {
 
 	m.started = true
 	m.logger.Info("Event logger started")
+
+	// Emit configuration loaded event (now that subject is available)
+	m.emitOperationalEvent(ctx, EventTypeConfigLoaded, map[string]interface{}{
+		"enabled":              m.config.Enabled,
+		"buffer_size":          m.config.BufferSize,
+		"output_targets_count": len(m.config.OutputTargets),
+		"log_level":            m.config.LogLevel,
+	})
+
+	// Emit output registered events
+	for i, targetConfig := range m.config.OutputTargets {
+		m.emitOperationalEvent(ctx, EventTypeOutputRegistered, map[string]interface{}{
+			"output_index": i,
+			"output_type":  targetConfig.Type,
+			"output_level": targetConfig.Level,
+		})
+	}
 
 	// Emit logger started event
 	m.emitOperationalEvent(ctx, EventTypeLoggerStarted, map[string]interface{}{

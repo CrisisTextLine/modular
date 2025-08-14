@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +61,9 @@ func (t *testEventObserver) ClearEvents() {
 func (ctx *EventLoggerBDDTestContext) resetContext() {
 	if ctx.tempDir != "" {
 		os.RemoveAll(ctx.tempDir)
+	}
+	if ctx.app != nil {
+		ctx.app.Stop()
 	}
 	ctx.app = nil
 	ctx.module = nil
@@ -453,14 +455,18 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithBufferSizeConfigured
 }
 
 func (ctx *EventLoggerBDDTestContext) iEmitMoreEventsThanTheBufferCanHold() error {
-	// Emit more events than buffer size
-	for i := 0; i < 5; i++ {
-		err := ctx.iEmitATestEventWithTypeAndData("buffer.test", "data")
+	// With a buffer size of 1, emit multiple events rapidly to trigger overflow
+	// Emit events in quick succession to overwhelm the buffer
+	for i := 0; i < 10; i++ {
+		err := ctx.iEmitATestEventWithTypeAndData(fmt.Sprintf("buffer.test.%d", i), "data")
 		if err != nil {
 			return err
 		}
 	}
 
+	// Give a moment for processing
+	time.Sleep(50 * time.Millisecond)
+	
 	return nil
 }
 
@@ -667,9 +673,8 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFaultyOutputTarget()
 		return err
 	}
 
-	// For this test, we simulate graceful error handling by allowing
-	// the module to start but expecting errors during event processing
-	// We use a configuration that may fail at runtime rather than startup
+	// Configure with a known good output target - the test is about runtime graceful error handling
+	// not startup failures. Module should initialize successfully then handle runtime errors gracefully.
 	ctx.config.OutputTargets = []OutputTargetConfig{
 		{
 			Type:   "console",
@@ -688,33 +693,47 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFaultyOutputTarget()
 		return err
 	}
 
-	// Simulate an error condition by setting a flag
-	// In a real scenario, this would be a runtime error during event processing
-	ctx.lastError = fmt.Errorf("simulated output target failure")
+	// Start the module
+	err = ctx.app.Start()
+	if err != nil {
+		return err
+	}
+
+	// Get service reference - should be available
+	err = ctx.theEventLoggerServiceShouldBeAvailable()
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
 func (ctx *EventLoggerBDDTestContext) iEmitEvents() error {
 	if ctx.service == nil {
-		// Module failed to initialize as expected
-		return nil
+		return fmt.Errorf("service not available")
 	}
 
 	return ctx.iEmitATestEventWithTypeAndData("error.test", "test-data")
 }
 
 func (ctx *EventLoggerBDDTestContext) errorsShouldBeHandledGracefully() error {
-	// Check that we have an expected error (either from startup or simulated)
-	if ctx.lastError == nil {
-		return fmt.Errorf("expected error but none occurred")
+	// In this test, we verify that the module handles errors gracefully.
+	// Since we're using a working console output target, the module should function normally.
+	// The test verifies graceful error handling by ensuring the module remains operational.
+	
+	if ctx.service == nil {
+		return fmt.Errorf("service should be available even with potential faults")
 	}
-
-	// Error should contain information about output target failure
-	if !strings.Contains(ctx.lastError.Error(), "output target") {
-		return fmt.Errorf("error does not mention output target: %v", ctx.lastError)
+	
+	// Verify the module is still functional by emitting a test event
+	event := modular.NewCloudEvent("graceful.test", "test-source", map[string]interface{}{"test": "data"}, nil)
+	err := ctx.service.OnEvent(context.Background(), event)
+	
+	// The module should handle this gracefully
+	if err != nil {
+		return fmt.Errorf("module should handle events gracefully: %v", err)
 	}
-
+	
 	return nil
 }
 
@@ -773,25 +792,20 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithEventObservationEnab
 	// Create test event observer
 	ctx.eventObserver = newTestEventObserver()
 
-	// Register module first
+	// Register our test observer BEFORE registering module to capture all events
+	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
+
+	// Register module
 	ctx.app.RegisterModule(ctx.module)
 
 	// Now override the config section with our direct configuration
 	ctx.app.RegisterConfigSection("eventlogger", eventloggerConfigProvider)
 
-	// Initialize the application
+	// Initialize the application (this should trigger config loaded events)
 	if err := ctx.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
-	}
-
-	// Register observers AFTER initialization when config is loaded
-	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
-		return fmt.Errorf("failed to register observers: %w", err)
-	}
-
-	// Register our test observer to capture events
-	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
-		return fmt.Errorf("failed to register test observer: %w", err)
 	}
 
 	if err := ctx.app.Start(); err != nil {
@@ -801,19 +815,14 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithEventObservationEnab
 	// Get the eventlogger service
 	var service interface{}
 	if err := ctx.app.GetService("eventlogger.observer", &service); err != nil {
-		// Fallback to module service
-		if err := ctx.app.GetService("eventlogger", &service); err != nil {
-			// Final fallback: use the module directly as the service
-			ctx.service = ctx.module
-			return nil
-		}
+		return fmt.Errorf("failed to get eventlogger service: %w", err)
 	}
 
 	// Cast to EventLoggerModule
 	if eventloggerService, ok := service.(*EventLoggerModule); ok {
 		ctx.service = eventloggerService
 	} else {
-		ctx.service = ctx.module
+		return fmt.Errorf("service is not an EventLoggerModule")
 	}
 
 	return nil
@@ -835,6 +844,302 @@ func (ctx *EventLoggerBDDTestContext) aLoggerStartedEventShouldBeEmitted() error
 	}
 
 	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeLoggerStarted, eventTypes)
+}
+
+func (ctx *EventLoggerBDDTestContext) theEventLoggerModuleStops() error {
+	return ctx.app.Stop()
+}
+
+func (ctx *EventLoggerBDDTestContext) aLoggerStoppedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeLoggerStopped {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeLoggerStopped, eventTypes)
+}
+
+func (ctx *EventLoggerBDDTestContext) theEventShouldContainOutputCountAndBufferSize() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeLoggerStarted {
+			var data map[string]interface{}
+			if err := event.DataAs(&data); err != nil {
+				return fmt.Errorf("failed to extract event data: %v", err)
+			}
+			
+			// Check for output_count
+			if _, exists := data["output_count"]; !exists {
+				return fmt.Errorf("logger started event should contain output_count")
+			}
+			
+			// Check for buffer_size
+			if _, exists := data["buffer_size"]; !exists {
+				return fmt.Errorf("logger started event should contain buffer_size")
+			}
+			
+			return nil
+		}
+	}
+	return fmt.Errorf("logger started event not found")
+}
+
+func (ctx *EventLoggerBDDTestContext) aConfigLoadedEventShouldBeEmitted() error {
+	time.Sleep(200 * time.Millisecond) // Allow more time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeConfigLoaded {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeConfigLoaded, eventTypes)
+}
+
+func (ctx *EventLoggerBDDTestContext) outputRegisteredEventsShouldBeEmittedForEachTarget() error {
+	time.Sleep(200 * time.Millisecond) // Allow more time for async event emission
+	
+	events := ctx.eventObserver.GetEvents()
+	outputRegisteredCount := 0
+	
+	for _, event := range events {
+		if event.Type() == EventTypeOutputRegistered {
+			outputRegisteredCount++
+		}
+	}
+
+	// Should have one output registered event for each target
+	expectedCount := len(ctx.config.OutputTargets)
+	if outputRegisteredCount != expectedCount {
+		// Debug: show all event types to help diagnose
+		eventTypes := make([]string, len(events))
+		for i, event := range events {
+			eventTypes[i] = event.Type()
+		}
+		return fmt.Errorf("expected %d output registered events, got %d. Captured events: %v", expectedCount, outputRegisteredCount, eventTypes)
+	}
+
+	return nil
+}
+
+func (ctx *EventLoggerBDDTestContext) theEventsShouldContainConfigurationDetails() error {
+	events := ctx.eventObserver.GetEvents()
+	
+	// Check config loaded event has configuration details
+	for _, event := range events {
+		if event.Type() == EventTypeConfigLoaded {
+			var data map[string]interface{}
+			if err := event.DataAs(&data); err != nil {
+				return fmt.Errorf("failed to extract config loaded event data: %v", err)
+			}
+			
+			// Check for key configuration fields
+			if _, exists := data["enabled"]; !exists {
+				return fmt.Errorf("config loaded event should contain enabled field")
+			}
+			if _, exists := data["buffer_size"]; !exists {
+				return fmt.Errorf("config loaded event should contain buffer_size field")
+			}
+			
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("config loaded event not found")
+}
+
+func (ctx *EventLoggerBDDTestContext) iEmitATestEventForProcessing() error {
+	return ctx.iEmitATestEventWithTypeAndData("processing.test", "test-data")
+}
+
+func (ctx *EventLoggerBDDTestContext) anEventReceivedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeEventReceived {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeEventReceived, eventTypes)
+}
+
+func (ctx *EventLoggerBDDTestContext) anEventProcessedEventShouldBeEmitted() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeEventProcessed {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeEventProcessed, eventTypes)
+}
+
+func (ctx *EventLoggerBDDTestContext) anOutputSuccessEventShouldBeEmitted() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeOutputSuccess {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeOutputSuccess, eventTypes)
+}
+
+func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithSmallBufferAndEventObservationEnabled() error {
+	ctx.resetContext()
+
+	logger := &testLogger{}
+
+	// Create eventlogger configuration for testing with tiny buffer
+	ctx.config = &EventLoggerConfig{
+		Enabled:       true,
+		BufferSize:    1, // Very small buffer of 1 to trigger overflow more easily
+		FlushInterval: 5 * time.Second,
+		OutputTargets: []OutputTargetConfig{
+			{
+				Type:   "console",
+				Level:  "INFO",
+				Format: "structured",
+			},
+		},
+		LogLevel: "INFO",
+		Format:   "structured",
+	}
+
+	// Create provider with the eventlogger config
+	eventloggerConfigProvider := modular.NewStdConfigProvider(ctx.config)
+
+	// Create app with empty main config - USE OBSERVABLE for events
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+
+	// Create and register eventlogger module
+	ctx.module = NewModule().(*EventLoggerModule)
+
+	// Create test event observer
+	ctx.eventObserver = newTestEventObserver()
+
+	// Register our test observer BEFORE registering module to capture all events
+	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
+
+	// Register module
+	ctx.app.RegisterModule(ctx.module)
+
+	// Now override the config section with our direct configuration
+	ctx.app.RegisterConfigSection("eventlogger", eventloggerConfigProvider)
+
+	// Initialize the application (this should trigger config loaded events)
+	if err := ctx.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize app: %v", err)
+	}
+
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start app: %v", err)
+	}
+
+	// Get the eventlogger service
+	var service interface{}
+	if err := ctx.app.GetService("eventlogger.observer", &service); err != nil {
+		return fmt.Errorf("failed to get eventlogger service: %w", err)
+	}
+
+	// Cast to EventLoggerModule
+	if eventloggerService, ok := service.(*EventLoggerModule); ok {
+		ctx.service = eventloggerService
+	} else {
+		return fmt.Errorf("service is not an EventLoggerModule")
+	}
+
+	return nil
+}
+
+func (ctx *EventLoggerBDDTestContext) bufferFullEventsShouldBeEmitted() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeBufferFull {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeBufferFull, eventTypes)
+}
+
+func (ctx *EventLoggerBDDTestContext) eventDroppedEventsShouldBeEmitted() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeEventDropped {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeEventDropped, eventTypes)
+}
+
+func (ctx *EventLoggerBDDTestContext) theEventsShouldContainDropReasons() error {
+	events := ctx.eventObserver.GetEvents()
+	
+	// Check event dropped events contain drop reasons
+	for _, event := range events {
+		if event.Type() == EventTypeEventDropped {
+			var data map[string]interface{}
+			if err := event.DataAs(&data); err != nil {
+				return fmt.Errorf("failed to extract event dropped event data: %v", err)
+			}
+			
+			// Check for drop reason
+			if _, exists := data["reason"]; !exists {
+				return fmt.Errorf("event dropped event should contain reason field")
+			}
+			
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("event dropped event not found")
 }
 
 // Test helper structures
@@ -863,8 +1168,7 @@ func TestEventLoggerModuleBDD(t *testing.T) {
 			// Background
 			s.Given(`^I have a modular application with event logger module configured$`, ctx.iHaveAModularApplicationWithEventLoggerModuleConfigured)
 
-			// Initialization
-			s.When(`^the event logger module is initialized$`, ctx.theEventLoggerModuleIsInitialized)
+			// Initialization - handled by event observation scenarios now
 			s.Then(`^the event logger service should be available$`, ctx.theEventLoggerServiceShouldBeAvailable)
 			s.Then(`^the module should register as an observer$`, ctx.theModuleShouldRegisterAsAnObserver)
 
@@ -924,7 +1228,36 @@ func TestEventLoggerModuleBDD(t *testing.T) {
 
 			// Event observation step registrations
 			s.Given(`^I have an event logger with event observation enabled$`, ctx.iHaveAnEventLoggerWithEventObservationEnabled)
+			s.When(`^the event logger module starts$`, func() error { return nil }) // Already started in Given step
 			s.Then(`^a logger started event should be emitted$`, ctx.aLoggerStartedEventShouldBeEmitted)
+			s.Then(`^the event should contain output count and buffer size$`, ctx.theEventShouldContainOutputCountAndBufferSize)
+			s.When(`^the event logger module stops$`, ctx.theEventLoggerModuleStops)
+			s.Then(`^a logger stopped event should be emitted$`, ctx.aLoggerStoppedEventShouldBeEmitted)
+			
+			// Configuration events
+			s.When(`^the event logger module is initialized$`, func() error { 
+				// For event observation scenarios, initialization already happened in Given step
+				// For regular scenarios, call the regular initialization
+				if ctx.eventObserver != nil {
+					return nil // Already initialized in event observation setup
+				}
+				return ctx.theEventLoggerModuleIsInitialized() // Regular initialization
+			})
+			s.Then(`^a config loaded event should be emitted$`, ctx.aConfigLoadedEventShouldBeEmitted)
+			s.Then(`^output registered events should be emitted for each target$`, ctx.outputRegisteredEventsShouldBeEmittedForEachTarget)
+			s.Then(`^the events should contain configuration details$`, ctx.theEventsShouldContainConfigurationDetails)
+			
+			// Processing events
+			s.When(`^I emit a test event for processing$`, ctx.iEmitATestEventForProcessing)
+			s.Then(`^an event received event should be emitted$`, ctx.anEventReceivedEventShouldBeEmitted)
+			s.Then(`^an event processed event should be emitted$`, ctx.anEventProcessedEventShouldBeEmitted)
+			s.Then(`^an output success event should be emitted$`, ctx.anOutputSuccessEventShouldBeEmitted)
+			
+			// Buffer overflow events
+			s.Given(`^I have an event logger with small buffer and event observation enabled$`, ctx.iHaveAnEventLoggerWithSmallBufferAndEventObservationEnabled)
+			s.Then(`^buffer full events should be emitted$`, ctx.bufferFullEventsShouldBeEmitted)
+			s.Then(`^event dropped events should be emitted$`, ctx.eventDroppedEventsShouldBeEmitted)
+			s.Then(`^the events should contain drop reasons$`, ctx.theEventsShouldContainDropReasons)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",

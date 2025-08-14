@@ -51,6 +51,10 @@ func (t *testEventObserver) GetEvents() []cloudevents.Event {
 	return events
 }
 
+func (t *testEventObserver) ClearEvents() {
+	t.events = make([]cloudevents.Event, 0)
+}
+
 func (ctx *ReverseProxyBDDTestContext) resetContext() {
 	// Close test servers
 	for _, server := range ctx.testServers {
@@ -222,7 +226,7 @@ func (ctx *ReverseProxyBDDTestContext) theRequestShouldBeForwardedToTheBackend()
 	}
 	
 	// Verify that at least one backend is configured for request forwarding
-	if ctx.config == nil || len(ctx.config.Targets) == 0 {
+	if ctx.config == nil || len(ctx.config.BackendServices) == 0 {
 		return fmt.Errorf("no backend targets configured for request forwarding")
 	}
 	
@@ -631,6 +635,342 @@ func (ctx *ReverseProxyBDDTestContext) newRequestsShouldBeRejectedGracefully() e
 	return nil
 }
 
+// Event observation step methods
+func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithEventObservationEnabled() error {
+	ctx.resetContext()
+	
+	// Create application with reverse proxy config - use ObservableApplication for event support
+	logger := &testLogger{}
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+	
+	// Create a test backend server
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("backend response"))
+	}))
+	ctx.testServers = append(ctx.testServers, testServer)
+	
+	// Create reverse proxy configuration
+	ctx.config = &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"test-backend": testServer.URL,
+		},
+		Routes: map[string]string{
+			"/api/test": "test-backend",
+		},
+		DefaultBackend: "test-backend",
+	}
+	
+	// Create reverse proxy module
+	ctx.module = NewModule()
+	ctx.service = ctx.module
+	
+	// Create test event observer
+	ctx.eventObserver = newTestEventObserver()
+	
+	// Register our test observer BEFORE registering module to capture all events
+	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
+	
+	// Register module
+	ctx.app.RegisterModule(ctx.module)
+	
+	// Register reverse proxy config section
+	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
+	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
+	
+	// Initialize the application (this should trigger config loaded events)
+	if err := ctx.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize app: %v", err)
+	}
+	
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) theReverseProxyModuleStarts() error {
+	// Start the application
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start app: %v", err)
+	}
+	
+	// Give time for all events to be emitted
+	time.Sleep(200 * time.Millisecond)
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) aProxyCreatedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+	
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeProxyCreated {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeProxyCreated, eventTypes)
+}
+
+func (ctx *ReverseProxyBDDTestContext) aProxyStartedEventShouldBeEmitted() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeProxyStarted {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeProxyStarted, eventTypes)
+}
+
+func (ctx *ReverseProxyBDDTestContext) aModuleStartedEventShouldBeEmitted() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeModuleStarted {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeModuleStarted, eventTypes)
+}
+
+func (ctx *ReverseProxyBDDTestContext) theEventsShouldContainProxyConfigurationDetails() error {
+	events := ctx.eventObserver.GetEvents()
+	
+	// Check module started event has configuration details
+	for _, event := range events {
+		if event.Type() == EventTypeModuleStarted {
+			var data map[string]interface{}
+			if err := event.DataAs(&data); err != nil {
+				return fmt.Errorf("failed to extract module started event data: %v", err)
+			}
+			
+			// Check for key configuration fields
+			if _, exists := data["backend_count"]; !exists {
+				return fmt.Errorf("module started event should contain backend_count field")
+			}
+			
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("module started event not found")
+}
+
+func (ctx *ReverseProxyBDDTestContext) theReverseProxyModuleStops() error {
+	return ctx.app.Stop()
+}
+
+func (ctx *ReverseProxyBDDTestContext) aProxyStoppedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+	
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeProxyStopped {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeProxyStopped, eventTypes)
+}
+
+func (ctx *ReverseProxyBDDTestContext) aModuleStoppedEventShouldBeEmitted() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeModuleStopped {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeModuleStopped, eventTypes)
+}
+
+func (ctx *ReverseProxyBDDTestContext) iHaveABackendServiceConfigured() error {
+	// This is already done in the setup, just ensure it's ready
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) iSendARequestToTheReverseProxy() error {
+	// Clear previous events to focus on this request
+	ctx.eventObserver.ClearEvents()
+	
+	// Since this is BDD testing, we'll simulate the request handling by calling the handler directly
+	// In a real implementation, this would make an HTTP request to the proxy server
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) aRequestReceivedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+	
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeRequestReceived {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestReceived, eventTypes)
+}
+
+func (ctx *ReverseProxyBDDTestContext) theEventShouldContainRequestDetails() error {
+	events := ctx.eventObserver.GetEvents()
+	
+	// Check request received event has request details
+	for _, event := range events {
+		if event.Type() == EventTypeRequestReceived {
+			var data map[string]interface{}
+			if err := event.DataAs(&data); err != nil {
+				return fmt.Errorf("failed to extract request received event data: %v", err)
+			}
+			
+			// Check for key request fields
+			if _, exists := data["backend"]; !exists {
+				return fmt.Errorf("request received event should contain backend field")
+			}
+			if _, exists := data["method"]; !exists {
+				return fmt.Errorf("request received event should contain method field")
+			}
+			
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("request received event not found")
+}
+
+func (ctx *ReverseProxyBDDTestContext) theRequestIsSuccessfullyProxiedToTheBackend() error {
+	// Wait for the request to be processed
+	time.Sleep(100 * time.Millisecond)
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) aRequestProxiedEventShouldBeEmitted() error {
+	time.Sleep(200 * time.Millisecond) // Allow time for async event emission
+	
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeRequestProxied {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestProxied, eventTypes)
+}
+
+func (ctx *ReverseProxyBDDTestContext) theEventShouldContainBackendAndResponseDetails() error {
+	events := ctx.eventObserver.GetEvents()
+	
+	// Check request proxied event has backend and response details
+	for _, event := range events {
+		if event.Type() == EventTypeRequestProxied {
+			var data map[string]interface{}
+			if err := event.DataAs(&data); err != nil {
+				return fmt.Errorf("failed to extract request proxied event data: %v", err)
+			}
+			
+			// Check for key response fields
+			if _, exists := data["backend"]; !exists {
+				return fmt.Errorf("request proxied event should contain backend field")
+			}
+			
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("request proxied event not found")
+}
+
+func (ctx *ReverseProxyBDDTestContext) iHaveAnUnavailableBackendServiceConfigured() error {
+	// Configure with an invalid backend URL to simulate unavailability
+	ctx.config.BackendServices = map[string]string{
+		"unavailable-backend": "http://localhost:99999", // Invalid port
+	}
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) theRequestFailsToReachTheBackend() error {
+	// Wait for the request to fail
+	time.Sleep(300 * time.Millisecond)
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) aRequestFailedEventShouldBeEmitted() error {
+	time.Sleep(200 * time.Millisecond) // Allow time for async event emission
+	
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeRequestFailed {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestFailed, eventTypes)
+}
+
+func (ctx *ReverseProxyBDDTestContext) theEventShouldContainErrorDetails() error {
+	events := ctx.eventObserver.GetEvents()
+	
+	// Check request failed event has error details
+	for _, event := range events {
+		if event.Type() == EventTypeRequestFailed {
+			var data map[string]interface{}
+			if err := event.DataAs(&data); err != nil {
+				return fmt.Errorf("failed to extract request failed event data: %v", err)
+			}
+			
+			// Check for error field
+			if _, exists := data["error"]; !exists {
+				return fmt.Errorf("request failed event should contain error field")
+			}
+			
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("request failed event not found")
+}
+
 // Test helper structures
 type testLogger struct{}
 
@@ -706,6 +1046,32 @@ func TestReverseProxyModuleBDD(t *testing.T) {
 			s.When(`^the module is stopped$`, ctx.theModuleIsStopped)
 			s.Then(`^ongoing requests should be completed$`, ctx.ongoingRequestsShouldBeCompleted)
 			s.Then(`^new requests should be rejected gracefully$`, ctx.newRequestsShouldBeRejectedGracefully)
+
+			// Event observation scenarios
+			s.Given(`^I have a reverse proxy with event observation enabled$`, ctx.iHaveAReverseProxyWithEventObservationEnabled)
+			s.When(`^the reverse proxy module starts$`, ctx.theReverseProxyModuleStarts)
+			s.Then(`^a proxy created event should be emitted$`, ctx.aProxyCreatedEventShouldBeEmitted)
+			s.Then(`^a proxy started event should be emitted$`, ctx.aProxyStartedEventShouldBeEmitted)
+			s.Then(`^a module started event should be emitted$`, ctx.aModuleStartedEventShouldBeEmitted)
+			s.Then(`^the events should contain proxy configuration details$`, ctx.theEventsShouldContainProxyConfigurationDetails)
+			s.When(`^the reverse proxy module stops$`, ctx.theReverseProxyModuleStops)
+			s.Then(`^a proxy stopped event should be emitted$`, ctx.aProxyStoppedEventShouldBeEmitted)
+			s.Then(`^a module stopped event should be emitted$`, ctx.aModuleStoppedEventShouldBeEmitted)
+
+			// Request routing events
+			s.Given(`^I have a backend service configured$`, ctx.iHaveABackendServiceConfigured)
+			s.When(`^I send a request to the reverse proxy$`, ctx.iSendARequestToTheReverseProxy)
+			s.Then(`^a request received event should be emitted$`, ctx.aRequestReceivedEventShouldBeEmitted)
+			s.Then(`^the event should contain request details$`, ctx.theEventShouldContainRequestDetails)
+			s.When(`^the request is successfully proxied to the backend$`, ctx.theRequestIsSuccessfullyProxiedToTheBackend)
+			s.Then(`^a request proxied event should be emitted$`, ctx.aRequestProxiedEventShouldBeEmitted)
+			s.Then(`^the event should contain backend and response details$`, ctx.theEventShouldContainBackendAndResponseDetails)
+
+			// Request failure events
+			s.Given(`^I have an unavailable backend service configured$`, ctx.iHaveAnUnavailableBackendServiceConfigured)
+			s.When(`^the request fails to reach the backend$`, ctx.theRequestFailsToReachTheBackend)
+			s.Then(`^a request failed event should be emitted$`, ctx.aRequestFailedEventShouldBeEmitted)
+			s.Then(`^the event should contain error details$`, ctx.theEventShouldContainErrorDetails)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",

@@ -532,6 +532,12 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 		"health_checker_enabled": m.healthChecker != nil,
 		"metrics_enabled":        m.enableMetrics,
 	})
+	
+	// Emit proxy started event
+	m.emitEvent(ctx, EventTypeProxyStarted, map[string]interface{}{
+		"backend_count": len(m.config.BackendServices),
+		"server_running": true,
+	})
 
 	return nil
 }
@@ -595,6 +601,17 @@ func (m *ReverseProxyModule) Stop(ctx context.Context) error {
 			m.app.Logger().Debug("Cleaned up resources for tenant", "tenant", tenantID)
 		}
 	}
+
+	// Emit proxy stopped event
+	m.emitEvent(ctx, EventTypeProxyStopped, map[string]interface{}{
+		"backend_count": len(m.config.BackendServices),
+		"server_running": false,
+	})
+	
+	// Emit module stopped event
+	m.emitEvent(ctx, EventTypeModuleStopped, map[string]interface{}{
+		"cleanup_complete": true,
+	})
 
 	if m.app != nil && m.app.Logger() != nil {
 		m.app.Logger().Info("Reverseproxy module shutdown complete")
@@ -1164,6 +1181,13 @@ func (m *ReverseProxyModule) SetHttpClient(client *http.Client) {
 // createReverseProxyForBackend creates a reverse proxy for a specific backend with per-backend configuration.
 func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backendID string, endpoint string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	
+	// Emit proxy created event
+	m.emitEvent(context.Background(), EventTypeProxyCreated, map[string]interface{}{
+		"backend_id": backendID,
+		"target_url": target.String(),
+		"endpoint":   endpoint,
+	})
 
 	// Use the module's custom transport if available
 	if m.httpClient != nil && m.httpClient.Transport != nil {
@@ -1491,6 +1515,14 @@ func (m *ReverseProxyModule) applyPatternReplacement(path, pattern, replacement 
 // to a specific backend, with support for tenant-specific backends and feature flag evaluation
 func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Emit request received event
+		m.emitEvent(r.Context(), EventTypeRequestReceived, map[string]interface{}{
+			"backend":     backend,
+			"method":      r.Method,
+			"path":        r.URL.Path,
+			"remote_addr": r.RemoteAddr,
+		})
+
 		// Extract tenant ID from request header, if present
 		tenantHeader := m.config.TenantIDHeader
 		tenantID := modular.TenantID(r.Header.Get(tenantHeader))
@@ -2726,9 +2758,7 @@ func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Ev
 func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	event := modular.NewCloudEvent(eventType, "reverseproxy-service", data, nil)
 
-	go func() {
-		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
-		}
-	}()
+	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
+	}
 }

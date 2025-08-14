@@ -16,16 +16,47 @@ import (
 
 // EventLogger BDD Test Context
 type EventLoggerBDDTestContext struct {
-	app          modular.Application
-	module       *EventLoggerModule
-	service      *EventLoggerModule
-	config       *EventLoggerConfig
-	lastError    error
-	loggedEvents []cloudevents.Event
-	tempDir      string
-	outputLogs   []string
-	testConsole  *testConsoleOutput
-	testFile     *testFileOutput
+	app           modular.Application
+	module        *EventLoggerModule
+	service       *EventLoggerModule
+	config        *EventLoggerConfig
+	lastError     error
+	loggedEvents  []cloudevents.Event
+	tempDir       string
+	outputLogs    []string
+	testConsole   *testConsoleOutput
+	testFile      *testFileOutput
+	eventObserver *testEventObserver
+}
+
+// Test event observer for capturing emitted events
+type testEventObserver struct {
+	events []cloudevents.Event
+}
+
+func newTestEventObserver() *testEventObserver {
+	return &testEventObserver{
+		events: make([]cloudevents.Event, 0),
+	}
+}
+
+func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	t.events = append(t.events, event.Clone())
+	return nil
+}
+
+func (t *testEventObserver) ObserverID() string {
+	return "test-observer-eventlogger"
+}
+
+func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	events := make([]cloudevents.Event, len(t.events))
+	copy(events, t.events)
+	return events
+}
+
+func (t *testEventObserver) ClearEvents() {
+	t.events = make([]cloudevents.Event, 0)
 }
 
 func (ctx *EventLoggerBDDTestContext) resetContext() {
@@ -38,10 +69,11 @@ func (ctx *EventLoggerBDDTestContext) resetContext() {
 	ctx.config = nil
 	ctx.lastError = nil
 	ctx.loggedEvents = nil
+	ctx.tempDir = ""
 	ctx.outputLogs = nil
 	ctx.testConsole = nil
 	ctx.testFile = nil
-	ctx.tempDir = ""
+	ctx.eventObserver = nil
 }
 
 func (ctx *EventLoggerBDDTestContext) iHaveAModularApplicationWithEventLoggerModuleConfigured() error {
@@ -687,10 +719,122 @@ func (ctx *EventLoggerBDDTestContext) errorsShouldBeHandledGracefully() error {
 }
 
 func (ctx *EventLoggerBDDTestContext) otherOutputTargetsShouldContinueWorking() error {
-	// In a real implementation, console output should still work
-	// even if file output fails. For this test, we just verify
-	// error handling occurred as expected.
+	// Verify that non-faulty output targets continue to function correctly
+	// even when other targets fail. This is verified by checking that 
+	// events are still being processed and logged successfully.
+	if ctx.service == nil {
+		return fmt.Errorf("event logger service not available")
+	}
+	
+	// Emit a test event to verify other outputs still work
+	event := modular.NewCloudEvent("test.recovery", "test-source", map[string]interface{}{"test": "recovery"}, nil)
+	err := ctx.service.OnEvent(context.Background(), event)
+	
+	// The error handling should ensure this succeeds even with faulty targets
+	if err != nil {
+		return fmt.Errorf("other output targets failed to work after error: %v", err)
+	}
+	
 	return nil
+}
+
+// Event observation setup and step implementations
+func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithEventObservationEnabled() error {
+	ctx.resetContext()
+
+	logger := &testLogger{}
+
+	// Create eventlogger configuration for testing
+	ctx.config = &EventLoggerConfig{
+		Enabled:       true,
+		BufferSize:    100,
+		FlushInterval: 5 * time.Second,
+		OutputTargets: []OutputTargetConfig{
+			{
+				Type:   "console",
+				Level:  "INFO",
+				Format: "structured",
+			},
+		},
+		LogLevel: "INFO",
+		Format:   "structured",
+	}
+
+	// Create provider with the eventlogger config
+	eventloggerConfigProvider := modular.NewStdConfigProvider(ctx.config)
+
+	// Create app with empty main config - USE OBSERVABLE for events
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+
+	// Create and register eventlogger module
+	ctx.module = NewModule().(*EventLoggerModule)
+
+	// Create test event observer
+	ctx.eventObserver = newTestEventObserver()
+
+	// Register module first
+	ctx.app.RegisterModule(ctx.module)
+
+	// Now override the config section with our direct configuration
+	ctx.app.RegisterConfigSection("eventlogger", eventloggerConfigProvider)
+
+	// Initialize the application
+	if err := ctx.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize app: %v", err)
+	}
+
+	// Register observers AFTER initialization when config is loaded
+	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+		return fmt.Errorf("failed to register observers: %w", err)
+	}
+
+	// Register our test observer to capture events
+	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
+
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start app: %v", err)
+	}
+
+	// Get the eventlogger service
+	var service interface{}
+	if err := ctx.app.GetService("eventlogger.observer", &service); err != nil {
+		// Fallback to module service
+		if err := ctx.app.GetService("eventlogger", &service); err != nil {
+			// Final fallback: use the module directly as the service
+			ctx.service = ctx.module
+			return nil
+		}
+	}
+
+	// Cast to EventLoggerModule
+	if eventloggerService, ok := service.(*EventLoggerModule); ok {
+		ctx.service = eventloggerService
+	} else {
+		ctx.service = ctx.module
+	}
+
+	return nil
+}
+
+func (ctx *EventLoggerBDDTestContext) aLoggerStartedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeLoggerStarted {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeLoggerStarted, eventTypes)
 }
 
 // Test helper structures
@@ -777,6 +921,10 @@ func TestEventLoggerModuleBDD(t *testing.T) {
 			s.When(`^I emit events$`, ctx.iEmitEvents)
 			s.Then(`^errors should be handled gracefully$`, ctx.errorsShouldBeHandledGracefully)
 			s.Then(`^other output targets should continue working$`, ctx.otherOutputTargetsShouldContinueWorking)
+
+			// Event observation step registrations
+			s.Given(`^I have an event logger with event observation enabled$`, ctx.iHaveAnEventLoggerWithEventObservationEnabled)
+			s.Then(`^a logger started event should be emitted$`, ctx.aLoggerStartedEventShouldBeEmitted)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",

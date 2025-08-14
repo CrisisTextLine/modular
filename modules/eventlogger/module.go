@@ -400,7 +400,8 @@ func (m *EventLoggerModule) emitOperationalEvent(ctx context.Context, eventType 
 // emitSyncOperationalEvent emits an event synchronously for reliable test capture
 func (m *EventLoggerModule) emitSyncOperationalEvent(ctx context.Context, eventType string, data map[string]interface{}) error {
 	if m.subject == nil {
-		return fmt.Errorf("no subject available for event emission")
+		m.logger.Debug("Subject not available, skipping event emission", "event_type", eventType)
+		return nil // Don't return error, just skip
 	}
 
 	// Use a different source for config/output events to avoid any filtering issues during testing

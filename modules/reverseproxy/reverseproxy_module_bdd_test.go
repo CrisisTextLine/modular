@@ -1,6 +1,7 @@
 package reverseproxy
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,18 +9,46 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cucumber/godog"
 )
 
 // ReverseProxy BDD Test Context
 type ReverseProxyBDDTestContext struct {
-	app          modular.Application
-	module       *ReverseProxyModule
-	service      *ReverseProxyModule
-	config       *ReverseProxyConfig
-	lastError    error
-	testServers  []*httptest.Server
-	lastResponse *http.Response
+	app           modular.Application
+	module        *ReverseProxyModule
+	service       *ReverseProxyModule
+	config        *ReverseProxyConfig
+	lastError     error
+	testServers   []*httptest.Server
+	lastResponse  *http.Response
+	eventObserver *testEventObserver
+}
+
+// testEventObserver captures CloudEvents during testing
+type testEventObserver struct {
+	events []cloudevents.Event
+}
+
+func newTestEventObserver() *testEventObserver {
+	return &testEventObserver{
+		events: make([]cloudevents.Event, 0),
+	}
+}
+
+func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	t.events = append(t.events, event.Clone())
+	return nil
+}
+
+func (t *testEventObserver) ObserverID() string {
+	return "test-observer-reverseproxy"
+}
+
+func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	events := make([]cloudevents.Event, len(t.events))
+	copy(events, t.events)
+	return events
 }
 
 func (ctx *ReverseProxyBDDTestContext) resetContext() {
@@ -187,7 +216,16 @@ func (ctx *ReverseProxyBDDTestContext) iSendARequestToTheProxy() error {
 }
 
 func (ctx *ReverseProxyBDDTestContext) theRequestShouldBeForwardedToTheBackend() error {
-	// In a real implementation, would verify request forwarding
+	// Verify that the reverse proxy service is available and configured
+	if ctx.service == nil {
+		return fmt.Errorf("reverse proxy service not available")
+	}
+	
+	// Verify that at least one backend is configured for request forwarding
+	if ctx.config == nil || len(ctx.config.Targets) == 0 {
+		return fmt.Errorf("no backend targets configured for request forwarding")
+	}
+	
 	return nil
 }
 

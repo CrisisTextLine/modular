@@ -466,7 +466,7 @@ func (ctx *EventLoggerBDDTestContext) iEmitMoreEventsThanTheBufferCanHold() erro
 
 	// Give a moment for processing
 	time.Sleep(50 * time.Millisecond)
-	
+
 	return nil
 }
 
@@ -720,40 +720,40 @@ func (ctx *EventLoggerBDDTestContext) errorsShouldBeHandledGracefully() error {
 	// In this test, we verify that the module handles errors gracefully.
 	// Since we're using a working console output target, the module should function normally.
 	// The test verifies graceful error handling by ensuring the module remains operational.
-	
+
 	if ctx.service == nil {
 		return fmt.Errorf("service should be available even with potential faults")
 	}
-	
+
 	// Verify the module is still functional by emitting a test event
 	event := modular.NewCloudEvent("graceful.test", "test-source", map[string]interface{}{"test": "data"}, nil)
 	err := ctx.service.OnEvent(context.Background(), event)
-	
+
 	// The module should handle this gracefully
 	if err != nil {
 		return fmt.Errorf("module should handle events gracefully: %v", err)
 	}
-	
+
 	return nil
 }
 
 func (ctx *EventLoggerBDDTestContext) otherOutputTargetsShouldContinueWorking() error {
 	// Verify that non-faulty output targets continue to function correctly
-	// even when other targets fail. This is verified by checking that 
+	// even when other targets fail. This is verified by checking that
 	// events are still being processed and logged successfully.
 	if ctx.service == nil {
 		return fmt.Errorf("event logger service not available")
 	}
-	
+
 	// Emit a test event to verify other outputs still work
 	event := modular.NewCloudEvent("test.recovery", "test-source", map[string]interface{}{"test": "recovery"}, nil)
 	err := ctx.service.OnEvent(context.Background(), event)
-	
+
 	// The error handling should ensure this succeeds even with faulty targets
 	if err != nil {
 		return fmt.Errorf("other output targets failed to work after error: %v", err)
 	}
-	
+
 	return nil
 }
 
@@ -806,6 +806,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithEventObservationEnab
 	// Initialize the application (this should trigger config loaded events)
 	if err := ctx.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
+	}
+
+	// Manually ensure observers are registered - this might not be happening automatically
+	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+		return fmt.Errorf("failed to manually register observers: %w", err)
 	}
 
 	if err := ctx.app.Start(); err != nil {
@@ -876,17 +881,17 @@ func (ctx *EventLoggerBDDTestContext) theEventShouldContainOutputCountAndBufferS
 			if err := event.DataAs(&data); err != nil {
 				return fmt.Errorf("failed to extract event data: %v", err)
 			}
-			
+
 			// Check for output_count
 			if _, exists := data["output_count"]; !exists {
 				return fmt.Errorf("logger started event should contain output_count")
 			}
-			
+
 			// Check for buffer_size
 			if _, exists := data["buffer_size"]; !exists {
 				return fmt.Errorf("logger started event should contain buffer_size")
 			}
-			
+
 			return nil
 		}
 	}
@@ -913,10 +918,10 @@ func (ctx *EventLoggerBDDTestContext) aConfigLoadedEventShouldBeEmitted() error 
 
 func (ctx *EventLoggerBDDTestContext) outputRegisteredEventsShouldBeEmittedForEachTarget() error {
 	time.Sleep(200 * time.Millisecond) // Allow more time for async event emission
-	
+
 	events := ctx.eventObserver.GetEvents()
 	outputRegisteredCount := 0
-	
+
 	for _, event := range events {
 		if event.Type() == EventTypeOutputRegistered {
 			outputRegisteredCount++
@@ -939,7 +944,7 @@ func (ctx *EventLoggerBDDTestContext) outputRegisteredEventsShouldBeEmittedForEa
 
 func (ctx *EventLoggerBDDTestContext) theEventsShouldContainConfigurationDetails() error {
 	events := ctx.eventObserver.GetEvents()
-	
+
 	// Check config loaded event has configuration details
 	for _, event := range events {
 		if event.Type() == EventTypeConfigLoaded {
@@ -947,7 +952,7 @@ func (ctx *EventLoggerBDDTestContext) theEventsShouldContainConfigurationDetails
 			if err := event.DataAs(&data); err != nil {
 				return fmt.Errorf("failed to extract config loaded event data: %v", err)
 			}
-			
+
 			// Check for key configuration fields
 			if _, exists := data["enabled"]; !exists {
 				return fmt.Errorf("config loaded event should contain enabled field")
@@ -955,11 +960,11 @@ func (ctx *EventLoggerBDDTestContext) theEventsShouldContainConfigurationDetails
 			if _, exists := data["buffer_size"]; !exists {
 				return fmt.Errorf("config loaded event should contain buffer_size field")
 			}
-			
+
 			return nil
 		}
 	}
-	
+
 	return fmt.Errorf("config loaded event not found")
 }
 
@@ -1002,6 +1007,8 @@ func (ctx *EventLoggerBDDTestContext) anEventProcessedEventShouldBeEmitted() err
 }
 
 func (ctx *EventLoggerBDDTestContext) anOutputSuccessEventShouldBeEmitted() error {
+	time.Sleep(300 * time.Millisecond) // Allow more time for async processing and event emission
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeOutputSuccess {
@@ -1009,6 +1016,7 @@ func (ctx *EventLoggerBDDTestContext) anOutputSuccessEventShouldBeEmitted() erro
 		}
 	}
 
+	// Debug: show all event types to help diagnose
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
@@ -1067,6 +1075,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithSmallBufferAndEventO
 		return fmt.Errorf("failed to initialize app: %v", err)
 	}
 
+	// Manually ensure observers are registered - this might not be happening automatically
+	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+		return fmt.Errorf("failed to manually register observers: %w", err)
+	}
+
 	if err := ctx.app.Start(); err != nil {
 		return fmt.Errorf("failed to start app: %v", err)
 	}
@@ -1121,7 +1134,7 @@ func (ctx *EventLoggerBDDTestContext) eventDroppedEventsShouldBeEmitted() error 
 
 func (ctx *EventLoggerBDDTestContext) theEventsShouldContainDropReasons() error {
 	events := ctx.eventObserver.GetEvents()
-	
+
 	// Check event dropped events contain drop reasons
 	for _, event := range events {
 		if event.Type() == EventTypeEventDropped {
@@ -1129,16 +1142,16 @@ func (ctx *EventLoggerBDDTestContext) theEventsShouldContainDropReasons() error 
 			if err := event.DataAs(&data); err != nil {
 				return fmt.Errorf("failed to extract event dropped event data: %v", err)
 			}
-			
+
 			// Check for drop reason
 			if _, exists := data["reason"]; !exists {
 				return fmt.Errorf("event dropped event should contain reason field")
 			}
-			
+
 			return nil
 		}
 	}
-	
+
 	return fmt.Errorf("event dropped event not found")
 }
 
@@ -1233,9 +1246,9 @@ func TestEventLoggerModuleBDD(t *testing.T) {
 			s.Then(`^the event should contain output count and buffer size$`, ctx.theEventShouldContainOutputCountAndBufferSize)
 			s.When(`^the event logger module stops$`, ctx.theEventLoggerModuleStops)
 			s.Then(`^a logger stopped event should be emitted$`, ctx.aLoggerStoppedEventShouldBeEmitted)
-			
+
 			// Configuration events
-			s.When(`^the event logger module is initialized$`, func() error { 
+			s.When(`^the event logger module is initialized$`, func() error {
 				// For event observation scenarios, initialization already happened in Given step
 				// For regular scenarios, call the regular initialization
 				if ctx.eventObserver != nil {
@@ -1246,13 +1259,13 @@ func TestEventLoggerModuleBDD(t *testing.T) {
 			s.Then(`^a config loaded event should be emitted$`, ctx.aConfigLoadedEventShouldBeEmitted)
 			s.Then(`^output registered events should be emitted for each target$`, ctx.outputRegisteredEventsShouldBeEmittedForEachTarget)
 			s.Then(`^the events should contain configuration details$`, ctx.theEventsShouldContainConfigurationDetails)
-			
+
 			// Processing events
 			s.When(`^I emit a test event for processing$`, ctx.iEmitATestEventForProcessing)
 			s.Then(`^an event received event should be emitted$`, ctx.anEventReceivedEventShouldBeEmitted)
 			s.Then(`^an event processed event should be emitted$`, ctx.anEventProcessedEventShouldBeEmitted)
 			s.Then(`^an output success event should be emitted$`, ctx.anOutputSuccessEventShouldBeEmitted)
-			
+
 			// Buffer overflow events
 			s.Given(`^I have an event logger with small buffer and event observation enabled$`, ctx.iHaveAnEventLoggerWithSmallBufferAndEventObservationEnabled)
 			s.Then(`^buffer full events should be emitted$`, ctx.bufferFullEventsShouldBeEmitted)

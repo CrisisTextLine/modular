@@ -161,6 +161,17 @@ func (m *SchedulerModule) Init(app modular.Application) error {
 	m.config = cfg.GetConfig().(*SchedulerConfig)
 	m.logger = app.Logger()
 
+	// Emit config loaded event
+	m.emitEvent(context.Background(), EventTypeConfigLoaded, map[string]interface{}{
+		"worker_count":       m.config.WorkerCount,
+		"queue_size":         m.config.QueueSize,
+		"shutdown_timeout":   m.config.ShutdownTimeout.String(),
+		"storage_type":       m.config.StorageType,
+		"check_interval":     m.config.CheckInterval.String(),
+		"retention_days":     m.config.RetentionDays,
+		"enable_persistence": m.config.EnablePersistence,
+	})
+
 	// Initialize job store based on configuration
 	switch m.config.StorageType {
 	case "memory":
@@ -211,6 +222,14 @@ func (m *SchedulerModule) Start(ctx context.Context) error {
 	}
 
 	m.running = true
+
+	// Emit module started event
+	m.emitEvent(ctx, EventTypeModuleStarted, map[string]interface{}{
+		"worker_count": m.config.WorkerCount,
+		"queue_size":   m.config.QueueSize,
+		"storage_type": m.config.StorageType,
+	})
+
 	m.logger.Info("Scheduler started successfully")
 	return nil
 }

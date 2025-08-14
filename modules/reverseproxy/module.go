@@ -342,6 +342,16 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 		app.Logger().Info("Circuit breakers initialized", "backends", len(m.circuitBreakers))
 	}
 
+	// Emit config loaded event
+	m.emitEvent(context.Background(), EventTypeConfigLoaded, map[string]interface{}{
+		"backend_count":            len(m.config.BackendServices),
+		"composite_routes_count":   len(m.config.CompositeRoutes),
+		"circuit_breakers_enabled": len(m.circuitBreakers) > 0,
+		"metrics_enabled":          m.enableMetrics,
+		"cache_enabled":            m.config.CacheEnabled,
+		"request_timeout":          m.config.RequestTimeout.String(),
+	})
+
 	return nil
 }
 
@@ -514,6 +524,14 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to start health checker: %w", err)
 		}
 	}
+
+	// Emit module started event
+	m.emitEvent(ctx, EventTypeModuleStarted, map[string]interface{}{
+		"backend_count":          len(m.config.BackendServices),
+		"composite_routes_count": len(m.config.CompositeRoutes),
+		"health_checker_enabled": m.healthChecker != nil,
+		"metrics_enabled":        m.enableMetrics,
+	})
 
 	return nil
 }

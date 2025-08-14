@@ -88,3 +88,18 @@ Feature: EventBus Module
     Then all subscriptions should be cancelled
     And worker pools should be shut down gracefully
     And no memory leaks should occur
+
+  Scenario: Event observation during message publishing
+    Given I have an eventbus service with event observation enabled
+    When I subscribe to topic "user.created" with a handler
+    And I publish an event to topic "user.created" with payload "test-user"
+    Then a message published event should be emitted
+    And a subscription created event should be emitted
+
+  Scenario: Event observation during bus lifecycle
+    Given I have an eventbus service with event observation enabled
+    When the eventbus module starts
+    Then a config loaded event should be emitted
+    And a bus started event should be emitted
+    When the eventbus is stopped
+    Then a bus stopped event should be emitted

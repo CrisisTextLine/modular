@@ -9,6 +9,7 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/cucumber/godog"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // EventBus BDD Test Context
@@ -28,6 +29,44 @@ type EventBusBDDTestContext struct {
 	activeTopics      []string
 	subscriberCounts  map[string]int
 	mutex             sync.Mutex
+	eventObserver     *testEventObserver
+}
+
+// Test event observer for capturing emitted events
+type testEventObserver struct {
+	events []cloudevents.Event
+	mutex  sync.Mutex
+}
+
+func newTestEventObserver() *testEventObserver {
+	return &testEventObserver{
+		events: make([]cloudevents.Event, 0),
+	}
+}
+
+func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.events = append(t.events, event.Clone())
+	return nil
+}
+
+func (t *testEventObserver) ObserverID() string {
+	return "test-observer-eventbus"
+}
+
+func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	events := make([]cloudevents.Event, len(t.events))
+	copy(events, t.events)
+	return events
+}
+
+func (t *testEventObserver) ClearEvents() {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.events = make([]cloudevents.Event, 0)
 }
 
 func (ctx *EventBusBDDTestContext) resetContext() {
@@ -48,6 +87,7 @@ func (ctx *EventBusBDDTestContext) resetContext() {
 	ctx.handlerErrors = nil
 	ctx.activeTopics = nil
 	ctx.subscriberCounts = make(map[string]int)
+	ctx.eventObserver = nil
 }
 
 func (ctx *EventBusBDDTestContext) iHaveAModularApplicationWithEventbusModuleConfigured() error {
@@ -89,6 +129,90 @@ func (ctx *EventBusBDDTestContext) iHaveAModularApplicationWithEventbusModuleCon
 	// Now override the config section with our direct configuration
 	ctx.app.RegisterConfigSection("eventbus", eventbusConfigProvider)
 
+	return nil
+}
+
+// Event observation setup method
+func (ctx *EventBusBDDTestContext) iHaveAnEventbusServiceWithEventObservationEnabled() error {
+	ctx.resetContext()
+
+	// Create application with eventbus config
+	logger := &testLogger{}
+
+	// Save and clear ConfigFeeders to prevent environment interference during tests
+	originalFeeders := modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{}
+	defer func() {
+		modular.ConfigFeeders = originalFeeders
+	}()
+
+	// Create basic eventbus configuration for testing
+	ctx.eventbusConfig = &EventBusConfig{
+		Engine:                 "memory",
+		MaxEventQueueSize:      1000,
+		DefaultEventBufferSize: 10,
+		WorkerCount:            5,
+		EventTTL:               3600,
+		RetentionDays:          7,
+	}
+
+	// Create provider with the eventbus config
+	eventbusConfigProvider := modular.NewStdConfigProvider(ctx.eventbusConfig)
+
+	// Create app with empty main config - USE OBSERVABLE for events
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+
+	// Create and register eventbus module
+	ctx.module = NewModule().(*EventBusModule)
+
+	// Create test event observer
+	ctx.eventObserver = newTestEventObserver()
+
+	// Register module first (this will create the instance-aware config provider)
+	ctx.app.RegisterModule(ctx.module)
+
+	// Register observers BEFORE config override to avoid timing issues
+	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+		return fmt.Errorf("failed to register observers: %w", err)
+	}
+
+	// Register our test observer to capture events
+	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
+
+	// Now override the config section with our direct configuration
+	ctx.app.RegisterConfigSection("eventbus", eventbusConfigProvider)
+
+	// Initialize and start the application
+	if err := ctx.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize app: %v", err)
+	}
+
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start app: %v", err)
+	}
+
+	// Get the eventbus service
+	var service interface{}
+	if err := ctx.app.GetService("eventbus", &service); err != nil {
+		// Try the provider service as fallback
+		var eventbusService *EventBusModule
+		if err := ctx.app.GetService("eventbus.provider", &eventbusService); err == nil {
+			ctx.service = eventbusService
+		} else {
+			// Final fallback: use the module directly as the service
+			ctx.service = ctx.module
+		}
+	} else {
+		// Cast to EventBusModule
+		eventbusService, ok := service.(*EventBusModule)
+		if !ok {
+			return fmt.Errorf("service is not an EventBusModule, got: %T", service)
+		}
+		ctx.service = eventbusService
+	}
 	return nil
 }
 
@@ -380,8 +504,12 @@ func (ctx *EventBusBDDTestContext) theHandlerShouldProcessTheEventAsynchronously
 }
 
 func (ctx *EventBusBDDTestContext) thePublishingShouldNotBlock() error {
-	// For BDD purposes, assume publishing doesn't block if no error occurred
-	// In a real implementation, you'd measure timing
+	// Publishing is async by design in the eventbus module
+	// If we reach this point without timeout, publishing was non-blocking
+	// Check that we completed quickly (within reasonable time)
+	if ctx.publishingBlocked {
+		return fmt.Errorf("publishing was blocked when it should have been async")
+	}
 	return nil
 }
 
@@ -676,8 +804,15 @@ func (ctx *EventBusBDDTestContext) theEventbusIsStopped() error {
 }
 
 func (ctx *EventBusBDDTestContext) allSubscriptionsShouldBeCancelled() error {
-	// For BDD purposes, validate that stop was called successfully
-	// In real implementation, would check that subscriptions are inactive
+	// After stop, verify that no active subscriptions remain
+	if ctx.service != nil {
+		topics := ctx.service.Topics()
+		if len(topics) > 0 {
+			return fmt.Errorf("expected no active topics after shutdown, but found: %v", topics)
+		}
+	}
+	// Clear our local subscriptions to reflect cancelled state
+	ctx.subscriptions = make(map[string]Subscription)
 	return nil
 }
 
@@ -689,6 +824,120 @@ func (ctx *EventBusBDDTestContext) workerPoolsShouldBeShutDownGracefully() error
 func (ctx *EventBusBDDTestContext) noMemoryLeaksShouldOccur() error {
 	// For BDD purposes, validate shutdown was successful
 	return nil
+}
+
+// Event observation step implementations
+func (ctx *EventBusBDDTestContext) aMessagePublishedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeMessagePublished {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeMessagePublished, eventTypes)
+}
+
+func (ctx *EventBusBDDTestContext) aMessageReceivedEventShouldBeEmitted() error {
+	time.Sleep(500 * time.Millisecond) // Allow more time for async message processing and event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeMessageReceived {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeMessageReceived, eventTypes)
+}
+
+func (ctx *EventBusBDDTestContext) aSubscriptionCreatedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeSubscriptionCreated {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeSubscriptionCreated, eventTypes)
+}
+
+func (ctx *EventBusBDDTestContext) theEventbusModuleStarts() error {
+	// Module should already be started in the background setup
+	return nil
+}
+
+func (ctx *EventBusBDDTestContext) aConfigLoadedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeConfigLoaded {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeConfigLoaded, eventTypes)
+}
+
+func (ctx *EventBusBDDTestContext) aBusStartedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeBusStarted {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeBusStarted, eventTypes)
+}
+
+func (ctx *EventBusBDDTestContext) aBusStoppedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeBusStopped {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeBusStopped, eventTypes)
 }
 
 func (ctx *EventBusBDDTestContext) setupApplicationWithConfig() error {
@@ -815,6 +1064,16 @@ func TestEventBusModuleBDD(t *testing.T) {
 			ctx.Then(`^all subscriptions should be cancelled$`, testCtx.allSubscriptionsShouldBeCancelled)
 			ctx.Then(`^worker pools should be shut down gracefully$`, testCtx.workerPoolsShouldBeShutDownGracefully)
 			ctx.Then(`^no memory leaks should occur$`, testCtx.noMemoryLeaksShouldOccur)
+
+			// Event observation steps
+			ctx.Given(`^I have an eventbus service with event observation enabled$`, testCtx.iHaveAnEventbusServiceWithEventObservationEnabled)
+			ctx.Then(`^a message published event should be emitted$`, testCtx.aMessagePublishedEventShouldBeEmitted)
+			ctx.Then(`^a message received event should be emitted$`, testCtx.aMessageReceivedEventShouldBeEmitted)
+			ctx.Then(`^a subscription created event should be emitted$`, testCtx.aSubscriptionCreatedEventShouldBeEmitted)
+			ctx.When(`^the eventbus module starts$`, testCtx.theEventbusModuleStarts)
+			ctx.Then(`^a config loaded event should be emitted$`, testCtx.aConfigLoadedEventShouldBeEmitted)
+			ctx.Then(`^a bus started event should be emitted$`, testCtx.aBusStartedEventShouldBeEmitted)
+			ctx.Then(`^a bus stopped event should be emitted$`, testCtx.aBusStoppedEventShouldBeEmitted)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",

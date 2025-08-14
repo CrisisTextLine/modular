@@ -93,6 +93,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -135,6 +136,7 @@ type ChiMuxModule struct {
 	router        *chi.Mux
 	app           modular.TenantApplication
 	logger        modular.Logger
+	subject       modular.Subject // Added for event observation
 }
 
 // NewChiMuxModule creates a new instance of the chimux module.
@@ -218,6 +220,18 @@ func (m *ChiMuxModule) Init(app modular.Application) error {
 		return err
 	}
 
+	// Emit configuration loaded event
+	ctx := context.Background()
+	m.emitEvent(ctx, EventTypeConfigLoaded, map[string]interface{}{
+		"allowed_origins":   m.config.AllowedOrigins,
+		"allowed_methods":   m.config.AllowedMethods,
+		"allowed_headers":   m.config.AllowedHeaders,
+		"allow_credentials": m.config.AllowCredentials,
+		"max_age":           m.config.MaxAge,
+		"timeout_ms":        m.config.Timeout,
+		"base_path":         m.config.BasePath,
+	})
+
 	m.logger.Info("Chimux module initialized")
 	return nil
 }
@@ -267,6 +281,21 @@ func (m *ChiMuxModule) initRouter() error {
 
 	// Apply CORS middleware using the configuration
 	m.router.Use(m.corsMiddleware())
+
+	// Emit CORS configured event
+	m.emitEvent(context.Background(), EventTypeCorsConfigured, map[string]interface{}{
+		"allowed_origins":     m.config.AllowedOrigins,
+		"allowed_methods":     m.config.AllowedMethods,
+		"allowed_headers":     m.config.AllowedHeaders,
+		"credentials_enabled": m.config.AllowCredentials,
+	})
+
+	// Emit router created event
+	m.emitEvent(context.Background(), EventTypeRouterCreated, map[string]interface{}{
+		"base_path":    m.config.BasePath,
+		"cors_enabled": len(m.config.AllowedOrigins) > 0,
+	})
+
 	m.logger.Debug("Applied CORS middleware with config",
 		"allowedOrigins", m.config.AllowedOrigins,
 		"allowedMethods", m.config.AllowedMethods,
@@ -319,11 +348,19 @@ func (m *ChiMuxModule) setupMiddleware(app modular.Application) error {
 //  1. Loads configurations for all registered tenants
 //  2. Applies tenant-specific CORS and routing settings
 //  3. Prepares the router for incoming requests
-func (m *ChiMuxModule) Start(context.Context) error {
+func (m *ChiMuxModule) Start(ctx context.Context) error {
 	m.logger.Info("Starting chimux module")
 
 	// Load tenant configurations now that it's safe to do so
 	m.loadTenantConfigs()
+
+	// Emit module started event
+	m.emitEvent(ctx, EventTypeModuleStarted, map[string]interface{}{
+		"tenant_count":     len(m.tenantConfigs),
+		"base_path":        m.config.BasePath,
+		"cors_enabled":     len(m.config.AllowedOrigins) > 0,
+		"middleware_count": len(m.router.Middlewares()),
+	})
 
 	return nil
 }
@@ -332,8 +369,15 @@ func (m *ChiMuxModule) Start(context.Context) error {
 // This method gracefully shuts down the router and cleans up resources.
 // Note that the HTTP server itself is typically managed by a separate
 // HTTP server module.
-func (m *ChiMuxModule) Stop(context.Context) error {
+func (m *ChiMuxModule) Stop(ctx context.Context) error {
 	m.logger.Info("Stopping chimux module")
+
+	// Emit module stopped event
+	m.emitEvent(ctx, EventTypeModuleStopped, map[string]interface{}{
+		"tenant_count": len(m.tenantConfigs),
+		"routes_count": len(m.router.Routes()),
+	})
+
 	return nil
 }
 
@@ -461,21 +505,45 @@ func (m *ChiMuxModule) ChiRouter() chi.Router {
 // Get registers a GET handler for the pattern
 func (m *ChiMuxModule) Get(pattern string, handler http.HandlerFunc) {
 	m.router.Get(pattern, handler)
+
+	// Emit route registered event
+	m.emitEvent(context.Background(), EventTypeRouteRegistered, map[string]interface{}{
+		"method":  "GET",
+		"pattern": pattern,
+	})
 }
 
 // Post registers a POST handler for the pattern
 func (m *ChiMuxModule) Post(pattern string, handler http.HandlerFunc) {
 	m.router.Post(pattern, handler)
+
+	// Emit route registered event
+	m.emitEvent(context.Background(), EventTypeRouteRegistered, map[string]interface{}{
+		"method":  "POST",
+		"pattern": pattern,
+	})
 }
 
 // Put registers a PUT handler for the pattern
 func (m *ChiMuxModule) Put(pattern string, handler http.HandlerFunc) {
 	m.router.Put(pattern, handler)
+
+	// Emit route registered event
+	m.emitEvent(context.Background(), EventTypeRouteRegistered, map[string]interface{}{
+		"method":  "PUT",
+		"pattern": pattern,
+	})
 }
 
 // Delete registers a DELETE handler for the pattern
 func (m *ChiMuxModule) Delete(pattern string, handler http.HandlerFunc) {
 	m.router.Delete(pattern, handler)
+
+	// Emit route registered event
+	m.emitEvent(context.Background(), EventTypeRouteRegistered, map[string]interface{}{
+		"method":  "DELETE",
+		"pattern": pattern,
+	})
 }
 
 // Patch registers a PATCH handler for the pattern
@@ -501,6 +569,12 @@ func (m *ChiMuxModule) Mount(pattern string, handler http.Handler) {
 // Use appends middleware to the chain
 func (m *ChiMuxModule) Use(middlewares ...func(http.Handler) http.Handler) {
 	m.router.Use(middlewares...)
+
+	// Emit middleware added event
+	m.emitEvent(context.Background(), EventTypeMiddlewareAdded, map[string]interface{}{
+		"middleware_count": len(middlewares),
+		"total_middleware": len(m.router.Middlewares()),
+	})
 }
 
 // Handle registers a handler for a specific pattern
@@ -640,4 +714,35 @@ func (m *ChiMuxModule) corsMiddleware() func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// RegisterObservers implements the ObservableModule interface.
+// This allows the chimux module to register as an observer for events it's interested in.
+func (m *ChiMuxModule) RegisterObservers(subject modular.Subject) error {
+	m.subject = subject
+	return nil
+}
+
+// EmitEvent implements the ObservableModule interface.
+// This allows the chimux module to emit events that other modules or observers can receive.
+func (m *ChiMuxModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
+	if m.subject == nil {
+		return ErrNoSubjectForEventEmission
+	}
+	if err := m.subject.NotifyObservers(ctx, event); err != nil {
+		return fmt.Errorf("failed to notify observers: %w", err)
+	}
+	return nil
+}
+
+// emitEvent is a helper method to create and emit CloudEvents for the chimux module.
+// This centralizes the event creation logic and ensures consistent event formatting.
+func (m *ChiMuxModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+	event := modular.NewCloudEvent(eventType, "chimux-service", data, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			fmt.Printf("Failed to emit chimux event %s: %v\n", eventType, emitErr)
+		}
+	}()
 }

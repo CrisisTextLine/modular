@@ -11,25 +11,55 @@ import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/cucumber/godog"
 	"github.com/go-chi/chi/v5"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // ChiMux BDD Test Context
 type ChiMuxBDDTestContext struct {
-	app            modular.Application
-	module         *ChiMuxModule
-	routerService  *ChiMuxModule
-	chiService     *ChiMuxModule
-	config         *ChiMuxConfig
-	lastError      error
-	testServer     *httptest.Server
-	routes         map[string]string
+	app                 modular.Application
+	module              *ChiMuxModule
+	routerService       *ChiMuxModule
+	chiService          *ChiMuxModule
+	config              *ChiMuxConfig
+	lastError           error
+	testServer          *httptest.Server
+	routes              map[string]string
 	middlewareProviders []MiddlewareProvider
-	routeGroups    []string
+	routeGroups         []string
+	eventObserver       *testEventObserver
+}
+
+// Test event observer for capturing emitted events
+type testEventObserver struct {
+	events []cloudevents.Event
+}
+
+func newTestEventObserver() *testEventObserver {
+	return &testEventObserver{
+		events: make([]cloudevents.Event, 0),
+	}
+}
+
+func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	t.events = append(t.events, event.Clone())
+	return nil
+}
+
+func (t *testEventObserver) ObserverID() string {
+	return "test-observer"
+}
+
+func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	return t.events
+}
+
+func (t *testEventObserver) ClearEvents() {
+	t.events = make([]cloudevents.Event, 0)
 }
 
 // Test middleware provider
 type testMiddlewareProvider struct {
-	name string
+	name  string
 	order int
 }
 
@@ -58,14 +88,15 @@ func (ctx *ChiMuxBDDTestContext) resetContext() {
 	ctx.routes = make(map[string]string)
 	ctx.middlewareProviders = []MiddlewareProvider{}
 	ctx.routeGroups = []string{}
+	ctx.eventObserver = nil
 }
 
 func (ctx *ChiMuxBDDTestContext) iHaveAModularApplicationWithChimuxModuleConfigured() error {
 	ctx.resetContext()
-	
+
 	// Create application
 	logger := &testLogger{}
-	
+
 	// Create basic chimux configuration for testing
 	ctx.config = &ChiMuxConfig{
 		AllowedOrigins:   []string{"*"},
@@ -76,13 +107,13 @@ func (ctx *ChiMuxBDDTestContext) iHaveAModularApplicationWithChimuxModuleConfigu
 		Timeout:          60 * time.Second,
 		BasePath:         "",
 	}
-	
+
 	// Create provider with the chimux config
 	chimuxConfigProvider := modular.NewStdConfigProvider(ctx.config)
-	
+
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	
+
 	// Create mock tenant application since chimux requires tenant app
 	mockTenantApp := &mockTenantApplication{
 		Application: modular.NewStdApplication(mainConfigProvider, logger),
@@ -90,19 +121,19 @@ func (ctx *ChiMuxBDDTestContext) iHaveAModularApplicationWithChimuxModuleConfigu
 			configs: make(map[modular.TenantID]map[string]modular.ConfigProvider),
 		},
 	}
-	
+
 	// Register the chimux config section first
 	mockTenantApp.RegisterConfigSection("chimux", chimuxConfigProvider)
-	
+
 	// Create and register chimux module
 	ctx.module = NewChiMuxModule().(*ChiMuxModule)
 	mockTenantApp.RegisterModule(ctx.module)
-	
+
 	// Initialize
 	if err := mockTenantApp.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
 	}
-	
+
 	ctx.app = mockTenantApp
 	return nil
 }
@@ -117,7 +148,7 @@ func (ctx *ChiMuxBDDTestContext) theRouterServiceShouldBeAvailable() error {
 	if err := ctx.app.GetService("router", &routerService); err != nil {
 		return fmt.Errorf("failed to get router service: %v", err)
 	}
-	
+
 	ctx.routerService = routerService
 	return nil
 }
@@ -127,7 +158,7 @@ func (ctx *ChiMuxBDDTestContext) theChiRouterServiceShouldBeAvailable() error {
 	if err := ctx.app.GetService("chimux.router", &chiService); err != nil {
 		return fmt.Errorf("failed to get chimux router service: %v", err)
 	}
-	
+
 	ctx.chiService = chiService
 	return nil
 }
@@ -148,7 +179,7 @@ func (ctx *ChiMuxBDDTestContext) iRegisterAGETRouteWithHandler(path string) erro
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("GET " + path))
 	})
-	
+
 	ctx.routerService.Get(path, handler)
 	ctx.routes["GET "+path] = "registered"
 	return nil
@@ -159,7 +190,7 @@ func (ctx *ChiMuxBDDTestContext) iRegisterAPOSTRouteWithHandler(path string) err
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("POST " + path))
 	})
-	
+
 	ctx.routerService.Post(path, handler)
 	ctx.routes["POST "+path] = "registered"
 	return nil
@@ -188,13 +219,13 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsInitializedWithCORS() error {
 	// Use the updated CORS configuration that was set in previous step
 	// Create application
 	logger := &testLogger{}
-	
+
 	// Create provider with the updated chimux config
 	chimuxConfigProvider := modular.NewStdConfigProvider(ctx.config)
-	
+
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	
+
 	// Create mock tenant application since chimux requires tenant app
 	mockTenantApp := &mockTenantApplication{
 		Application: modular.NewStdApplication(mainConfigProvider, logger),
@@ -202,19 +233,19 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsInitializedWithCORS() error {
 			configs: make(map[modular.TenantID]map[string]modular.ConfigProvider),
 		},
 	}
-	
+
 	// Register the chimux config section first
 	mockTenantApp.RegisterConfigSection("chimux", chimuxConfigProvider)
-	
+
 	// Create and register chimux module
 	ctx.module = NewChiMuxModule().(*ChiMuxModule)
 	mockTenantApp.RegisterModule(ctx.module)
-	
+
 	// Initialize
 	if err := mockTenantApp.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
 	}
-	
+
 	ctx.app = mockTenantApp
 	return nil
 }
@@ -237,14 +268,24 @@ func (ctx *ChiMuxBDDTestContext) iHaveMiddlewareProviderServicesAvailable() erro
 	// Create test middleware providers
 	provider1 := &testMiddlewareProvider{name: "provider1", order: 1}
 	provider2 := &testMiddlewareProvider{name: "provider2", order: 2}
-	
+
 	ctx.middlewareProviders = []MiddlewareProvider{provider1, provider2}
 	return nil
 }
 
 func (ctx *ChiMuxBDDTestContext) theChimuxModuleDiscoversMiddlewareProviders() error {
 	// In a real scenario, the module would discover services implementing MiddlewareProvider
-	// For testing purposes, we simulate this discovery
+	// For testing purposes, we simulate this discovery by adding test middleware
+	if ctx.routerService != nil {
+		// Add test middleware to trigger middleware events
+		testMiddleware := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Test-Middleware", "test")
+				next.ServeHTTP(w, r)
+			})
+		}
+		ctx.routerService.Use(testMiddleware)
+	}
 	return nil
 }
 
@@ -280,13 +321,13 @@ func (ctx *ChiMuxBDDTestContext) iRegisterRoutesWithTheConfiguredBasePath() erro
 	if ctx.routerService == nil {
 		// Initialize application with the base path configuration
 		logger := &testLogger{}
-		
-		// Create provider with the updated chimux config 
+
+		// Create provider with the updated chimux config
 		chimuxConfigProvider := modular.NewStdConfigProvider(ctx.config)
-		
+
 		// Create app with empty main config
 		mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-		
+
 		// Create mock tenant application since chimux requires tenant app
 		mockTenantApp := &mockTenantApplication{
 			Application: modular.NewStdApplication(mainConfigProvider, logger),
@@ -294,27 +335,27 @@ func (ctx *ChiMuxBDDTestContext) iRegisterRoutesWithTheConfiguredBasePath() erro
 				configs: make(map[modular.TenantID]map[string]modular.ConfigProvider),
 			},
 		}
-		
+
 		// Register the chimux config section first
 		mockTenantApp.RegisterConfigSection("chimux", chimuxConfigProvider)
-		
+
 		// Create and register chimux module
 		ctx.module = NewChiMuxModule().(*ChiMuxModule)
 		mockTenantApp.RegisterModule(ctx.module)
-		
+
 		// Initialize
 		if err := mockTenantApp.Init(); err != nil {
 			return fmt.Errorf("failed to initialize app: %v", err)
 		}
-		
+
 		ctx.app = mockTenantApp
-		
+
 		// Get router service
 		if err := ctx.theRouterServiceShouldBeAvailable(); err != nil {
 			return err
 		}
 	}
-	
+
 	// Routes would be registered normally, but the module should prefix them
 	ctx.routerService.Get("/users", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -406,17 +447,17 @@ func (ctx *ChiMuxBDDTestContext) iRegisterRoutesForDifferentHTTPMethods() error 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	
+
 	ctx.routerService.Get("/test", handler)
 	ctx.routerService.Post("/test", handler)
 	ctx.routerService.Put("/test", handler)
 	ctx.routerService.Delete("/test", handler)
-	
+
 	ctx.routes["GET /test"] = "registered"
 	ctx.routes["POST /test"] = "registered"
 	ctx.routes["PUT /test"] = "registered"
 	ctx.routes["DELETE /test"] = "registered"
-	
+
 	return nil
 }
 
@@ -456,13 +497,13 @@ func (ctx *ChiMuxBDDTestContext) iRegisterParameterizedRoutes() error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	
+
 	ctx.routerService.Get("/users/{id}", handler)
 	ctx.routerService.Get("/posts/*", handler)
-	
+
 	ctx.routes["GET /users/{id}"] = "parameterized"
 	ctx.routes["GET /posts/*"] = "wildcard"
-	
+
 	return nil
 }
 
@@ -503,76 +544,344 @@ func (ctx *ChiMuxBDDTestContext) requestProcessingShouldFollowTheMiddlewareChain
 	return nil
 }
 
+// Event observation step implementations
+func (ctx *ChiMuxBDDTestContext) iHaveAChimuxModuleWithEventObservationEnabled() error {
+	ctx.resetContext()
+
+	// Create application with observable capabilities
+	logger := &testLogger{}
+
+	// Create basic chimux configuration for testing
+	ctx.config = &ChiMuxConfig{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Origin", "Accept", "Content-Type", "Authorization"},
+		AllowCredentials: false,
+		MaxAge:           300,
+		Timeout:          60 * time.Second,
+		BasePath:         "",
+	}
+
+	// Create provider with the chimux config
+	chimuxConfigProvider := modular.NewStdConfigProvider(ctx.config)
+
+	// Create app with empty main config - chimux module requires tenant app
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+
+	// Create mock tenant application since chimux requires tenant app
+	mockTenantApp := &mockTenantApplication{
+		Application: modular.NewObservableApplication(mainConfigProvider, logger),
+		tenantService: &mockTenantService{
+			configs: make(map[modular.TenantID]map[string]modular.ConfigProvider),
+		},
+	}
+
+	ctx.app = mockTenantApp
+
+	// Create test event observer
+	ctx.eventObserver = newTestEventObserver()
+
+	// Register the chimux config section first
+	ctx.app.RegisterConfigSection("chimux", chimuxConfigProvider)
+
+	// Create and register chimux module
+	ctx.module = NewChiMuxModule().(*ChiMuxModule)
+	ctx.app.RegisterModule(ctx.module)
+
+	// Register observers BEFORE initialization
+	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+		return fmt.Errorf("failed to register module observers: %w", err)
+	}
+
+	// Register our test observer to capture events
+	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
+
+	// Initialize the application to trigger lifecycle events
+	if err := ctx.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize application: %w", err)
+	}
+
+	// Start the application to trigger start events
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start application: %w", err)
+	}
+
+	return nil
+}
+
+func (ctx *ChiMuxBDDTestContext) aConfigLoadedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeConfigLoaded {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeConfigLoaded, eventTypes)
+}
+
+func (ctx *ChiMuxBDDTestContext) aRouterCreatedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeRouterCreated {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRouterCreated, eventTypes)
+}
+
+func (ctx *ChiMuxBDDTestContext) aModuleStartedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeModuleStarted {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeModuleStarted, eventTypes)
+}
+
+func (ctx *ChiMuxBDDTestContext) routeRegisteredEventsShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	routeRegisteredCount := 0
+	for _, event := range events {
+		if event.Type() == EventTypeRouteRegistered {
+			routeRegisteredCount++
+		}
+	}
+
+	if routeRegisteredCount < 2 { // We registered 2 routes
+		eventTypes := make([]string, len(events))
+		for i, event := range events {
+			eventTypes[i] = event.Type()
+		}
+		return fmt.Errorf("expected at least 2 route registered events, found %d. Captured events: %v", routeRegisteredCount, eventTypes)
+	}
+
+	return nil
+}
+
+func (ctx *ChiMuxBDDTestContext) theEventsShouldContainTheCorrectRouteInformation() error {
+	events := ctx.eventObserver.GetEvents()
+	routePaths := []string{}
+	
+	for _, event := range events {
+		if event.Type() == EventTypeRouteRegistered {
+			// Extract data from CloudEvent
+			var eventData map[string]interface{}
+			if err := event.DataAs(&eventData); err == nil {
+				if pattern, ok := eventData["pattern"].(string); ok {
+					routePaths = append(routePaths, pattern)
+				}
+			}
+		}
+	}
+
+	// Debug: print all captured event types and data
+	fmt.Printf("DEBUG: Found %d route registered events with paths: %v\n", len(routePaths), routePaths)
+
+	// Check that we have the routes we registered
+	expectedPaths := []string{"/test", "/api/data"}
+	for _, expectedPath := range expectedPaths {
+		found := false
+		for _, actualPath := range routePaths {
+			if actualPath == expectedPath {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("expected route path %s not found in events. Found paths: %v", expectedPath, routePaths)
+		}
+	}
+
+	return nil
+}
+
+func (ctx *ChiMuxBDDTestContext) aCORSConfiguredEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeCorsConfigured {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeCorsConfigured, eventTypes)
+}
+
+func (ctx *ChiMuxBDDTestContext) aCORSEnabledEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeCorsEnabled {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeCorsEnabled, eventTypes)
+}
+
+func (ctx *ChiMuxBDDTestContext) middlewareAddedEventsShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeMiddlewareAdded {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeMiddlewareAdded, eventTypes)
+}
+
+func (ctx *ChiMuxBDDTestContext) theEventsShouldContainMiddlewareInformation() error {
+	events := ctx.eventObserver.GetEvents()
+	
+	for _, event := range events {
+		if event.Type() == EventTypeMiddlewareAdded {
+			// Extract data from CloudEvent
+			var eventData map[string]interface{}
+			if err := event.DataAs(&eventData); err == nil {
+				// Check that the event has middleware count information
+				if _, ok := eventData["middleware_count"]; ok {
+					return nil
+				}
+				if _, ok := eventData["total_middleware"]; ok {
+					return nil
+				}
+			}
+		}
+	}
+
+	return fmt.Errorf("middleware added events should contain middleware information")
+}
+
 // Test runner function
 func TestChiMuxModuleBDD(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
 			testCtx := &ChiMuxBDDTestContext{}
-			
+
 			// Background
 			ctx.Step(`^I have a modular application with chimux module configured$`, testCtx.iHaveAModularApplicationWithChimuxModuleConfigured)
-			
+
 			// Initialization steps
 			ctx.Step(`^the chimux module is initialized$`, testCtx.theChimuxModuleIsInitialized)
 			ctx.Step(`^the router service should be available$`, testCtx.theRouterServiceShouldBeAvailable)
 			ctx.Step(`^the Chi router service should be available$`, testCtx.theChiRouterServiceShouldBeAvailable)
 			ctx.Step(`^the basic router service should be available$`, testCtx.theBasicRouterServiceShouldBeAvailable)
-			
+
 			// Service availability
 			ctx.Step(`^I have a router service available$`, testCtx.iHaveARouterServiceAvailable)
 			ctx.Step(`^I have a basic router service available$`, testCtx.iHaveABasicRouterServiceAvailable)
 			ctx.Step(`^I have access to the Chi router service$`, testCtx.iHaveAccessToTheChiRouterService)
-			
+
 			// Route registration
 			ctx.Step(`^I register a GET route "([^"]*)" with handler$`, testCtx.iRegisterAGETRouteWithHandler)
 			ctx.Step(`^I register a POST route "([^"]*)" with handler$`, testCtx.iRegisterAPOSTRouteWithHandler)
 			ctx.Step(`^the routes should be registered successfully$`, testCtx.theRoutesShouldBeRegisteredSuccessfully)
-			
+
 			// CORS configuration
 			ctx.Step(`^I have a chimux configuration with CORS settings$`, testCtx.iHaveAChimuxConfigurationWithCORSSettings)
 			ctx.Step(`^the chimux module is initialized with CORS$`, testCtx.theChimuxModuleIsInitializedWithCORS)
 			ctx.Step(`^the CORS middleware should be configured$`, testCtx.theCORSMiddlewareShouldBeConfigured)
 			ctx.Step(`^allowed origins should include the configured values$`, testCtx.allowedOriginsShouldIncludeTheConfiguredValues)
-			
+
 			// Middleware
 			ctx.Step(`^I have middleware provider services available$`, testCtx.iHaveMiddlewareProviderServicesAvailable)
 			ctx.Step(`^the chimux module discovers middleware providers$`, testCtx.theChimuxModuleDiscoversMiddlewareProviders)
 			ctx.Step(`^the middleware should be applied to the router$`, testCtx.theMiddlewareShouldBeAppliedToTheRouter)
 			ctx.Step(`^requests should pass through the middleware chain$`, testCtx.requestsShouldPassThroughTheMiddlewareChain)
-			
+
 			// Base path
 			ctx.Step(`^I have a chimux configuration with base path "([^"]*)"$`, testCtx.iHaveAChimuxConfigurationWithBasePath)
 			ctx.Step(`^I register routes with the configured base path$`, testCtx.iRegisterRoutesWithTheConfiguredBasePath)
 			ctx.Step(`^all routes should be prefixed with the base path$`, testCtx.allRoutesShouldBePrefixedWithTheBasePath)
-			
+
 			// Timeout
 			ctx.Step(`^I have a chimux configuration with timeout settings$`, testCtx.iHaveAChimuxConfigurationWithTimeoutSettings)
 			ctx.Step(`^the chimux module applies timeout configuration$`, testCtx.theChimuxModuleAppliesTimeoutConfiguration)
 			ctx.Step(`^the timeout middleware should be configured$`, testCtx.theTimeoutMiddlewareShouldBeConfigured)
 			ctx.Step(`^requests should respect the timeout settings$`, testCtx.requestsShouldRespectTheTimeoutSettings)
-			
+
 			// Chi-specific features
 			ctx.Step(`^I use Chi-specific routing features$`, testCtx.iUseChiSpecificRoutingFeatures)
 			ctx.Step(`^I should be able to create route groups$`, testCtx.iShouldBeAbleToCreateRouteGroups)
 			ctx.Step(`^I should be able to mount sub-routers$`, testCtx.iShouldBeAbleToMountSubRouters)
-			
+
 			// HTTP methods
 			ctx.Step(`^I register routes for different HTTP methods$`, testCtx.iRegisterRoutesForDifferentHTTPMethods)
 			ctx.Step(`^GET routes should be handled correctly$`, testCtx.gETRoutesShouldBeHandledCorrectly)
 			ctx.Step(`^POST routes should be handled correctly$`, testCtx.pOSTRoutesShouldBeHandledCorrectly)
 			ctx.Step(`^PUT routes should be handled correctly$`, testCtx.pUTRoutesShouldBeHandledCorrectly)
 			ctx.Step(`^DELETE routes should be handled correctly$`, testCtx.dELETERoutesShouldBeHandledCorrectly)
-			
+
 			// Route parameters
 			ctx.Step(`^I register parameterized routes$`, testCtx.iRegisterParameterizedRoutes)
 			ctx.Step(`^route parameters should be extracted correctly$`, testCtx.routeParametersShouldBeExtractedCorrectly)
 			ctx.Step(`^wildcard routes should match appropriately$`, testCtx.wildcardRoutesShouldMatchAppropriately)
-			
+
 			// Middleware ordering
 			ctx.Step(`^I have multiple middleware providers$`, testCtx.iHaveMultipleMiddlewareProviders)
 			ctx.Step(`^middleware is applied to the router$`, testCtx.middlewareIsAppliedToTheRouter)
 			ctx.Step(`^middleware should be applied in the correct order$`, testCtx.middlewareShouldBeAppliedInTheCorrectOrder)
 			ctx.Step(`^request processing should follow the middleware chain$`, testCtx.requestProcessingShouldFollowTheMiddlewareChain)
+
+			// Event observation steps
+			ctx.Step(`^I have a chimux module with event observation enabled$`, testCtx.iHaveAChimuxModuleWithEventObservationEnabled)
+			ctx.Step(`^a config loaded event should be emitted$`, testCtx.aConfigLoadedEventShouldBeEmitted)
+			ctx.Step(`^a router created event should be emitted$`, testCtx.aRouterCreatedEventShouldBeEmitted)
+			ctx.Step(`^a module started event should be emitted$`, testCtx.aModuleStartedEventShouldBeEmitted)
+			ctx.Step(`^route registered events should be emitted$`, testCtx.routeRegisteredEventsShouldBeEmitted)
+			ctx.Step(`^the events should contain the correct route information$`, testCtx.theEventsShouldContainTheCorrectRouteInformation)
+			ctx.Step(`^a CORS configured event should be emitted$`, testCtx.aCORSConfiguredEventShouldBeEmitted)
+			ctx.Step(`^a CORS enabled event should be emitted$`, testCtx.aCORSEnabledEventShouldBeEmitted)
+			ctx.Step(`^middleware added events should be emitted$`, testCtx.middlewareAddedEventsShouldBeEmitted)
+			ctx.Step(`^the events should contain middleware information$`, testCtx.theEventsShouldContainMiddlewareInformation)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",
@@ -590,6 +899,34 @@ func TestChiMuxModuleBDD(t *testing.T) {
 type mockTenantApplication struct {
 	modular.Application
 	tenantService *mockTenantService
+}
+
+func (mta *mockTenantApplication) RegisterObserver(observer modular.Observer, eventTypes ...string) error {
+	if subject, ok := mta.Application.(modular.Subject); ok {
+		return subject.RegisterObserver(observer, eventTypes...)
+	}
+	return fmt.Errorf("underlying application does not support observers")
+}
+
+func (mta *mockTenantApplication) UnregisterObserver(observer modular.Observer) error {
+	if subject, ok := mta.Application.(modular.Subject); ok {
+		return subject.UnregisterObserver(observer)
+	}
+	return fmt.Errorf("underlying application does not support observers")
+}
+
+func (mta *mockTenantApplication) NotifyObservers(ctx context.Context, event cloudevents.Event) error {
+	if subject, ok := mta.Application.(modular.Subject); ok {
+		return subject.NotifyObservers(ctx, event)
+	}
+	return fmt.Errorf("underlying application does not support observers")
+}
+
+func (mta *mockTenantApplication) GetObservers() []modular.ObserverInfo {
+	if subject, ok := mta.Application.(modular.Subject); ok {
+		return subject.GetObservers()
+	}
+	return []modular.ObserverInfo{}
 }
 
 type mockTenantService struct {

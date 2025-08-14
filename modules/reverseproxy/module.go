@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/gobwas/glob"
 )
 
@@ -75,6 +76,9 @@ type ReverseProxyModule struct {
 
 	// Dry run handling
 	dryRunHandler *DryRunHandler
+
+	// Event observation
+	subject modular.Subject
 }
 
 // Compile-time assertions to ensure interface compliance
@@ -338,6 +342,16 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 		app.Logger().Info("Circuit breakers initialized", "backends", len(m.circuitBreakers))
 	}
 
+	// Emit config loaded event
+	m.emitEvent(context.Background(), EventTypeConfigLoaded, map[string]interface{}{
+		"backend_count":            len(m.config.BackendServices),
+		"composite_routes_count":   len(m.config.CompositeRoutes),
+		"circuit_breakers_enabled": len(m.circuitBreakers) > 0,
+		"metrics_enabled":          m.enableMetrics,
+		"cache_enabled":            m.config.CacheEnabled,
+		"request_timeout":          m.config.RequestTimeout.String(),
+	})
+
 	return nil
 }
 
@@ -510,6 +524,14 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to start health checker: %w", err)
 		}
 	}
+
+	// Emit module started event
+	m.emitEvent(ctx, EventTypeModuleStarted, map[string]interface{}{
+		"backend_count":          len(m.config.BackendServices),
+		"composite_routes_count": len(m.config.CompositeRoutes),
+		"health_checker_enabled": m.healthChecker != nil,
+		"metrics_enabled":        m.enableMetrics,
+	})
 
 	return nil
 }
@@ -2678,4 +2700,35 @@ func isEmptyComparisonResult(result ComparisonResult) bool {
 	// Default case: If none of the above conditions matched, we conservatively assume the result is empty.
 	// This ensures that only explicit differences or matches are treated as non-empty; ambiguous or default-initialized results are considered empty.
 	return true
+}
+
+// RegisterObservers implements the ObservableModule interface.
+// This allows the reverseproxy module to register as an observer for events it's interested in.
+func (m *ReverseProxyModule) RegisterObservers(subject modular.Subject) error {
+	m.subject = subject
+	return nil
+}
+
+// EmitEvent implements the ObservableModule interface.
+// This allows the reverseproxy module to emit events that other modules or observers can receive.
+func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
+	if m.subject == nil {
+		return ErrNoSubjectForEventEmission
+	}
+	if err := m.subject.NotifyObservers(ctx, event); err != nil {
+		return fmt.Errorf("failed to notify observers: %w", err)
+	}
+	return nil
+}
+
+// emitEvent is a helper method to create and emit CloudEvents for the reverseproxy module.
+// This centralizes the event creation logic and ensures consistent event formatting.
+func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+	event := modular.NewCloudEvent(eventType, "reverseproxy-service", data, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
+		}
+	}()
 }

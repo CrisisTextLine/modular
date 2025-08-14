@@ -10,22 +10,53 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/cucumber/godog"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/cucumber/godog"
 )
 
 // EventLogger BDD Test Context
 type EventLoggerBDDTestContext struct {
-	app          modular.Application
-	module       *EventLoggerModule
-	service      *EventLoggerModule
-	config       *EventLoggerConfig
-	lastError    error
-	loggedEvents []cloudevents.Event
-	tempDir      string
-	outputLogs   []string
-	testConsole  *testConsoleOutput
-	testFile     *testFileOutput
+	app           modular.Application
+	module        *EventLoggerModule
+	service       *EventLoggerModule
+	config        *EventLoggerConfig
+	lastError     error
+	loggedEvents  []cloudevents.Event
+	tempDir       string
+	outputLogs    []string
+	testConsole   *testConsoleOutput
+	testFile      *testFileOutput
+	eventObserver *testEventObserver
+}
+
+// Test event observer for capturing emitted events
+type testEventObserver struct {
+	events []cloudevents.Event
+}
+
+func newTestEventObserver() *testEventObserver {
+	return &testEventObserver{
+		events: make([]cloudevents.Event, 0),
+	}
+}
+
+func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	t.events = append(t.events, event.Clone())
+	return nil
+}
+
+func (t *testEventObserver) ObserverID() string {
+	return "test-observer-eventlogger"
+}
+
+func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	events := make([]cloudevents.Event, len(t.events))
+	copy(events, t.events)
+	return events
+}
+
+func (t *testEventObserver) ClearEvents() {
+	t.events = make([]cloudevents.Event, 0)
 }
 
 func (ctx *EventLoggerBDDTestContext) resetContext() {
@@ -38,22 +69,23 @@ func (ctx *EventLoggerBDDTestContext) resetContext() {
 	ctx.config = nil
 	ctx.lastError = nil
 	ctx.loggedEvents = nil
+	ctx.tempDir = ""
 	ctx.outputLogs = nil
 	ctx.testConsole = nil
 	ctx.testFile = nil
-	ctx.tempDir = ""
+	ctx.eventObserver = nil
 }
 
 func (ctx *EventLoggerBDDTestContext) iHaveAModularApplicationWithEventLoggerModuleConfigured() error {
 	ctx.resetContext()
-	
+
 	// Create temp directory for file outputs
 	var err error
 	ctx.tempDir, err = os.MkdirTemp("", "eventlogger-bdd-test")
 	if err != nil {
 		return err
 	}
-	
+
 	// Create basic event logger configuration for testing
 	ctx.config = &EventLoggerConfig{
 		Enabled:           true,
@@ -75,30 +107,30 @@ func (ctx *EventLoggerBDDTestContext) iHaveAModularApplicationWithEventLoggerMod
 			},
 		},
 	}
-	
+
 	// Create application
 	logger := &testLogger{}
-	
+
 	// Save and clear ConfigFeeders to prevent environment interference during tests
 	originalFeeders := modular.ConfigFeeders
 	modular.ConfigFeeders = []modular.Feeder{}
 	defer func() {
 		modular.ConfigFeeders = originalFeeders
 	}()
-	
+
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
-	
+
 	// Create and register event logger module
 	ctx.module = NewModule().(*EventLoggerModule)
-	
+
 	// Register the eventlogger config section
 	eventLoggerConfigProvider := modular.NewStdConfigProvider(ctx.config)
 	ctx.app.RegisterConfigSection("eventlogger", eventLoggerConfigProvider)
-	
+
 	// Register the module
 	ctx.app.RegisterModule(ctx.module)
-	
+
 	return nil
 }
 
@@ -128,7 +160,7 @@ func (ctx *EventLoggerBDDTestContext) theModuleShouldRegisterAsAnObserver() erro
 	if err != nil {
 		return err
 	}
-	
+
 	// Verify observer is registered by checking if module is in started state
 	if !ctx.service.started {
 		return fmt.Errorf("module not started")
@@ -141,7 +173,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithConsoleOutputConfigu
 	if err != nil {
 		return err
 	}
-	
+
 	// Update config to use test console
 	ctx.config.OutputTargets = []OutputTargetConfig{
 		{
@@ -154,23 +186,23 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithConsoleOutputConfigu
 			},
 		},
 	}
-	
+
 	// Initialize and start the module
 	err = ctx.theEventLoggerModuleIsInitialized()
 	if err != nil {
 		return err
 	}
-	
+
 	err = ctx.theEventLoggerServiceShouldBeAvailable()
 	if err != nil {
 		return err
 	}
-	
+
 	err = ctx.app.Start()
 	if err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -178,7 +210,7 @@ func (ctx *EventLoggerBDDTestContext) iEmitATestEventWithTypeAndData(eventType, 
 	if ctx.service == nil {
 		return fmt.Errorf("service not available")
 	}
-	
+
 	// Create CloudEvent
 	event := cloudevents.NewEvent()
 	event.SetID("test-id")
@@ -186,17 +218,17 @@ func (ctx *EventLoggerBDDTestContext) iEmitATestEventWithTypeAndData(eventType, 
 	event.SetSource("test-source")
 	event.SetData(cloudevents.ApplicationJSON, data)
 	event.SetTime(time.Now())
-	
+
 	// Emit event through the observer
 	err := ctx.service.OnEvent(context.Background(), event)
 	if err != nil {
 		ctx.lastError = err
 		return err
 	}
-	
+
 	// Wait a bit for async processing
 	time.Sleep(100 * time.Millisecond)
-	
+
 	return nil
 }
 
@@ -220,7 +252,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFileOutputConfigured
 	if err != nil {
 		return err
 	}
-	
+
 	// Update config to use file output
 	logFile := filepath.Join(ctx.tempDir, "test.log")
 	ctx.config.OutputTargets = []OutputTargetConfig{
@@ -236,22 +268,22 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFileOutputConfigured
 			},
 		},
 	}
-	
+
 	// Initialize and start the module
 	err = ctx.theEventLoggerModuleIsInitialized()
 	if err != nil {
 		return err
 	}
-	
+
 	err = ctx.theEventLoggerServiceShouldBeAvailable()
 	if err != nil {
 		return err
 	}
-	
+
 	// HACK: Manually set the config to work around instance-aware provider issue
 	// This ensures the file target configuration is actually used
 	ctx.service.config = ctx.config
-	
+
 	// Re-initialize output targets with the correct config
 	ctx.service.outputs = make([]OutputTarget, 0, len(ctx.config.OutputTargets))
 	for i, targetConfig := range ctx.config.OutputTargets {
@@ -261,12 +293,12 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFileOutputConfigured
 		}
 		ctx.service.outputs = append(ctx.service.outputs, output)
 	}
-	
+
 	err = ctx.app.Start()
 	if err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -279,26 +311,26 @@ func (ctx *EventLoggerBDDTestContext) iEmitMultipleEventsWithDifferentTypes() er
 		{"order.placed", "order-data"},
 		{"payment.processed", "payment-data"},
 	}
-	
+
 	for _, evt := range events {
 		err := ctx.iEmitATestEventWithTypeAndData(evt.eventType, evt.data)
 		if err != nil {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
 func (ctx *EventLoggerBDDTestContext) allEventsShouldBeLoggedToTheFile() error {
 	// Wait for events to be flushed
 	time.Sleep(200 * time.Millisecond)
-	
+
 	logFile := filepath.Join(ctx.tempDir, "test.log")
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
 		return fmt.Errorf("log file not created")
 	}
-	
+
 	return nil
 }
 
@@ -308,12 +340,12 @@ func (ctx *EventLoggerBDDTestContext) theFileShouldContainStructuredLogEntries()
 	if err != nil {
 		return err
 	}
-	
+
 	// Verify file contains some content (basic check)
 	if len(content) == 0 {
 		return fmt.Errorf("log file is empty")
 	}
-	
+
 	return nil
 }
 
@@ -322,20 +354,20 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithEventTypeFiltersConf
 	if err != nil {
 		return err
 	}
-	
+
 	// Update config with event type filters
 	ctx.config.EventTypeFilters = []string{"user.created", "order.placed"}
-	
+
 	err = ctx.theEventLoggerModuleIsInitialized()
 	if err != nil {
 		return err
 	}
-	
+
 	err = ctx.theEventLoggerServiceShouldBeAvailable()
 	if err != nil {
 		return err
 	}
-	
+
 	return ctx.app.Start()
 }
 
@@ -355,33 +387,33 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithINFOLogLevelConfigur
 	if err != nil {
 		return err
 	}
-	
+
 	ctx.config.LogLevel = "INFO"
-	
+
 	err = ctx.theEventLoggerModuleIsInitialized()
 	if err != nil {
 		return err
 	}
-	
+
 	err = ctx.theEventLoggerServiceShouldBeAvailable()
 	if err != nil {
 		return err
 	}
-	
+
 	return ctx.app.Start()
 }
 
 func (ctx *EventLoggerBDDTestContext) iEmitEventsWithDifferentLogLevels() error {
 	// Emit events that would map to different log levels
 	events := []string{"config.loaded", "module.registered", "application.failed"}
-	
+
 	for _, eventType := range events {
 		err := ctx.iEmitATestEventWithTypeAndData(eventType, "test-data")
 		if err != nil {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -404,19 +436,19 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithBufferSizeConfigured
 	if err != nil {
 		return err
 	}
-	
+
 	ctx.config.BufferSize = 3 // Small buffer for testing
-	
+
 	err = ctx.theEventLoggerModuleIsInitialized()
 	if err != nil {
 		return err
 	}
-	
+
 	err = ctx.theEventLoggerServiceShouldBeAvailable()
 	if err != nil {
 		return err
 	}
-	
+
 	return ctx.app.Start()
 }
 
@@ -428,7 +460,7 @@ func (ctx *EventLoggerBDDTestContext) iEmitMoreEventsThanTheBufferCanHold() erro
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -450,7 +482,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithMultipleOutputTarget
 	if err != nil {
 		return err
 	}
-	
+
 	logFile := filepath.Join(ctx.tempDir, "multi.log")
 	ctx.config.OutputTargets = []OutputTargetConfig{
 		{
@@ -474,21 +506,21 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithMultipleOutputTarget
 			},
 		},
 	}
-	
+
 	err = ctx.theEventLoggerModuleIsInitialized()
 	if err != nil {
 		return err
 	}
-	
+
 	err = ctx.theEventLoggerServiceShouldBeAvailable()
 	if err != nil {
 		return err
 	}
-	
+
 	// HACK: Manually set the config to work around instance-aware provider issue
 	// This ensures the multi-target configuration is actually used
 	ctx.service.config = ctx.config
-	
+
 	// Re-initialize output targets with the correct config
 	ctx.service.outputs = make([]OutputTarget, 0, len(ctx.config.OutputTargets))
 	for i, targetConfig := range ctx.config.OutputTargets {
@@ -498,7 +530,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithMultipleOutputTarget
 		}
 		ctx.service.outputs = append(ctx.service.outputs, output)
 	}
-	
+
 	return ctx.app.Start()
 }
 
@@ -509,13 +541,13 @@ func (ctx *EventLoggerBDDTestContext) iEmitAnEvent() error {
 func (ctx *EventLoggerBDDTestContext) theEventShouldBeLoggedToAllConfiguredTargets() error {
 	// Wait for processing
 	time.Sleep(200 * time.Millisecond)
-	
+
 	// Check if file was created (indicating file target worked)
 	logFile := filepath.Join(ctx.tempDir, "multi.log")
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
 		return fmt.Errorf("log file not created for multi-target test")
 	}
-	
+
 	return nil
 }
 
@@ -529,19 +561,19 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithMetadataInclusionEna
 	if err != nil {
 		return err
 	}
-	
+
 	ctx.config.IncludeMetadata = true
-	
+
 	err = ctx.theEventLoggerModuleIsInitialized()
 	if err != nil {
 		return err
 	}
-	
+
 	err = ctx.theEventLoggerServiceShouldBeAvailable()
 	if err != nil {
 		return err
 	}
-	
+
 	return ctx.app.Start()
 }
 
@@ -552,17 +584,17 @@ func (ctx *EventLoggerBDDTestContext) iEmitAnEventWithMetadata() error {
 	event.SetSource("test-source")
 	event.SetData(cloudevents.ApplicationJSON, "test-data")
 	event.SetTime(time.Now())
-	
+
 	// Add custom extensions (metadata)
 	event.SetExtension("custom-field", "custom-value")
 	event.SetExtension("request-id", "12345")
-	
+
 	err := ctx.service.OnEvent(context.Background(), event)
 	if err != nil {
 		ctx.lastError = err
 		return err
 	}
-	
+
 	time.Sleep(100 * time.Millisecond)
 	return nil
 }
@@ -582,25 +614,25 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithPendingEvents() erro
 	if err != nil {
 		return err
 	}
-	
+
 	// Initialize the module
 	err = ctx.theEventLoggerModuleIsInitialized()
 	if err != nil {
 		return err
 	}
-	
+
 	// Get service reference
 	err = ctx.theEventLoggerServiceShouldBeAvailable()
 	if err != nil {
 		return err
 	}
-	
+
 	// Start the module
 	err = ctx.app.Start()
 	if err != nil {
 		return err
 	}
-	
+
 	// Emit some events that will be pending
 	for i := 0; i < 3; i++ {
 		err := ctx.iEmitATestEventWithTypeAndData("pending.event", "data")
@@ -608,7 +640,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithPendingEvents() erro
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -634,7 +666,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFaultyOutputTarget()
 	if err != nil {
 		return err
 	}
-	
+
 	// For this test, we simulate graceful error handling by allowing
 	// the module to start but expecting errors during event processing
 	// We use a configuration that may fail at runtime rather than startup
@@ -649,17 +681,17 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFaultyOutputTarget()
 			},
 		},
 	}
-	
+
 	// Initialize normally - this should succeed
 	err = ctx.theEventLoggerModuleIsInitialized()
 	if err != nil {
 		return err
 	}
-	
+
 	// Simulate an error condition by setting a flag
 	// In a real scenario, this would be a runtime error during event processing
 	ctx.lastError = fmt.Errorf("simulated output target failure")
-	
+
 	return nil
 }
 
@@ -668,7 +700,7 @@ func (ctx *EventLoggerBDDTestContext) iEmitEvents() error {
 		// Module failed to initialize as expected
 		return nil
 	}
-	
+
 	return ctx.iEmitATestEventWithTypeAndData("error.test", "test-data")
 }
 
@@ -677,29 +709,141 @@ func (ctx *EventLoggerBDDTestContext) errorsShouldBeHandledGracefully() error {
 	if ctx.lastError == nil {
 		return fmt.Errorf("expected error but none occurred")
 	}
-	
+
 	// Error should contain information about output target failure
 	if !strings.Contains(ctx.lastError.Error(), "output target") {
 		return fmt.Errorf("error does not mention output target: %v", ctx.lastError)
+	}
+
+	return nil
+}
+
+func (ctx *EventLoggerBDDTestContext) otherOutputTargetsShouldContinueWorking() error {
+	// Verify that non-faulty output targets continue to function correctly
+	// even when other targets fail. This is verified by checking that 
+	// events are still being processed and logged successfully.
+	if ctx.service == nil {
+		return fmt.Errorf("event logger service not available")
+	}
+	
+	// Emit a test event to verify other outputs still work
+	event := modular.NewCloudEvent("test.recovery", "test-source", map[string]interface{}{"test": "recovery"}, nil)
+	err := ctx.service.OnEvent(context.Background(), event)
+	
+	// The error handling should ensure this succeeds even with faulty targets
+	if err != nil {
+		return fmt.Errorf("other output targets failed to work after error: %v", err)
 	}
 	
 	return nil
 }
 
-func (ctx *EventLoggerBDDTestContext) otherOutputTargetsShouldContinueWorking() error {
-	// In a real implementation, console output should still work
-	// even if file output fails. For this test, we just verify
-	// error handling occurred as expected.
+// Event observation setup and step implementations
+func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithEventObservationEnabled() error {
+	ctx.resetContext()
+
+	logger := &testLogger{}
+
+	// Create eventlogger configuration for testing
+	ctx.config = &EventLoggerConfig{
+		Enabled:       true,
+		BufferSize:    100,
+		FlushInterval: 5 * time.Second,
+		OutputTargets: []OutputTargetConfig{
+			{
+				Type:   "console",
+				Level:  "INFO",
+				Format: "structured",
+			},
+		},
+		LogLevel: "INFO",
+		Format:   "structured",
+	}
+
+	// Create provider with the eventlogger config
+	eventloggerConfigProvider := modular.NewStdConfigProvider(ctx.config)
+
+	// Create app with empty main config - USE OBSERVABLE for events
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+
+	// Create and register eventlogger module
+	ctx.module = NewModule().(*EventLoggerModule)
+
+	// Create test event observer
+	ctx.eventObserver = newTestEventObserver()
+
+	// Register module first
+	ctx.app.RegisterModule(ctx.module)
+
+	// Now override the config section with our direct configuration
+	ctx.app.RegisterConfigSection("eventlogger", eventloggerConfigProvider)
+
+	// Initialize the application
+	if err := ctx.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize app: %v", err)
+	}
+
+	// Register observers AFTER initialization when config is loaded
+	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+		return fmt.Errorf("failed to register observers: %w", err)
+	}
+
+	// Register our test observer to capture events
+	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
+
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start app: %v", err)
+	}
+
+	// Get the eventlogger service
+	var service interface{}
+	if err := ctx.app.GetService("eventlogger.observer", &service); err != nil {
+		// Fallback to module service
+		if err := ctx.app.GetService("eventlogger", &service); err != nil {
+			// Final fallback: use the module directly as the service
+			ctx.service = ctx.module
+			return nil
+		}
+	}
+
+	// Cast to EventLoggerModule
+	if eventloggerService, ok := service.(*EventLoggerModule); ok {
+		ctx.service = eventloggerService
+	} else {
+		ctx.service = ctx.module
+	}
+
 	return nil
+}
+
+func (ctx *EventLoggerBDDTestContext) aLoggerStartedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeLoggerStarted {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeLoggerStarted, eventTypes)
 }
 
 // Test helper structures
 type testLogger struct{}
 
-func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) {}
-func (l *testLogger) Info(msg string, keysAndValues ...interface{})  {}
-func (l *testLogger) Warn(msg string, keysAndValues ...interface{})  {}
-func (l *testLogger) Error(msg string, keysAndValues ...interface{}) {}
+func (l *testLogger) Debug(msg string, keysAndValues ...interface{})   {}
+func (l *testLogger) Info(msg string, keysAndValues ...interface{})    {}
+func (l *testLogger) Warn(msg string, keysAndValues ...interface{})    {}
+func (l *testLogger) Error(msg string, keysAndValues ...interface{})   {}
 func (l *testLogger) With(keysAndValues ...interface{}) modular.Logger { return l }
 
 type testConsoleOutput struct {
@@ -715,68 +859,72 @@ func TestEventLoggerModuleBDD(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
 			ctx := &EventLoggerBDDTestContext{}
-			
+
 			// Background
 			s.Given(`^I have a modular application with event logger module configured$`, ctx.iHaveAModularApplicationWithEventLoggerModuleConfigured)
-			
+
 			// Initialization
 			s.When(`^the event logger module is initialized$`, ctx.theEventLoggerModuleIsInitialized)
 			s.Then(`^the event logger service should be available$`, ctx.theEventLoggerServiceShouldBeAvailable)
 			s.Then(`^the module should register as an observer$`, ctx.theModuleShouldRegisterAsAnObserver)
-			
+
 			// Console output
 			s.Given(`^I have an event logger with console output configured$`, ctx.iHaveAnEventLoggerWithConsoleOutputConfigured)
 			s.When(`^I emit a test event with type "([^"]*)" and data "([^"]*)"$`, ctx.iEmitATestEventWithTypeAndData)
 			s.Then(`^the event should be logged to console output$`, ctx.theEventShouldBeLoggedToConsoleOutput)
 			s.Then(`^the log entry should contain the event type and data$`, ctx.theLogEntryShouldContainTheEventTypeAndData)
-			
+
 			// File output
 			s.Given(`^I have an event logger with file output configured$`, ctx.iHaveAnEventLoggerWithFileOutputConfigured)
 			s.When(`^I emit multiple events with different types$`, ctx.iEmitMultipleEventsWithDifferentTypes)
 			s.Then(`^all events should be logged to the file$`, ctx.allEventsShouldBeLoggedToTheFile)
 			s.Then(`^the file should contain structured log entries$`, ctx.theFileShouldContainStructuredLogEntries)
-			
+
 			// Event filtering
 			s.Given(`^I have an event logger with event type filters configured$`, ctx.iHaveAnEventLoggerWithEventTypeFiltersConfigured)
 			s.When(`^I emit events with different types$`, ctx.iEmitEventsWithDifferentTypes)
 			s.Then(`^only filtered event types should be logged$`, ctx.onlyFilteredEventTypesShouldBeLogged)
 			s.Then(`^non-matching events should be ignored$`, ctx.nonMatchingEventsShouldBeIgnored)
-			
+
 			// Log level filtering
 			s.Given(`^I have an event logger with INFO log level configured$`, ctx.iHaveAnEventLoggerWithINFOLogLevelConfigured)
 			s.When(`^I emit events with different log levels$`, ctx.iEmitEventsWithDifferentLogLevels)
 			s.Then(`^only INFO and higher level events should be logged$`, ctx.onlyINFOAndHigherLevelEventsShouldBeLogged)
 			s.Then(`^DEBUG events should be filtered out$`, ctx.dEBUGEventsShouldBeFilteredOut)
-			
+
 			// Buffer management
 			s.Given(`^I have an event logger with buffer size configured$`, ctx.iHaveAnEventLoggerWithBufferSizeConfigured)
 			s.When(`^I emit more events than the buffer can hold$`, ctx.iEmitMoreEventsThanTheBufferCanHold)
 			s.Then(`^older events should be dropped$`, ctx.olderEventsShouldBeDropped)
 			s.Then(`^buffer overflow should be handled gracefully$`, ctx.bufferOverflowShouldBeHandledGracefully)
-			
+
 			// Multiple targets
 			s.Given(`^I have an event logger with multiple output targets configured$`, ctx.iHaveAnEventLoggerWithMultipleOutputTargetsConfigured)
 			s.When(`^I emit an event$`, ctx.iEmitAnEvent)
 			s.Then(`^the event should be logged to all configured targets$`, ctx.theEventShouldBeLoggedToAllConfiguredTargets)
 			s.Then(`^each target should receive the same event data$`, ctx.eachTargetShouldReceiveTheSameEventData)
-			
+
 			// Metadata
 			s.Given(`^I have an event logger with metadata inclusion enabled$`, ctx.iHaveAnEventLoggerWithMetadataInclusionEnabled)
 			s.When(`^I emit an event with metadata$`, ctx.iEmitAnEventWithMetadata)
 			s.Then(`^the logged event should include the metadata$`, ctx.theLoggedEventShouldIncludeTheMetadata)
 			s.Then(`^CloudEvent fields should be preserved$`, ctx.cloudEventFieldsShouldBePreserved)
-			
+
 			// Shutdown
 			s.Given(`^I have an event logger with pending events$`, ctx.iHaveAnEventLoggerWithPendingEvents)
 			s.When(`^the module is stopped$`, ctx.theModuleIsStopped)
 			s.Then(`^all pending events should be flushed$`, ctx.allPendingEventsShouldBeFlushed)
 			s.Then(`^output targets should be closed properly$`, ctx.outputTargetsShouldBeClosedProperly)
-			
+
 			// Error handling
 			s.Given(`^I have an event logger with faulty output target$`, ctx.iHaveAnEventLoggerWithFaultyOutputTarget)
 			s.When(`^I emit events$`, ctx.iEmitEvents)
 			s.Then(`^errors should be handled gracefully$`, ctx.errorsShouldBeHandledGracefully)
 			s.Then(`^other output targets should continue working$`, ctx.otherOutputTargetsShouldContinueWorking)
+
+			// Event observation step registrations
+			s.Given(`^I have an event logger with event observation enabled$`, ctx.iHaveAnEventLoggerWithEventObservationEnabled)
+			s.Then(`^a logger started event should be emitted$`, ctx.aLoggerStartedEventShouldBeEmitted)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",
@@ -784,7 +932,7 @@ func TestEventLoggerModuleBDD(t *testing.T) {
 			TestingT: t,
 		},
 	}
-	
+
 	if suite.Run() != 0 {
 		t.Fatal("non-zero status returned, failed to run feature tests")
 	}

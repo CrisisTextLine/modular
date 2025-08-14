@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // ModuleName is the name of this module for registration and dependency resolution.
@@ -73,6 +74,15 @@ var (
 //   - Request routing and handler registration
 //   - Server configuration and health monitoring
 //   - Integration with certificate services for automatic HTTPS
+//   - Event observation and emission for server operations
+//
+// The module implements the following interfaces:
+//   - modular.Module: Basic module lifecycle
+//   - modular.Configurable: Configuration management
+//   - modular.ServiceAware: Service dependency management
+//   - modular.Startable: Startup logic
+//   - modular.Stoppable: Shutdown logic
+//   - modular.ObservableModule: Event observation and emission
 type HTTPServerModule struct {
 	config             *HTTPServerConfig
 	server             *http.Server
@@ -81,6 +91,7 @@ type HTTPServerModule struct {
 	handler            http.Handler
 	started            bool
 	certificateService CertificateService
+	subject            modular.Subject // For event observation
 }
 
 // Make sure the HTTPServerModule implements the Module interface
@@ -155,6 +166,19 @@ func (m *HTTPServerModule) Init(app modular.Application) error {
 	}
 	m.config = cfg.GetConfig().(*HTTPServerConfig)
 
+	// Emit config loaded event
+	event := modular.NewCloudEvent(EventTypeConfigLoaded, "httpserver-module", map[string]interface{}{
+		"host":        m.config.Host,
+		"port":        m.config.Port,
+		"tls_enabled": m.config.TLS != nil && m.config.TLS.Enabled,
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+			fmt.Printf("Failed to emit httpserver config loaded event: %v\n", emitErr)
+		}
+	}()
+
 	return nil
 }
 
@@ -228,6 +252,17 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 				if m.certificateService != nil {
 					m.logger.Info("Using certificate service for TLS")
 					tlsConfig.GetCertificate = m.certificateService.GetCertificate
+
+					// Emit TLS enabled event
+					tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
+						"method": "certificate_service",
+					}, nil)
+					go func() {
+						if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
+							fmt.Printf("Failed to emit TLS enabled event: %v\n", emitErr)
+						}
+					}()
+
 				} else {
 					// Fall back to auto-generated certificates if UseService is true but no service is available
 					m.logger.Warn("No certificate service available, falling back to auto-generated certificates")
@@ -251,6 +286,18 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 			} else if m.config.TLS.AutoGenerate {
 				// Auto-generate self-signed certificates
 				m.logger.Info("Auto-generating self-signed certificates", "domains", m.config.TLS.Domains)
+
+				// Emit TLS enabled event
+				tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
+					"method":  "auto_generate",
+					"domains": m.config.TLS.Domains,
+				}, nil)
+				go func() {
+					if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
+						fmt.Printf("Failed to emit TLS auto-generate event: %v\n", emitErr)
+					}
+				}()
+
 				cert, key, err := m.generateSelfSignedCertificate(m.config.TLS.Domains)
 				if err != nil {
 					m.logger.Error("Failed to generate self-signed certificate", "error", err)
@@ -266,6 +313,19 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 			} else {
 				// Use provided certificate files
 				m.logger.Info("Using TLS configuration", "cert", m.config.TLS.CertFile, "key", m.config.TLS.KeyFile)
+
+				// Emit TLS enabled event
+				tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
+					"method":    "certificate_files",
+					"cert_file": m.config.TLS.CertFile,
+					"key_file":  m.config.TLS.KeyFile,
+				}, nil)
+				go func() {
+					if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
+						fmt.Printf("Failed to emit TLS configured event: %v\n", emitErr)
+					}
+				}()
+
 				err = m.server.ListenAndServeTLS(m.config.TLS.CertFile, m.config.TLS.KeyFile)
 			}
 		} else {
@@ -325,6 +385,21 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 
 	m.started = true
 	m.logger.Info("HTTP server started successfully", "address", addr)
+
+	// Emit server started event
+	event := modular.NewCloudEvent(EventTypeServerStarted, "httpserver-service", map[string]interface{}{
+		"address":     addr,
+		"tls_enabled": m.config.TLS != nil && m.config.TLS.Enabled,
+		"host":        m.config.Host,
+		"port":        m.config.Port,
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			fmt.Printf("Failed to emit server started event: %v\n", emitErr)
+		}
+	}()
+
 	return nil
 }
 
@@ -362,6 +437,19 @@ func (m *HTTPServerModule) Stop(ctx context.Context) error {
 
 	m.started = false
 	m.logger.Info("HTTP server stopped successfully")
+
+	// Emit server stopped event
+	event := modular.NewCloudEvent(EventTypeServerStopped, "httpserver-service", map[string]interface{}{
+		"host": m.config.Host,
+		"port": m.config.Port,
+	}, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			fmt.Printf("Failed to emit server stopped event: %v\n", emitErr)
+		}
+	}()
+
 	return nil
 }
 
@@ -487,4 +575,32 @@ func (m *HTTPServerModule) createTempFile(pattern, content string) (string, erro
 	}
 
 	return tmpFile.Name(), nil
+}
+
+// RegisterObservers implements the ObservableModule interface.
+// This allows the httpserver module to register as an observer for events it's interested in.
+func (m *HTTPServerModule) RegisterObservers(subject modular.Subject) error {
+	m.subject = subject
+	// The httpserver module currently does not need to observe other events,
+	// but this method stores the subject for event emission.
+	return nil
+}
+
+// EmitEvent implements the ObservableModule interface.
+// This allows the httpserver module to emit events to registered observers.
+func (m *HTTPServerModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
+	if m.subject == nil {
+		return ErrNoSubjectForEventEmission
+	}
+	// Use a goroutine to prevent blocking server operations with event emission
+	go func() {
+		if err := m.subject.NotifyObservers(ctx, event); err != nil {
+			// Log error but don't fail the operation
+			// This ensures event emission issues don't affect server functionality
+			if m.logger != nil {
+				m.logger.Debug("Failed to notify observers", "error", err, "event_type", event.Type())
+			}
+		}
+	}()
+	return nil
 }

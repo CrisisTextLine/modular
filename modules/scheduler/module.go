@@ -64,6 +64,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // Module errors
@@ -98,6 +99,7 @@ type SchedulerModule struct {
 	jobStore      JobStore
 	running       bool
 	schedulerLock sync.Mutex
+	subject       modular.Subject // Added for event observation
 }
 
 // NewModule creates a new instance of the scheduler module.
@@ -159,6 +161,17 @@ func (m *SchedulerModule) Init(app modular.Application) error {
 	m.config = cfg.GetConfig().(*SchedulerConfig)
 	m.logger = app.Logger()
 
+	// Emit config loaded event
+	m.emitEvent(context.Background(), EventTypeConfigLoaded, map[string]interface{}{
+		"worker_count":       m.config.WorkerCount,
+		"queue_size":         m.config.QueueSize,
+		"shutdown_timeout":   m.config.ShutdownTimeout.String(),
+		"storage_type":       m.config.StorageType,
+		"check_interval":     m.config.CheckInterval.String(),
+		"retention_days":     m.config.RetentionDays,
+		"enable_persistence": m.config.EnablePersistence,
+	})
+
 	// Initialize job store based on configuration
 	switch m.config.StorageType {
 	case "memory":
@@ -209,6 +222,14 @@ func (m *SchedulerModule) Start(ctx context.Context) error {
 	}
 
 	m.running = true
+
+	// Emit module started event
+	m.emitEvent(ctx, EventTypeModuleStarted, map[string]interface{}{
+		"worker_count": m.config.WorkerCount,
+		"queue_size":   m.config.QueueSize,
+		"storage_type": m.config.StorageType,
+	})
+
 	m.logger.Info("Scheduler started successfully")
 	return nil
 }
@@ -369,4 +390,35 @@ func (m *SchedulerModule) savePersistedJobs() error {
 
 	m.logger.Warn("Job store does not support persistence")
 	return ErrJobStoreNotPersistable
+}
+
+// RegisterObservers implements the ObservableModule interface.
+// This allows the scheduler module to register as an observer for events it's interested in.
+func (m *SchedulerModule) RegisterObservers(subject modular.Subject) error {
+	m.subject = subject
+	return nil
+}
+
+// EmitEvent implements the ObservableModule interface.
+// This allows the scheduler module to emit events that other modules or observers can receive.
+func (m *SchedulerModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
+	if m.subject == nil {
+		return ErrNoSubjectForEventEmission
+	}
+	if err := m.subject.NotifyObservers(ctx, event); err != nil {
+		return fmt.Errorf("failed to notify observers: %w", err)
+	}
+	return nil
+}
+
+// emitEvent is a helper method to create and emit CloudEvents for the scheduler module.
+// This centralizes the event creation logic and ensures consistent event formatting.
+func (m *SchedulerModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+	event := modular.NewCloudEvent(eventType, "scheduler-service", data, nil)
+
+	go func() {
+		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+			fmt.Printf("Failed to emit scheduler event %s: %v\n", eventType, emitErr)
+		}
+	}()
 }

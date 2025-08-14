@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cucumber/godog"
 )
 
@@ -22,6 +23,37 @@ type CacheBDDTestContext struct {
 	cacheHit       bool
 	multipleItems  map[string]interface{}
 	multipleResult map[string]interface{}
+	capturedEvents []cloudevents.Event
+	eventObserver  *testEventObserver
+}
+
+// testEventObserver captures events for testing
+type testEventObserver struct {
+	events []cloudevents.Event
+	id     string
+}
+
+func newTestEventObserver() *testEventObserver {
+	return &testEventObserver{
+		id: "test-observer-cache",
+	}
+}
+
+func (o *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	o.events = append(o.events, event)
+	return nil
+}
+
+func (o *testEventObserver) ObserverID() string {
+	return o.id
+}
+
+func (o *testEventObserver) GetEvents() []cloudevents.Event {
+	return o.events
+}
+
+func (o *testEventObserver) ClearEvents() {
+	o.events = nil
 }
 
 func (ctx *CacheBDDTestContext) resetContext() {
@@ -34,54 +66,56 @@ func (ctx *CacheBDDTestContext) resetContext() {
 	ctx.cacheHit = false
 	ctx.multipleItems = make(map[string]interface{})
 	ctx.multipleResult = make(map[string]interface{})
+	ctx.capturedEvents = nil
+	ctx.eventObserver = newTestEventObserver()
 }
 
 func (ctx *CacheBDDTestContext) iHaveAModularApplicationWithCacheModuleConfigured() error {
 	ctx.resetContext()
-	
+
 	// Create application with cache config
 	logger := &testLogger{}
-	
+
 	// Create basic cache configuration for testing
 	ctx.cacheConfig = &CacheConfig{
-		Engine:           "memory",
-		DefaultTTL:       300 * time.Second,
-		CleanupInterval:  60 * time.Second,
-		MaxItems:         1000,
+		Engine:          "memory",
+		DefaultTTL:      300 * time.Second,
+		CleanupInterval: 60 * time.Second,
+		MaxItems:        1000,
 	}
-	
+
 	// Create provider with the cache config
 	cacheConfigProvider := modular.NewStdConfigProvider(ctx.cacheConfig)
-	
+
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
-	
+
 	// Create and register cache module
 	ctx.module = NewModule().(*CacheModule)
-	
+
 	// Register the cache config section first
 	ctx.app.RegisterConfigSection("cache", cacheConfigProvider)
-	
-	// Register the module  
+
+	// Register the module
 	ctx.app.RegisterModule(ctx.module)
-	
+
 	// Initialize
 	if err := ctx.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
 	}
-	
+
 	return nil
 }
 
 func (ctx *CacheBDDTestContext) iHaveACacheConfigurationWithMemoryEngine() error {
 	ctx.cacheConfig = &CacheConfig{
-		Engine:           "memory",
-		DefaultTTL:       300 * time.Second,
-		CleanupInterval:  60 * time.Second,
-		MaxItems:         1000,
+		Engine:          "memory",
+		DefaultTTL:      300 * time.Second,
+		CleanupInterval: 60 * time.Second,
+		MaxItems:        1000,
 	}
-	
+
 	// Update the module's config if it exists
 	if ctx.service != nil {
 		ctx.service.config = ctx.cacheConfig
@@ -91,13 +125,13 @@ func (ctx *CacheBDDTestContext) iHaveACacheConfigurationWithMemoryEngine() error
 
 func (ctx *CacheBDDTestContext) iHaveACacheConfigurationWithRedisEngine() error {
 	ctx.cacheConfig = &CacheConfig{
-		Engine:           "redis",
-		DefaultTTL:       300 * time.Second,
-		CleanupInterval:  60 * time.Second,
-		RedisURL:         "redis://localhost:6379",
-		RedisDB:          0,
+		Engine:          "redis",
+		DefaultTTL:      300 * time.Second,
+		CleanupInterval: 60 * time.Second,
+		RedisURL:        "redis://localhost:6379",
+		RedisDB:         0,
 	}
-	
+
 	// Update the module's config if it exists
 	if ctx.service != nil {
 		ctx.service.config = ctx.cacheConfig
@@ -115,7 +149,7 @@ func (ctx *CacheBDDTestContext) theCacheServiceShouldBeAvailable() error {
 	if err := ctx.app.GetService("cache.provider", &cacheService); err != nil {
 		return fmt.Errorf("failed to get cache service: %v", err)
 	}
-	
+
 	ctx.service = cacheService
 	return nil
 }
@@ -125,11 +159,11 @@ func (ctx *CacheBDDTestContext) theMemoryCacheEngineShouldBeConfigured() error {
 	if ctx.service == nil {
 		return fmt.Errorf("cache service not available")
 	}
-	
+
 	if ctx.service.config == nil {
 		return fmt.Errorf("cache service config is nil")
 	}
-	
+
 	if ctx.service.config.Engine != "memory" {
 		return fmt.Errorf("memory cache engine not configured, found: %s", ctx.service.config.Engine)
 	}
@@ -141,11 +175,11 @@ func (ctx *CacheBDDTestContext) theRedisCacheEngineShouldBeConfigured() error {
 	if ctx.service == nil {
 		return fmt.Errorf("cache service not available")
 	}
-	
+
 	if ctx.service.config == nil {
 		return fmt.Errorf("cache service config is nil")
 	}
-	
+
 	if ctx.service.config.Engine != "redis" {
 		return fmt.Errorf("redis cache engine not configured, found: %s", ctx.service.config.Engine)
 	}
@@ -182,11 +216,11 @@ func (ctx *CacheBDDTestContext) theCachedValueShouldBe(expectedValue string) err
 	if !ctx.cacheHit {
 		return errors.New("cache miss when hit was expected")
 	}
-	
+
 	if ctx.cachedValue != expectedValue {
 		return errors.New("cached value does not match expected value")
 	}
-	
+
 	return nil
 }
 
@@ -244,17 +278,17 @@ func (ctx *CacheBDDTestContext) iDeleteTheCacheItemWithKey(key string) error {
 func (ctx *CacheBDDTestContext) iHaveSetMultipleCacheItems() error {
 	items := map[string]interface{}{
 		"item1": "value1",
-		"item2": "value2", 
+		"item2": "value2",
 		"item3": "value3",
 	}
-	
+
 	for key, value := range items {
 		err := ctx.service.Set(context.Background(), key, value, 0)
 		if err != nil {
 			return err
 		}
 	}
-	
+
 	ctx.multipleItems = items
 	return nil
 }
@@ -284,13 +318,13 @@ func (ctx *CacheBDDTestContext) iSetMultipleCacheItemsWithDifferentKeysAndValues
 		"multi-key2": "multi-value2",
 		"multi-key3": "multi-value3",
 	}
-	
+
 	err := ctx.service.SetMulti(context.Background(), items, 0)
 	if err != nil {
 		ctx.lastError = err
 		return err
 	}
-	
+
 	ctx.multipleItems = items
 	return nil
 }
@@ -321,14 +355,14 @@ func (ctx *CacheBDDTestContext) iHaveSetMultipleCacheItemsWithKeys(key1, key2, k
 		key2: "value2",
 		key3: "value3",
 	}
-	
+
 	for key, value := range items {
 		err := ctx.service.Set(context.Background(), key, value, 0)
 		if err != nil {
 			return err
 		}
 	}
-	
+
 	ctx.multipleItems = items
 	return nil
 }
@@ -339,13 +373,13 @@ func (ctx *CacheBDDTestContext) iGetMultipleCacheItemsWithTheSameKeys() error {
 	for key := range ctx.multipleItems {
 		keys = append(keys, key)
 	}
-	
+
 	result, err := ctx.service.GetMulti(context.Background(), keys)
 	if err != nil {
 		ctx.lastError = err
 		return err
 	}
-	
+
 	ctx.multipleResult = result
 	return nil
 }
@@ -376,14 +410,14 @@ func (ctx *CacheBDDTestContext) iHaveSetMultipleCacheItemsWithKeysForDeletion(ke
 		key2: "value2",
 		key3: "value3",
 	}
-	
+
 	for key, value := range items {
 		err := ctx.service.Set(context.Background(), key, value, 0)
 		if err != nil {
 			return err
 		}
 	}
-	
+
 	ctx.multipleItems = items
 	return nil
 }
@@ -394,7 +428,7 @@ func (ctx *CacheBDDTestContext) iDeleteMultipleCacheItemsWithTheSameKeys() error
 	for key := range ctx.multipleItems {
 		keys = append(keys, key)
 	}
-	
+
 	err := ctx.service.DeleteMulti(context.Background(), keys)
 	if err != nil {
 		ctx.lastError = err
@@ -432,10 +466,10 @@ func (ctx *CacheBDDTestContext) theItemShouldUseTheDefaultTTLFromConfiguration()
 
 func (ctx *CacheBDDTestContext) iHaveACacheConfigurationWithInvalidRedisSettings() error {
 	ctx.cacheConfig = &CacheConfig{
-		Engine:           "redis",
-		DefaultTTL:       300 * time.Second,
-		CleanupInterval:  60 * time.Second,  // Add non-zero cleanup interval
-		RedisURL:         "redis://invalid-host:9999",
+		Engine:          "redis",
+		DefaultTTL:      300 * time.Second,
+		CleanupInterval: 60 * time.Second, // Add non-zero cleanup interval
+		RedisURL:        "redis://invalid-host:9999",
 	}
 	return nil
 }
@@ -443,28 +477,28 @@ func (ctx *CacheBDDTestContext) iHaveACacheConfigurationWithInvalidRedisSettings
 func (ctx *CacheBDDTestContext) theCacheModuleAttemptsToStart() error {
 	// Create application with invalid Redis config
 	logger := &testLogger{}
-	
+
 	// Create provider with the invalid cache config
 	cacheConfigProvider := modular.NewStdConfigProvider(ctx.cacheConfig)
-	
+
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	app := modular.NewStdApplication(mainConfigProvider, logger)
-	
+
 	// Create and register cache module
 	module := NewModule().(*CacheModule)
-	
+
 	// Register the cache config section first
 	app.RegisterConfigSection("cache", cacheConfigProvider)
-	
-	// Register the module  
+
+	// Register the module
 	app.RegisterModule(module)
-	
+
 	// Initialize
 	if err := app.Init(); err != nil {
 		return err
 	}
-	
+
 	// Try to start the application (this should fail for Redis)
 	ctx.lastError = app.Start()
 	ctx.app = app
@@ -485,23 +519,208 @@ func (ctx *CacheBDDTestContext) appropriateErrorMessagesShouldBeLogged() error {
 	return ctx.theModuleShouldHandleConnectionErrorsGracefully()
 }
 
+// Event observation step methods
+func (ctx *CacheBDDTestContext) iHaveACacheServiceWithEventObservationEnabled() error {
+	ctx.resetContext()
+	
+	// Create application with cache config - use ObservableApplication for event support
+	logger := &testLogger{}
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+	
+	// Create basic cache configuration for testing
+	ctx.cacheConfig = &CacheConfig{
+		Engine:           "memory",
+		DefaultTTL:       300 * time.Second,
+		CleanupInterval:  60 * time.Second,
+		MaxItems:         1000,
+	}
+	
+	cacheConfigProvider := modular.NewStdConfigProvider(ctx.cacheConfig)
+	
+	// Create cache module
+	ctx.module = NewModule().(*CacheModule)
+	ctx.service = ctx.module
+	
+	// Register the cache config section first
+	ctx.app.RegisterConfigSection("cache", cacheConfigProvider)
+	
+	// Register the module  
+	ctx.app.RegisterModule(ctx.module)
+	
+	// Initialize
+	if err := ctx.app.Init(); err != nil {
+		return err
+	}
+	
+	// Start the application to enable cache functionality
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start application: %w", err)
+	}
+	
+	// Register the event observer with the cache module
+	if err := ctx.service.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+		return fmt.Errorf("failed to register observers: %w", err)
+	}
+	
+	// Register our test observer to capture events
+	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
+	
+	return nil
+}
+
+func (ctx *CacheBDDTestContext) aCacheSetEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeCacheSet {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("cache set event not found. Captured events: %v", eventTypes)
+}
+
+func (ctx *CacheBDDTestContext) theEventShouldContainTheCacheKey(expectedKey string) error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeCacheSet {
+			var eventData map[string]interface{}
+			if err := event.DataAs(&eventData); err != nil {
+				continue
+			}
+			if cacheKey, ok := eventData["cache_key"]; ok && cacheKey == expectedKey {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("cache set event with key %s not found", expectedKey)
+}
+
+func (ctx *CacheBDDTestContext) aCacheHitEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeCacheHit {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("cache hit event not found. Captured events: %v", eventTypes)
+}
+
+func (ctx *CacheBDDTestContext) aCacheMissEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeCacheMiss {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("cache miss event not found. Captured events: %v", eventTypes)
+}
+
+func (ctx *CacheBDDTestContext) aCacheDeleteEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeCacheDelete {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("cache delete event not found. Captured events: %v", eventTypes)
+}
+
+func (ctx *CacheBDDTestContext) theCacheModuleStarts() error {
+	// The module should already be started from the setup
+	// This step is just to indicate the lifecycle event
+	return nil
+}
+
+func (ctx *CacheBDDTestContext) aCacheConnectedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeCacheConnected {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("cache connected event not found. Captured events: %v", eventTypes)
+}
+
+func (ctx *CacheBDDTestContext) aCacheFlushEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeCacheFlush {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
+	return fmt.Errorf("cache flush event not found. Captured events: %v", eventTypes)
+}
+
 // Test runner function
 func TestCacheModuleBDD(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
 			testCtx := &CacheBDDTestContext{}
-			
+
 			// Background
 			ctx.Step(`^I have a modular application with cache module configured$`, testCtx.iHaveAModularApplicationWithCacheModuleConfigured)
-			
+
 			// Initialization steps
 			ctx.Step(`^the cache module is initialized$`, testCtx.theCacheModuleIsInitialized)
 			ctx.Step(`^the cache service should be available$`, testCtx.theCacheServiceShouldBeAvailable)
-			
+
 			// Service availability
 			ctx.Step(`^I have a cache service available$`, testCtx.iHaveACacheServiceAvailable)
 			ctx.Step(`^I have a cache service with default TTL configured$`, testCtx.iHaveACacheServiceWithDefaultTTLConfigured)
-			
+
 			// Basic cache operations
 			ctx.Step(`^I set a cache item with key "([^"]*)" and value "([^"]*)"$`, testCtx.iSetACacheItemWithKeyAndValue)
 			ctx.Step(`^I get the cache item with key "([^"]*)"$`, testCtx.iGetTheCacheItemWithKey)
@@ -510,35 +729,46 @@ func TestCacheModuleBDD(t *testing.T) {
 			ctx.Step(`^the cache hit should be successful$`, testCtx.theCacheHitShouldBeSuccessful)
 			ctx.Step(`^the cache hit should be unsuccessful$`, testCtx.theCacheHitShouldBeUnsuccessful)
 			ctx.Step(`^no value should be returned$`, testCtx.noValueShouldBeReturned)
-			
+
 			// TTL operations
 			ctx.Step(`^I set a cache item with key "([^"]*)" and value "([^"]*)" with TTL (\d+) seconds$`, testCtx.iSetACacheItemWithKeyAndValueWithTTLSeconds)
 			ctx.Step(`^I wait for (\d+) seconds$`, testCtx.iWaitForSeconds)
 			ctx.Step(`^I set a cache item without specifying TTL$`, testCtx.iSetACacheItemWithoutSpecifyingTTL)
 			ctx.Step(`^the item should use the default TTL from configuration$`, testCtx.theItemShouldUseTheDefaultTTLFromConfiguration)
-			
+
 			// Delete operations
 			ctx.Step(`^I have set a cache item with key "([^"]*)" and value "([^"]*)"$`, testCtx.iHaveSetACacheItemWithKeyAndValue)
 			ctx.Step(`^I delete the cache item with key "([^"]*)"$`, testCtx.iDeleteTheCacheItemWithKey)
-			
+
 			// Flush operations
 			ctx.Step(`^I have set multiple cache items$`, testCtx.iHaveSetMultipleCacheItems)
 			ctx.Step(`^I flush all cache items$`, testCtx.iFlushAllCacheItems)
 			ctx.Step(`^I get any of the previously set cache items$`, testCtx.iGetAnyOfThePreviouslySetCacheItems)
-			
+
 			// Multi operations
 			ctx.Step(`^I set multiple cache items with different keys and values$`, testCtx.iSetMultipleCacheItemsWithDifferentKeysAndValues)
 			ctx.Step(`^all items should be stored successfully$`, testCtx.allItemsShouldBeStoredSuccessfully)
 			ctx.Step(`^I should be able to retrieve all items$`, testCtx.iShouldBeAbleToRetrieveAllItems)
-			
+
 			ctx.Step(`^I have set multiple cache items with keys "([^"]*)", "([^"]*)", "([^"]*)"$`, testCtx.iHaveSetMultipleCacheItemsWithKeys)
 			ctx.Step(`^I get multiple cache items with the same keys$`, testCtx.iGetMultipleCacheItemsWithTheSameKeys)
 			ctx.Step(`^I should receive all the cached values$`, testCtx.iShouldReceiveAllTheCachedValues)
 			ctx.Step(`^the values should match what was stored$`, testCtx.theValuesShouldMatchWhatWasStored)
-			
+
 			ctx.Step(`^I have set multiple cache items with keys "([^"]*)", "([^"]*)", "([^"]*)"$`, testCtx.iHaveSetMultipleCacheItemsWithKeysForDeletion)
 			ctx.Step(`^I delete multiple cache items with the same keys$`, testCtx.iDeleteMultipleCacheItemsWithTheSameKeys)
 			ctx.Step(`^I should receive no cached values$`, testCtx.iShouldReceiveNoCachedValues)
+
+			// Event observation steps
+			ctx.Step(`^I have a cache service with event observation enabled$`, testCtx.iHaveACacheServiceWithEventObservationEnabled)
+			ctx.Step(`^a cache set event should be emitted$`, testCtx.aCacheSetEventShouldBeEmitted)
+			ctx.Step(`^the event should contain the cache key "([^"]*)"$`, testCtx.theEventShouldContainTheCacheKey)
+			ctx.Step(`^a cache hit event should be emitted$`, testCtx.aCacheHitEventShouldBeEmitted)
+			ctx.Step(`^a cache miss event should be emitted$`, testCtx.aCacheMissEventShouldBeEmitted)
+			ctx.Step(`^a cache delete event should be emitted$`, testCtx.aCacheDeleteEventShouldBeEmitted)
+			ctx.Step(`^the cache module starts$`, testCtx.theCacheModuleStarts)
+			ctx.Step(`^a cache connected event should be emitted$`, testCtx.aCacheConnectedEventShouldBeEmitted)
+			ctx.Step(`^a cache flush event should be emitted$`, testCtx.aCacheFlushEventShouldBeEmitted)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",

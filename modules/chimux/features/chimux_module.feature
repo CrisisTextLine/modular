@@ -66,3 +66,34 @@ Feature: ChiMux Module
     When middleware is applied to the router
     Then middleware should be applied in the correct order
     And request processing should follow the middleware chain
+
+  Scenario: Event observation during module lifecycle
+    Given I have a chimux module with event observation enabled
+    When the chimux module is initialized
+    Then a config loaded event should be emitted
+    And a router created event should be emitted
+    And a module started event should be emitted
+
+  Scenario: Event observation during route registration
+    Given I have a chimux module with event observation enabled
+    And the chimux module is initialized
+    And the router service should be available
+    When I register a GET route "/test" with handler
+    And I register a POST route "/api/data" with handler
+    Then route registered events should be emitted
+    And the events should contain the correct route information
+
+  Scenario: Event observation during CORS configuration
+    Given I have a chimux module with event observation enabled
+    And I have a chimux configuration with CORS settings
+    When the chimux module is initialized with CORS
+    Then a CORS configured event should be emitted
+
+  Scenario: Event observation during middleware management
+    Given I have a chimux module with event observation enabled
+    And the chimux module is initialized
+    And the router service should be available
+    And I have middleware provider services available
+    When the chimux module discovers middleware providers
+    Then middleware added events should be emitted
+    And the events should contain middleware information

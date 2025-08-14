@@ -912,9 +912,7 @@ func (m *LetsEncryptModule) EmitEvent(ctx context.Context, event cloudevents.Eve
 func (m *LetsEncryptModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	event := modular.NewCloudEvent(eventType, "letsencrypt-service", data, nil)
 
-	go func() {
-		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			fmt.Printf("Failed to emit letsencrypt event %s: %v\n", eventType, emitErr)
-		}
-	}()
+	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		fmt.Printf("Failed to emit letsencrypt event %s: %v\n", eventType, emitErr)
+	}
 }

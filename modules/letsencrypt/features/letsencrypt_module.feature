@@ -64,3 +64,46 @@ Feature: LetsEncrypt Module
     When the module is stopped
     Then certificate renewal processes should be stopped
     And resources should be cleaned up properly
+
+  Scenario: Emit events during LetsEncrypt lifecycle
+    Given I have a LetsEncrypt module with event observation enabled
+    When the LetsEncrypt module starts
+    Then a service started event should be emitted
+    And the event should contain service configuration details
+    When the LetsEncrypt module stops
+    Then a service stopped event should be emitted
+    And a module stopped event should be emitted
+
+  Scenario: Emit events during certificate lifecycle
+    Given I have a LetsEncrypt module with event observation enabled
+    When a certificate is requested for domains
+    Then a certificate requested event should be emitted
+    And the event should contain domain information
+    When the certificate is successfully issued
+    Then a certificate issued event should be emitted
+    And the event should contain domain details
+
+  Scenario: Emit events during certificate renewal
+    Given I have a LetsEncrypt module with event observation enabled
+    And I have existing certificates that need renewal
+    When certificates are renewed
+    Then certificate renewed events should be emitted
+    And the events should contain renewal details
+
+  Scenario: Emit events during ACME protocol operations
+    Given I have a LetsEncrypt module with event observation enabled
+    When ACME challenges are processed
+    Then ACME challenge events should be emitted
+    When ACME authorization is completed
+    Then ACME authorization events should be emitted
+    When ACME orders are processed
+    Then ACME order events should be emitted
+
+  Scenario: Emit events during certificate storage operations
+    Given I have a LetsEncrypt module with event observation enabled
+    When certificates are stored to disk
+    Then storage write events should be emitted
+    When certificates are read from storage
+    Then storage read events should be emitted
+    When storage errors occur
+    Then storage error events should be emitted

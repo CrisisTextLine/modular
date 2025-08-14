@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/feeders"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cucumber/godog"
 	_ "github.com/mattn/go-sqlite3" // Import SQLite driver for BDD tests
@@ -64,13 +62,6 @@ func (ctx *DatabaseBDDTestContext) resetContext() {
 		modular.ConfigFeeders = ctx.originalFeeders
 		ctx.originalFeeders = nil
 	}
-
-	// Clean up environment variables
-	os.Unsetenv("DEFAULT_DB_CONNECTION")
-	os.Unsetenv("DB_DEFAULT_DRIVER")
-	os.Unsetenv("DB_DEFAULT_DSN")
-	os.Unsetenv("DB_DEFAULT_MAX_OPEN_CONNECTIONS")
-	os.Unsetenv("DB_DEFAULT_MAX_IDLE_CONNECTIONS")
 
 	ctx.app = nil
 	ctx.module = nil
@@ -389,34 +380,45 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseModuleConfigured() error {
 func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnabled() error {
 	ctx.resetContext()
 
-	// Save original feeders and use env feeder for BDD tests
-	// This allows the instance-aware config to pick up our env vars
+	// Save original feeders and disable env feeder for BDD tests
+	// This ensures BDD tests have full control over configuration
 	ctx.originalFeeders = modular.ConfigFeeders
-	modular.ConfigFeeders = []modular.Feeder{feeders.NewEnvFeeder()} // Use env feeder for controlled testing
+	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
 
-	// Set up environment variables that the instance-aware config will pick up
-	// The database module uses DB_<CONNECTION_NAME>_<FIELD> pattern
-	os.Setenv("DEFAULT_DB_CONNECTION", "default") // Set the default connection name
-	os.Setenv("DB_DEFAULT_DRIVER", "sqlite3")
-	os.Setenv("DB_DEFAULT_DSN", ":memory:")
-	os.Setenv("DB_DEFAULT_MAX_OPEN_CONNECTIONS", "10")
-	os.Setenv("DB_DEFAULT_MAX_IDLE_CONNECTIONS", "5")
-
-	// Create observable application with empty config since we'll use env vars
+	// Use standard application setup like the working tests
 	logger := &testLogger{}
+
+	// Create basic database configuration for testing
+	dbConfig := &Config{
+		Connections: map[string]*ConnectionConfig{
+			"default": {
+				Driver:             "sqlite3",
+				DSN:                ":memory:",
+				MaxOpenConnections: 10,
+				MaxIdleConnections: 5,
+			},
+		},
+		Default: "default",
+	}
+
+	// Create provider with the database config - bypass instance-aware setup
+	dbConfigProvider := modular.NewStdConfigProvider(dbConfig)
+
+	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+
+	// Create and configure database module
+	ctx.module = NewModule()
 
 	// Create test event observer
 	ctx.eventObserver = newTestEventObserver()
 
-	// Create database module
-	ctx.module = NewModule()
+	// Register the config section with database config first
+	ctx.app.RegisterConfigSection("database", dbConfigProvider)
 
-	// Register module first (this will call RegisterConfig with instance-aware provider)
+	// Register module (this will call RegisterConfig but we'll override it)
 	ctx.app.RegisterModule(ctx.module)
-
-	// No need to override config section - the instance-aware provider will pick up env vars
 
 	// Register the event observer with the database module BEFORE Init/Start
 	// This ensures events during initialization are captured
@@ -433,11 +435,6 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnab
 	if err := ctx.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize application: %w", err)
 	}
-
-	// Debug: Check what config was actually loaded by the module
-	fmt.Printf("After Init - Module config: %+v\n", ctx.module.config)
-	fmt.Printf("After Init - Module services: %+v\n", ctx.module.services)
-	fmt.Printf("After Init - Module connections: %+v\n", ctx.module.connections)
 
 	// Start the application to enable database functionality
 	if err := ctx.app.Start(); err != nil {

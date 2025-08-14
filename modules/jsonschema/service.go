@@ -193,13 +193,10 @@ func NewJSONSchemaServiceWithEventEmitter(eventEmitter EventEmitter) JSONSchemaS
 func (s *schemaServiceImpl) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	if s.eventEmitter != nil {
 		event := modular.NewCloudEvent(eventType, "jsonschema-service", data, nil)
-		// Emit in background to avoid blocking validation
-		go func() {
-			if err := s.eventEmitter.EmitEvent(ctx, event); err != nil {
-				// Log error but don't fail the operation
-				_ = err
-			}
-		}()
+		if err := s.eventEmitter.EmitEvent(ctx, event); err != nil {
+			// Log error but don't fail the operation
+			_ = err
+		}
 	}
 }
 

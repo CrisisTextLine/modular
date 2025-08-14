@@ -189,6 +189,7 @@ func (m *SchedulerModule) Init(app modular.Application) error {
 		WithQueueSize(m.config.QueueSize),
 		WithCheckInterval(m.config.CheckInterval),
 		WithLogger(m.logger),
+		WithEventEmitter(m),
 	)
 
 	// Load persisted jobs if enabled
@@ -264,6 +265,13 @@ func (m *SchedulerModule) Stop(ctx context.Context) error {
 	}
 
 	m.running = false
+	
+	// Emit module stopped event
+	m.emitEvent(ctx, EventTypeModuleStopped, map[string]interface{}{
+		"worker_count": m.config.WorkerCount,
+		"jobs_saved":   m.config.EnablePersistence,
+	})
+	
 	m.logger.Info("Scheduler stopped")
 	return nil
 }
@@ -298,7 +306,20 @@ func (m *SchedulerModule) Constructor() modular.ModuleConstructor {
 
 // ScheduleJob schedules a new job
 func (m *SchedulerModule) ScheduleJob(job Job) (string, error) {
-	return m.scheduler.ScheduleJob(job)
+	jobID, err := m.scheduler.ScheduleJob(job)
+	if err != nil {
+		return "", err
+	}
+	
+	// Emit job scheduled event
+	m.emitEvent(context.Background(), EventTypeJobScheduled, map[string]interface{}{
+		"job_id":     jobID,
+		"job_name":   job.Name,
+		"schedule_time": job.RunAt.Format(time.RFC3339),
+		"is_recurring": job.IsRecurring,
+	})
+	
+	return jobID, nil
 }
 
 // ScheduleRecurring schedules a recurring job using a cron expression
@@ -416,9 +437,7 @@ func (m *SchedulerModule) EmitEvent(ctx context.Context, event cloudevents.Event
 func (m *SchedulerModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	event := modular.NewCloudEvent(eventType, "scheduler-service", data, nil)
 
-	go func() {
-		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			fmt.Printf("Failed to emit scheduler event %s: %v\n", eventType, emitErr)
-		}
-	}()
+	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		fmt.Printf("Failed to emit scheduler event %s: %v\n", eventType, emitErr)
+	}
 }

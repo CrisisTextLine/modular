@@ -1,23 +1,52 @@
 package letsencrypt
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cucumber/godog"
 )
 
 // LetsEncrypt BDD Test Context
 type LetsEncryptBDDTestContext struct {
-	app       modular.Application
-	service   CertificateService
-	config    *LetsEncryptConfig
-	lastError error
-	tempDir   string
-	module    *LetsEncryptModule
+	app           modular.Application
+	service       CertificateService
+	config        *LetsEncryptConfig
+	lastError     error
+	tempDir       string
+	module        *LetsEncryptModule
+	eventObserver *testEventObserver
+}
+
+// testEventObserver captures CloudEvents during testing
+type testEventObserver struct {
+	events []cloudevents.Event
+}
+
+func newTestEventObserver() *testEventObserver {
+	return &testEventObserver{
+		events: make([]cloudevents.Event, 0),
+	}
+}
+
+func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	t.events = append(t.events, event.Clone())
+	return nil
+}
+
+func (t *testEventObserver) ObserverID() string {
+	return "test-observer-letsencrypt"
+}
+
+func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	events := make([]cloudevents.Event, len(t.events))
+	copy(events, t.events)
+	return events
 }
 
 func (ctx *LetsEncryptBDDTestContext) resetContext() {
@@ -30,6 +59,7 @@ func (ctx *LetsEncryptBDDTestContext) resetContext() {
 	ctx.lastError = nil
 	ctx.tempDir = ""
 	ctx.module = nil
+	ctx.eventObserver = nil
 }
 
 func (ctx *LetsEncryptBDDTestContext) iHaveAModularApplicationWithLetsEncryptModuleConfigured() error {
@@ -281,7 +311,15 @@ func (ctx *LetsEncryptBDDTestContext) theModuleShouldUseTheStagingCADirectory() 
 }
 
 func (ctx *LetsEncryptBDDTestContext) certificateRequestsShouldUseStagingEndpoints() error {
-	// In a real implementation, this would verify the actual CA directory URL
+	// Validate that staging configuration is properly set
+	if ctx.config == nil {
+		return fmt.Errorf("LetsEncrypt configuration not available")
+	}
+	
+	if !ctx.config.Staging {
+		return fmt.Errorf("staging mode should be enabled for staging environment")
+	}
+	
 	return nil
 }
 

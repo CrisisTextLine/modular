@@ -158,6 +158,14 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 
 	if err != nil {
 		if strings.Contains(err.Error(), "token is expired") {
+			// Emit token expired event
+			tokenPrefix := tokenString
+			if len(tokenString) > 10 {
+				tokenPrefix = tokenString[:10] + "..."
+			}
+			s.emitEvent(context.Background(), EventTypeTokenExpired, map[string]interface{}{
+				"token": tokenPrefix, // Only show first 10 chars for security
+			}, nil)
 			return nil, ErrTokenExpired
 		}
 		return nil, ErrTokenInvalid
@@ -253,6 +261,15 @@ func (s *Service) RefreshToken(refreshTokenString string) (*TokenPair, error) {
 
 	if err != nil {
 		if strings.Contains(err.Error(), "token is expired") {
+			// Emit token expired event for refresh token
+			tokenPrefix := refreshTokenString
+			if len(refreshTokenString) > 10 {
+				tokenPrefix = refreshTokenString[:10] + "..."
+			}
+			s.emitEvent(context.Background(), EventTypeTokenExpired, map[string]interface{}{
+				"token":     tokenPrefix, // Only show first 10 chars for security
+				"tokenType": "refresh",
+			}, nil)
 			return nil, ErrTokenExpired
 		}
 		return nil, ErrTokenInvalid
@@ -298,7 +315,18 @@ func (s *Service) RefreshToken(refreshTokenString string) (*TokenPair, error) {
 		"permissions": user.Permissions,
 	}
 
-	return s.GenerateToken(userID, customClaims)
+	newTokenPair, err := s.GenerateToken(userID, customClaims)
+	if err != nil {
+		return nil, err
+	}
+
+	// Emit token refreshed event
+	s.emitEvent(context.Background(), EventTypeTokenRefreshed, map[string]interface{}{
+		"userID":    userID,
+		"expiresAt": newTokenPair.ExpiresAt,
+	}, nil)
+
+	return newTokenPair, nil
 }
 
 // HashPassword hashes a password using bcrypt

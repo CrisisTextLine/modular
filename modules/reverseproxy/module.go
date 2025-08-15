@@ -53,7 +53,8 @@ type ReverseProxyModule struct {
 	backendRoutes   map[string]map[string]http.HandlerFunc
 	compositeRoutes map[string]http.HandlerFunc
 	defaultBackend  string
-	app             modular.TenantApplication
+	app             modular.Application
+	tenantApp       modular.TenantApplication
 	responseCache   *responseCache
 	circuitBreakers map[string]*CircuitBreaker
 	directorFactory func(backend string, tenant modular.TenantID) func(*http.Request)
@@ -138,7 +139,16 @@ func (m *ReverseProxyModule) Name() string {
 // It also stores the provided app as a TenantApplication for later use with
 // tenant-specific functionality.
 func (m *ReverseProxyModule) RegisterConfig(app modular.Application) error {
-	m.app = app.(modular.TenantApplication)
+	// Store app as TenantApplication if it implements the interface
+	if ta, ok := app.(modular.TenantApplication); ok {
+		m.app = ta
+	}
+
+	// Bind subject early for events that may be emitted during Init
+	if subj, ok := any(app).(modular.Subject); ok {
+		m.subject = subj
+	}
+
 	// Register the config section only if it doesn't already exist (for BDD tests)
 	if _, err := app.GetConfigSection(m.Name()); err != nil {
 		// Config section doesn't exist, register a default one
@@ -146,12 +156,24 @@ func (m *ReverseProxyModule) RegisterConfig(app modular.Application) error {
 	}
 
 	return nil
-}
-
-// Init initializes the module with the provided application.
+} // Init initializes the module with the provided application.
 // It retrieves the module's configuration and sets up the internal data structures
 // for each configured backend, including tenant-specific configurations.
 func (m *ReverseProxyModule) Init(app modular.Application) error {
+	// Store both interfaces - broader Application for Subject interface, TenantApplication for specific methods
+	m.app = app
+	if ta, ok := app.(modular.TenantApplication); ok {
+		m.tenantApp = ta
+	}
+
+	// If observable, opportunistically bind subject for early Init events
+	if subj, ok := app.(modular.Subject); ok {
+		m.subject = subj
+		slog.Info("DEBUG: Init - app is Subject, binding...")
+	} else {
+		slog.Info("DEBUG: Init - app is NOT Subject")
+	}
+
 	// Get the config section
 	cfg, err := app.GetConfigSection(m.Name())
 	if err != nil {
@@ -532,10 +554,10 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 		"health_checker_enabled": m.healthChecker != nil,
 		"metrics_enabled":        m.enableMetrics,
 	})
-	
+
 	// Emit proxy started event
 	m.emitEvent(ctx, EventTypeProxyStarted, map[string]interface{}{
-		"backend_count": len(m.config.BackendServices),
+		"backend_count":  len(m.config.BackendServices),
 		"server_running": true,
 	})
 
@@ -603,11 +625,15 @@ func (m *ReverseProxyModule) Stop(ctx context.Context) error {
 	}
 
 	// Emit proxy stopped event
+	backendCount := 0
+	if m.config != nil && m.config.BackendServices != nil {
+		backendCount = len(m.config.BackendServices)
+	}
 	m.emitEvent(ctx, EventTypeProxyStopped, map[string]interface{}{
-		"backend_count": len(m.config.BackendServices),
+		"backend_count":  backendCount,
 		"server_running": false,
 	})
-	
+
 	// Emit module stopped event
 	m.emitEvent(ctx, EventTypeModuleStopped, map[string]interface{}{
 		"cleanup_complete": true,
@@ -637,7 +663,7 @@ func (m *ReverseProxyModule) loadTenantConfigs() {
 		m.app.Logger().Debug("Loading tenant configs", "count", len(m.tenants))
 	}
 	for tenantID := range m.tenants {
-		cp, err := m.app.GetTenantConfig(tenantID, m.Name())
+		cp, err := m.tenantApp.GetTenantConfig(tenantID, m.Name())
 		if err != nil {
 			m.app.Logger().Error("Failed to get config for tenant", "tenant", tenantID, "module", m.Name(), "error", err)
 			continue
@@ -1181,7 +1207,7 @@ func (m *ReverseProxyModule) SetHttpClient(client *http.Client) {
 // createReverseProxyForBackend creates a reverse proxy for a specific backend with per-backend configuration.
 func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backendID string, endpoint string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	
+
 	// Emit proxy created event
 	m.emitEvent(context.Background(), EventTypeProxyCreated, map[string]interface{}{
 		"backend_id": backendID,
@@ -2737,6 +2763,7 @@ func isEmptyComparisonResult(result ComparisonResult) bool {
 // RegisterObservers implements the ObservableModule interface.
 // This allows the reverseproxy module to register as an observer for events it's interested in.
 func (m *ReverseProxyModule) RegisterObservers(subject modular.Subject) error {
+	fmt.Printf("DEBUG: RegisterObservers called for reverseproxy module\n")
 	m.subject = subject
 	return nil
 }
@@ -2744,6 +2771,13 @@ func (m *ReverseProxyModule) RegisterObservers(subject modular.Subject) error {
 // EmitEvent implements the ObservableModule interface.
 // This allows the reverseproxy module to emit events that other modules or observers can receive.
 func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
+	// Lazily bind to application's subject if not already set, so events emitted
+	// during Init/early lifecycle still reach observers when using ObservableApplication.
+	if m.subject == nil && m.app != nil {
+		if subj, ok := any(m.app).(modular.Subject); ok {
+			m.subject = subj
+		}
+	}
 	if m.subject == nil {
 		return ErrNoSubjectForEventEmission
 	}
@@ -2758,7 +2792,32 @@ func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Ev
 func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	event := modular.NewCloudEvent(eventType, "reverseproxy-service", data, nil)
 
+	// Debug: Log the emission attempt
+	fmt.Printf("DEBUG: Attempting to emit event %s (subject=%v, app=%v)\n", eventType, m.subject != nil, m.app != nil)
+
+	// Try to emit through the module's registered subject first
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		fmt.Printf("DEBUG: Module EmitEvent failed: %v\n", emitErr)
+
+		// If module subject isn't available, try to emit directly through app if it's a Subject
+		if m.app != nil {
+			if subj, ok := any(m.app).(modular.Subject); ok {
+				fmt.Printf("DEBUG: Trying to emit via app subject\n")
+				if appErr := subj.NotifyObservers(ctx, event); appErr != nil {
+					fmt.Printf("Failed to emit reverseproxy event %s via app subject: %v\n", eventType, appErr)
+				} else {
+					fmt.Printf("DEBUG: Successfully emitted via app subject\n")
+				}
+				return // Successfully emitted via app, no need to log error
+			} else {
+				fmt.Printf("DEBUG: App is not a Subject\n")
+			}
+		} else {
+			fmt.Printf("DEBUG: App is nil\n")
+		}
+		// Log the original error if we couldn't emit via app either
 		fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
+	} else {
+		fmt.Printf("DEBUG: Successfully emitted via module subject\n")
 	}
 }

@@ -178,13 +178,27 @@ func (m *CacheModule) Init(app modular.Application) error {
 	// Initialize the appropriate cache engine based on configuration
 	switch m.config.Engine {
 	case "memory":
-		m.cacheEngine = NewMemoryCache(m.config)
+		memCache := NewMemoryCache(m.config)
+		// Provide event emission callback to memory cache
+		memCache.SetEventEmitter(func(ctx context.Context, event cloudevents.Event) {
+			if err := m.EmitEvent(ctx, event); err != nil {
+				m.logger.Debug("Failed to emit cache event from memory engine", "error", err, "event_type", event.Type())
+			}
+		})
+		m.cacheEngine = memCache
 		m.logger.Info("Initialized memory cache engine", "maxItems", m.config.MaxItems)
 	case "redis":
 		m.cacheEngine = NewRedisCache(m.config)
 		m.logger.Info("Initialized Redis cache engine", "url", m.config.RedisURL)
 	default:
-		m.cacheEngine = NewMemoryCache(m.config)
+		memCache := NewMemoryCache(m.config)
+		// Provide event emission callback to memory cache for fallback case too
+		memCache.SetEventEmitter(func(ctx context.Context, event cloudevents.Event) {
+			if err := m.EmitEvent(ctx, event); err != nil {
+				m.logger.Debug("Failed to emit cache event from memory engine", "error", err, "event_type", event.Type())
+			}
+		})
+		m.cacheEngine = memCache
 		m.logger.Warn("Unknown cache engine specified, using memory cache", "specified", m.config.Engine)
 	}
 

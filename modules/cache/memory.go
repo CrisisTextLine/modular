@@ -4,15 +4,19 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/CrisisTextLine/modular"
 )
 
 // MemoryCache implements CacheEngine using in-memory storage
 type MemoryCache struct {
-	config     *CacheConfig
-	items      map[string]cacheItem
-	mutex      sync.RWMutex
-	cleanupCtx context.Context
-	cancelFunc context.CancelFunc
+	config       *CacheConfig
+	items        map[string]cacheItem
+	mutex        sync.RWMutex
+	cleanupCtx   context.Context
+	cancelFunc   context.CancelFunc
+	eventEmitter func(ctx context.Context, event cloudevents.Event) // Callback for emitting events
 }
 
 type cacheItem struct {
@@ -26,6 +30,16 @@ func NewMemoryCache(config *CacheConfig) *MemoryCache {
 		config: config,
 		items:  make(map[string]cacheItem),
 	}
+}
+
+// SetEventEmitter sets the event emission callback for the memory cache
+func (c *MemoryCache) SetEventEmitter(emitter func(ctx context.Context, event cloudevents.Event)) {
+	c.eventEmitter = emitter
+}
+
+// TriggerCleanup manually triggers the cleanup process (mainly for testing)
+func (c *MemoryCache) TriggerCleanup() {
+	c.cleanupExpiredItems()
 }
 
 // Connect initializes the memory cache
@@ -78,10 +92,22 @@ func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, ttl 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// If cache is full, reject new items
+	// If cache is full, reject new items (or evict old ones if we implement LRU)
 	if c.config.MaxItems > 0 && len(c.items) >= c.config.MaxItems {
 		_, exists := c.items[key]
 		if !exists {
+			// Cache is full and this is a new key, emit eviction event
+			if c.eventEmitter != nil {
+				event := modular.NewCloudEvent(EventTypeCacheEvicted, "cache-service", map[string]interface{}{
+					"reason":     "cache_full",
+					"max_items":  c.config.MaxItems,
+					"new_key":    key,
+				}, nil)
+				
+				go func() {
+					c.eventEmitter(context.Background(), event)
+				}()
+			}
 			return ErrCacheFull
 		}
 	}
@@ -169,9 +195,27 @@ func (c *MemoryCache) cleanupExpiredItems() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
+	expiredKeys := make([]string, 0)
+
 	for key, item := range c.items {
 		if !item.expiration.IsZero() && now.After(item.expiration) {
+			expiredKeys = append(expiredKeys, key)
 			delete(c.items, key)
 		}
+	}
+
+	// Emit expired events for each expired key
+	if c.eventEmitter != nil && len(expiredKeys) > 0 {
+		go func() {
+			for _, key := range expiredKeys {
+				event := modular.NewCloudEvent(EventTypeCacheExpired, "cache-service", map[string]interface{}{
+					"cache_key":   key,
+					"expired_at":  now.Format(time.RFC3339),
+					"reason":      "ttl_expired",
+				}, nil)
+				
+				c.eventEmitter(context.Background(), event)
+			}
+		}()
 	}
 }

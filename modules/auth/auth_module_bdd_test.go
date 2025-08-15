@@ -17,6 +17,8 @@ type AuthBDDTestContext struct {
 	module          *Module
 	service         *Service
 	token           string
+	refreshToken    string
+	newToken        string
 	claims          *Claims
 	password        string
 	hashedPassword  string
@@ -24,6 +26,7 @@ type AuthBDDTestContext struct {
 	strengthError   error
 	session         *Session
 	sessionID       string
+	originalExpiresAt time.Time
 	user            *User
 	userID          string
 	authResult      *User
@@ -86,12 +89,15 @@ func (ctx *AuthBDDTestContext) resetContext() {
 	ctx.strengthError = nil
 	ctx.session = nil
 	ctx.sessionID = ""
+	ctx.originalExpiresAt = time.Time{}
 	ctx.user = nil
 	ctx.userID = ""
 	ctx.authResult = nil
 	ctx.authError = nil
 	ctx.oauthURL = ""
 	ctx.lastError = nil
+	ctx.refreshToken = ""
+	ctx.newToken = ""
 	// Reset event observation fields
 	ctx.observableApp = nil
 	ctx.capturedEvents = nil
@@ -770,6 +776,7 @@ func InitializeAuthScenario(ctx *godog.ScenarioContext) {
 	// JWT token steps
 	ctx.Step(`^I have user credentials and JWT configuration$`, testCtx.iHaveUserCredentialsAndJWTConfiguration)
 	ctx.Step(`^I generate a JWT token for the user$`, testCtx.iGenerateAJWTTokenForTheUser)
+	ctx.Step(`^I generate a JWT token for a user$`, testCtx.iGenerateAJWTTokenForTheUser)
 	ctx.Step(`^the token should be created successfully$`, testCtx.theTokenShouldBeCreatedSuccessfully)
 	ctx.Step(`^the token should contain the user information$`, testCtx.theTokenShouldContainTheUserInformation)
 
@@ -861,6 +868,11 @@ func InitializeAuthScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^an OAuth2 auth URL event should be emitted$`, testCtx.anOAuth2AuthURLEventShouldBeEmitted)
 	ctx.Step(`^I exchange an OAuth2 code for tokens$`, testCtx.iExchangeAnOAuth2CodeForTokens)
 	ctx.Step(`^an OAuth2 exchange event should be emitted$`, testCtx.anOAuth2ExchangeEventShouldBeEmitted)
+
+	// Session expired event testing
+	ctx.Step(`^I access an expired session$`, testCtx.iAccessAnExpiredSession)
+	ctx.Step(`^a session expired event should be emitted$`, testCtx.aSessionExpiredEventShouldBeEmitted)
+	ctx.Step(`^the session access should fail$`, testCtx.theSessionAccessShouldFail)
 }
 
 // TestAuthModule runs the BDD tests for the auth module
@@ -1117,4 +1129,42 @@ func (ctx *AuthBDDTestContext) getEmittedEventTypes() []string {
 		types = append(types, event.Type())
 	}
 	return types
+}
+
+// Additional BDD step implementations for missing events
+
+func (ctx *AuthBDDTestContext) iAccessAnExpiredSession() error {
+	// Create an expired session directly in the store
+	expiredSession := &Session{
+		ID:        "expired-session",
+		UserID:    "test-user",
+		CreatedAt: time.Now().Add(-2 * time.Hour),
+		ExpiresAt: time.Now().Add(-1 * time.Hour), // Already expired
+		Active:    true,
+		Metadata:  map[string]interface{}{"test": "data"},
+	}
+	
+	// Store the expired session
+	err := ctx.service.sessionStore.Store(context.Background(), expiredSession)
+	if err != nil {
+		return fmt.Errorf("failed to store expired session: %w", err)
+	}
+	
+	ctx.sessionID = expiredSession.ID
+	
+	// Try to access the expired session
+	_, err = ctx.service.GetSession(ctx.sessionID)
+	ctx.lastError = err
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) aSessionExpiredEventShouldBeEmitted() error {
+	return ctx.checkEventEmitted(EventTypeSessionExpired)
+}
+
+func (ctx *AuthBDDTestContext) theSessionAccessShouldFail() error {
+	if ctx.lastError == nil {
+		return fmt.Errorf("expected session access to fail, but it succeeded")
+	}
+	return nil
 }

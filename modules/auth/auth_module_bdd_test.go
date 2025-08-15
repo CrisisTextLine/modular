@@ -937,9 +937,9 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 				"test-provider": {
 					ClientID:     "test-client-id",
 					ClientSecret: "test-client-secret",
-					RedirectURL:  "http://localhost/callback",
-					AuthURL:      "https://provider.com/auth",
-					TokenURL:     "https://provider.com/token",
+					RedirectURL:  "http://127.0.0.1:8080/callback",
+					AuthURL:      "http://127.0.0.1:8080/auth",
+					TokenURL:     "http://127.0.0.1:8080/token",
 					Scopes:       []string{"openid", "profile"},
 				},
 			},

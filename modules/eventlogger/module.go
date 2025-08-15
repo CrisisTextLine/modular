@@ -165,6 +165,12 @@ func (m *EventLoggerModule) Name() string {
 
 // RegisterConfig registers the module's configuration structure.
 func (m *EventLoggerModule) RegisterConfig(app modular.Application) error {
+	// Check if config section already exists (for testing or custom configurations)
+	if _, err := app.GetConfigSection(m.Name()); err == nil {
+		// Config section already exists, don't override it
+		return nil
+	}
+
 	// Register the configuration with default values
 	defaultConfig := &EventLoggerConfig{
 		Enabled:           true,

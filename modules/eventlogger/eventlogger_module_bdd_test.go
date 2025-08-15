@@ -809,7 +809,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithEventObservationEnab
 	}
 
 	// Manually ensure observers are registered - this might not be happening automatically
-	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+	if err := ctx.module.RegisterObservers(ctx.app.(*modular.ObservableApplication)); err != nil {
 		return fmt.Errorf("failed to manually register observers: %w", err)
 	}
 
@@ -1076,7 +1076,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithSmallBufferAndEventO
 	}
 
 	// Manually ensure observers are registered - this might not be happening automatically
-	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+	if err := ctx.module.RegisterObservers(ctx.app.(*modular.ObservableApplication)); err != nil {
 		return fmt.Errorf("failed to manually register observers: %w", err)
 	}
 

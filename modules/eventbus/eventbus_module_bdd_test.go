@@ -940,6 +940,23 @@ func (ctx *EventBusBDDTestContext) aBusStoppedEventShouldBeEmitted() error {
 	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeBusStopped, eventTypes)
 }
 
+func (ctx *EventBusBDDTestContext) aSubscriptionRemovedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeSubscriptionRemoved {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	return fmt.Errorf("subscription removed event not found. Available events: %v", eventTypes)
+}
+
 func (ctx *EventBusBDDTestContext) setupApplicationWithConfig() error {
 	logger := &testLogger{}
 
@@ -1068,8 +1085,8 @@ func TestEventBusModuleBDD(t *testing.T) {
 			// Event observation steps
 			ctx.Given(`^I have an eventbus service with event observation enabled$`, testCtx.iHaveAnEventbusServiceWithEventObservationEnabled)
 			ctx.Then(`^a message published event should be emitted$`, testCtx.aMessagePublishedEventShouldBeEmitted)
-			ctx.Then(`^a message received event should be emitted$`, testCtx.aMessageReceivedEventShouldBeEmitted)
 			ctx.Then(`^a subscription created event should be emitted$`, testCtx.aSubscriptionCreatedEventShouldBeEmitted)
+			ctx.Then(`^a subscription removed event should be emitted$`, testCtx.aSubscriptionRemovedEventShouldBeEmitted)
 			ctx.When(`^the eventbus module starts$`, testCtx.theEventbusModuleStarts)
 			ctx.Then(`^a config loaded event should be emitted$`, testCtx.aConfigLoadedEventShouldBeEmitted)
 			ctx.Then(`^a bus started event should be emitted$`, testCtx.aBusStartedEventShouldBeEmitted)

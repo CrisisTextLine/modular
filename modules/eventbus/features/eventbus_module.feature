@@ -103,3 +103,16 @@ Feature: EventBus Module
     And a bus started event should be emitted
     When the eventbus is stopped
     Then a bus stopped event should be emitted
+
+  Scenario: Event observation during subscription management
+    Given I have an eventbus service with event observation enabled
+    When I subscribe to topic "user.created" with a handler
+    Then a subscription created event should be emitted
+    When I unsubscribe from the topic
+    Then a subscription removed event should be emitted
+
+  Scenario: Event observation during message publishing
+    Given I have an eventbus service with event observation enabled
+    When I subscribe to topic "message.test" with a handler
+    And I publish an event to topic "message.test" with payload "test-data"
+    Then a message published event should be emitted

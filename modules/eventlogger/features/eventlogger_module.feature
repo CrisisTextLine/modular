@@ -93,3 +93,9 @@ Feature: Event Logger Module
     Then buffer full events should be emitted
     And event dropped events should be emitted
     And the events should contain drop reasons
+
+  Scenario: Emit events when output target fails
+    Given I have an event logger with faulty output target and event observation enabled
+    When I emit a test event for processing
+    Then an output error event should be emitted
+    And the error event should contain error details

@@ -3,6 +3,7 @@ package reverseproxy
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -823,12 +824,63 @@ func (ctx *ReverseProxyBDDTestContext) iHaveABackendServiceConfigured() error {
 }
 
 func (ctx *ReverseProxyBDDTestContext) iSendARequestToTheReverseProxy() error {
-	// Clear previous events to focus on this request
-	ctx.eventObserver.ClearEvents()
+	// Debug: Check if app is started and service is available
+	if ctx.service == nil {
+		return fmt.Errorf("service not available")
+	}
 	
-	// Since this is BDD testing, we'll simulate the request handling by calling the handler directly
-	// In a real implementation, this would make an HTTP request to the proxy server
+	// Make sure the application is started so routes are registered
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start app: %w", err)
+	}
+	
+	fmt.Printf("Debug: Making request to /api/test\n")
+	
+	// Make an actual request through the module to trigger events
+	resp, err := ctx.makeRequestThroughModule("GET", "/api/test", nil)
+	if err != nil {
+		return fmt.Errorf("failed to make request through module: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	ctx.lastResponse = resp
+	
+	// Give time for async event emission
+	time.Sleep(100 * time.Millisecond)
 	return nil
+}
+
+// Helper method to make requests through the module
+func (ctx *ReverseProxyBDDTestContext) makeRequestThroughModule(method, path string, body io.Reader) (*http.Response, error) {
+	// Create a test request
+	req := httptest.NewRequest(method, path, body)
+	
+	// Create a test response recorder
+	w := httptest.NewRecorder()
+	
+	// Get the router service and serve the request
+	var router routerService
+	if err := ctx.app.GetService("router", &router); err != nil {
+		return nil, fmt.Errorf("failed to get router service: %w", err)
+	}
+	
+	// Debug: Check what routes are registered
+	if testRouter, ok := router.(*testRouter); ok {
+		fmt.Printf("Debug: testRouter has %d routes registered\n", len(testRouter.routes))
+		for pattern := range testRouter.routes {
+			fmt.Printf("Debug: registered route: %s\n", pattern)
+		}
+	}
+	
+	// Serve the request through the router
+	router.ServeHTTP(w, req)
+	
+	// Debug: Check response
+	fmt.Printf("Debug: response status: %d\n", w.Code)
+	
+	// Convert the recorded response to an http.Response
+	result := w.Result()
+	return result, nil
 }
 
 func (ctx *ReverseProxyBDDTestContext) aRequestReceivedEventShouldBeEmitted() error {

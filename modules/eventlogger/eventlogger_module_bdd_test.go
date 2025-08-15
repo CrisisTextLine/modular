@@ -1189,6 +1189,9 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithSmallBufferAndEventO
 	
 	ctx.service.config = freshConfig
 
+	// Re-initialize channels with the correct buffer size since channels were created in Init
+	ctx.service.eventChan = make(chan cloudevents.Event, freshConfig.BufferSize)
+
 	// Re-initialize output targets with the correct config
 	ctx.service.outputs = make([]OutputTarget, 0, len(freshConfig.OutputTargets))
 	for i, targetConfig := range freshConfig.OutputTargets {

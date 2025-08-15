@@ -2762,3 +2762,10 @@ func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, da
 		fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
 	}
 }
+
+// Compile-time interface compliance checks
+var _ modular.Module = (*ReverseProxyModule)(nil)
+var _ modular.ObservableModule = (*ReverseProxyModule)(nil)
+var _ modular.TenantAwareModule = (*ReverseProxyModule)(nil)
+var _ modular.Startable = (*ReverseProxyModule)(nil)
+var _ modular.Stoppable = (*ReverseProxyModule)(nil)

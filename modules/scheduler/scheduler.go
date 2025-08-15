@@ -234,6 +234,7 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 		close(done)
 	}()
 
+	var shutdownErr error
 	select {
 	case <-done:
 		if s.logger != nil {
@@ -243,7 +244,7 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 		if s.logger != nil {
 			s.logger.Warn("Scheduler shutdown timed out")
 		}
-		return ErrSchedulerShutdownTimeout
+		shutdownErr = ErrSchedulerShutdownTimeout
 	case <-cronCtx.Done():
 		if s.logger != nil {
 			s.logger.Info("Cron scheduler stopped")
@@ -252,12 +253,12 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 
 	s.isStarted = false
 	
-	// Emit scheduler stopped event
+	// Always emit scheduler stopped event, regardless of shutdown result
 	s.emitEvent(context.Background(), EventTypeSchedulerStopped, map[string]interface{}{
 		"worker_count": s.workerCount,
 	})
 	
-	return nil
+	return shutdownErr
 }
 
 // worker processes jobs from the queue
@@ -588,6 +589,13 @@ func (s *Scheduler) CancelJob(jobID string) error {
 		}
 		s.entryMutex.Unlock()
 	}
+
+	// Emit job cancelled event
+	s.emitEvent(context.Background(), EventTypeJobCancelled, map[string]interface{}{
+		"job_id":   job.ID,
+		"job_name": job.Name,
+		"cancelled_at": time.Now().Format(time.RFC3339),
+	})
 
 	return nil
 }

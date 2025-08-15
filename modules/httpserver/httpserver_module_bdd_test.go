@@ -910,14 +910,20 @@ func TestHTTPServerModuleBDD(t *testing.T) {
 			ctx.When(`^the httpserver module starts$`, func() error { return nil }) // Already started in Given step
 			ctx.Then(`^a server started event should be emitted$`, testCtx.aServerStartedEventShouldBeEmitted)
 			ctx.Then(`^a config loaded event should be emitted$`, testCtx.aConfigLoadedEventShouldBeEmitted)
-			ctx.And(`^the events should contain server configuration details$`, testCtx.theEventsShouldContainServerConfigurationDetails)
+			ctx.Then(`^the events should contain server configuration details$`, testCtx.theEventsShouldContainServerConfigurationDetails)
 
 			// TLS configuration events
 			ctx.Given(`^I have an httpserver with TLS and event observation enabled$`, testCtx.iHaveAnHTTPServerWithTLSAndEventObservationEnabled)
 			ctx.When(`^the TLS server module starts$`, func() error { return nil }) // Already started in Given step
 			ctx.Then(`^a TLS enabled event should be emitted$`, testCtx.aTLSEnabledEventShouldBeEmitted)
 			ctx.Then(`^a TLS configured event should be emitted$`, testCtx.aTLSConfiguredEventShouldBeEmitted)
-			ctx.And(`^the events should contain TLS configuration details$`, testCtx.theEventsShouldContainTLSConfigurationDetails)
+			ctx.Then(`^the events should contain TLS configuration details$`, testCtx.theEventsShouldContainTLSConfigurationDetails)
+
+			// Request handling events
+			ctx.When(`^the httpserver processes a request$`, testCtx.theHTTPServerProcessesARequest)
+			ctx.Then(`^a request received event should be emitted$`, testCtx.aRequestReceivedEventShouldBeEmitted)
+			ctx.Then(`^a request handled event should be emitted$`, testCtx.aRequestHandledEventShouldBeEmitted)
+			ctx.Then(`^the events should contain request details$`, testCtx.theEventsShouldContainRequestDetails)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",
@@ -939,28 +945,31 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 
 	// Create httpserver configuration for testing
 	ctx.serverConfig = &HTTPServerConfig{
-		HTTP: HTTPConfig{
-			Address: "localhost",
-			Port:    "0", // Use random port for testing
-		},
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		ShutdownTimeout:   10 * time.Second,
-		MaxHeaderBytes:    1024 * 1024,
-		EnableHealthCheck: true,
-		HealthCheckPath:   "/health",
+		Host:            "127.0.0.1",
+		Port:            8091, // Use a fixed port for event testing
+		ReadTimeout:     30 * time.Second,
+		WriteTimeout:    30 * time.Second,
+		IdleTimeout:     120 * time.Second,
+		ShutdownTimeout: 10 * time.Second,
+	}
+
+	// Create a copy of the config to avoid issues
+	configCopy := &HTTPServerConfig{
+		Host:            ctx.serverConfig.Host,
+		Port:            ctx.serverConfig.Port,
+		ReadTimeout:     ctx.serverConfig.ReadTimeout,
+		WriteTimeout:    ctx.serverConfig.WriteTimeout,
+		IdleTimeout:     ctx.serverConfig.IdleTimeout,
+		ShutdownTimeout: ctx.serverConfig.ShutdownTimeout,
+		TLS:             nil, // No TLS for basic event testing
 	}
 
 	// Create provider with the httpserver config
-	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
+	serverConfigProvider := modular.NewStdConfigProvider(configCopy)
 
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
-
-	// Create and register httpserver module
-	ctx.module = NewModule().(*HTTPServerModule)
 
 	// Create test event observer
 	ctx.eventObserver = newTestEventObserver()
@@ -970,11 +979,30 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 		return fmt.Errorf("failed to register test observer: %w", err)
 	}
 
+	// Create a proper router service like the working tests
+	router := http.NewServeMux()
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	})
+
+	// Register the router service
+	if err := ctx.app.RegisterService("router", router); err != nil {
+		return fmt.Errorf("failed to register router service: %w", err)
+	}
+
+	// Create and register httpserver module
+	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
+
+	// Register the HTTP server config section first
+	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)
+
 	// Register module
 	ctx.app.RegisterModule(ctx.module)
-
-	// Now override the config section with our direct configuration
-	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)
 
 	// Initialize the application (this triggers automatic RegisterObservers)
 	if err := ctx.app.Init(); err != nil {
@@ -1008,35 +1036,50 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 
 	// Create httpserver configuration with TLS for testing
 	ctx.serverConfig = &HTTPServerConfig{
-		HTTP: HTTPConfig{
-			Address: "localhost",
-			Port:    "0", // Use random port for testing
+		Host:            "127.0.0.1",
+		Port:            8092, // Use a fixed port for TLS event testing
+		ReadTimeout:     30 * time.Second,
+		WriteTimeout:    30 * time.Second,
+		IdleTimeout:     120 * time.Second,
+		ShutdownTimeout: 10 * time.Second,
+		TLS: &TLSConfig{
+			Enabled:      true,
+			CertFile:     "",
+			KeyFile:      "",
+			AutoGenerate: true,
+			Domains:      []string{"localhost"},
 		},
-		HTTPS: HTTPSConfig{
-			Address:  "localhost",
-			Port:     "0", // Use random port for testing
-			Enabled:  true,
-			CertFile: "/tmp/test-cert.pem",
-			KeyFile:  "/tmp/test-key.pem",
-		},
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		ShutdownTimeout:   10 * time.Second,
-		MaxHeaderBytes:    1024 * 1024,
-		EnableHealthCheck: true,
-		HealthCheckPath:   "/health",
+	}
+
+	// Create a copy of the config to avoid issues
+	configCopy := &HTTPServerConfig{
+		Host:            ctx.serverConfig.Host,
+		Port:            ctx.serverConfig.Port,
+		ReadTimeout:     ctx.serverConfig.ReadTimeout,
+		WriteTimeout:    ctx.serverConfig.WriteTimeout,
+		IdleTimeout:     ctx.serverConfig.IdleTimeout,
+		ShutdownTimeout: ctx.serverConfig.ShutdownTimeout,
+	}
+
+	// Copy TLS config properly
+	if ctx.serverConfig.TLS != nil {
+		configCopy.TLS = &TLSConfig{
+			Enabled:      ctx.serverConfig.TLS.Enabled,
+			AutoGenerate: ctx.serverConfig.TLS.AutoGenerate,
+			CertFile:     ctx.serverConfig.TLS.CertFile,
+			KeyFile:      ctx.serverConfig.TLS.KeyFile,
+			Domains:      make([]string, len(ctx.serverConfig.TLS.Domains)),
+			UseService:   ctx.serverConfig.TLS.UseService,
+		}
+		copy(configCopy.TLS.Domains, ctx.serverConfig.TLS.Domains)
 	}
 
 	// Create provider with the httpserver config
-	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
+	serverConfigProvider := modular.NewStdConfigProvider(configCopy)
 
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
-
-	// Create and register httpserver module
-	ctx.module = NewModule().(*HTTPServerModule)
 
 	// Create test event observer
 	ctx.eventObserver = newTestEventObserver()
@@ -1046,11 +1089,30 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 		return fmt.Errorf("failed to register test observer: %w", err)
 	}
 
+	// Create a proper router service like the working tests
+	router := http.NewServeMux()
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	})
+
+	// Register the router service
+	if err := ctx.app.RegisterService("router", router); err != nil {
+		return fmt.Errorf("failed to register router service: %w", err)
+	}
+
+	// Create and register httpserver module
+	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
+
+	// Register the HTTP server config section first
+	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)
+
 	// Register module
 	ctx.app.RegisterModule(ctx.module)
-
-	// Now override the config section with our direct configuration
-	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)
 
 	// Initialize the application (this triggers automatic RegisterObservers)
 	if err := ctx.app.Init(); err != nil {
@@ -1195,4 +1257,91 @@ func (ctx *HTTPServerBDDTestContext) theEventsShouldContainTLSConfigurationDetai
 	}
 
 	return fmt.Errorf("TLS configured event not found")
+}
+
+// Request event step implementations
+func (ctx *HTTPServerBDDTestContext) theHTTPServerProcessesARequest() error {
+	// Make a test HTTP request to the server to trigger request events
+	if ctx.service == nil {
+		return fmt.Errorf("server not available")
+	}
+	
+	// Give the server a moment to fully start
+	time.Sleep(200 * time.Millisecond)
+	
+	// Make a simple request using the configured port
+	client := &http.Client{Timeout: 5 * time.Second}
+	url := fmt.Sprintf("http://127.0.0.1:%d/", ctx.service.config.Port)
+	
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to make request to %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	
+	// Read the response to ensure the request completes
+	_, _ = resp.Body.Read(make([]byte, 100))
+	
+	// Give time for async event emission
+	time.Sleep(300 * time.Millisecond)
+	
+	return nil
+}
+
+func (ctx *HTTPServerBDDTestContext) aRequestReceivedEventShouldBeEmitted() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeRequestReceived {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestReceived, eventTypes)
+}
+
+func (ctx *HTTPServerBDDTestContext) aRequestHandledEventShouldBeEmitted() error {
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeRequestHandled {
+			return nil
+		}
+	}
+	
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestHandled, eventTypes)
+}
+
+func (ctx *HTTPServerBDDTestContext) theEventsShouldContainRequestDetails() error {
+	events := ctx.eventObserver.GetEvents()
+	
+	// Check request received event has request details
+	for _, event := range events {
+		if event.Type() == EventTypeRequestReceived {
+			var data map[string]interface{}
+			if err := event.DataAs(&data); err != nil {
+				return fmt.Errorf("failed to extract request received event data: %v", err)
+			}
+			
+			// Check for key request fields
+			if _, exists := data["method"]; !exists {
+				return fmt.Errorf("request received event should contain method field")
+			}
+			if _, exists := data["url"]; !exists {
+				return fmt.Errorf("request received event should contain url field")
+			}
+			
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("request received event not found")
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cucumber/godog"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // Auth BDD Test Context
@@ -861,6 +862,18 @@ func InitializeAuthScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^an OAuth2 auth URL event should be emitted$`, testCtx.anOAuth2AuthURLEventShouldBeEmitted)
 	ctx.Step(`^I exchange an OAuth2 code for tokens$`, testCtx.iExchangeAnOAuth2CodeForTokens)
 	ctx.Step(`^an OAuth2 exchange event should be emitted$`, testCtx.anOAuth2ExchangeEventShouldBeEmitted)
+
+	// Additional event observation steps
+	ctx.Step(`^I generate a JWT token for a user$`, testCtx.iGenerateAJWTTokenForAUser)
+	ctx.Step(`^a token expired event should be emitted$`, testCtx.aTokenExpiredEventShouldBeEmitted)
+	ctx.Step(`^a token refreshed event should be emitted$`, testCtx.aTokenRefreshedEventShouldBeEmitted)
+	ctx.Step(`^a session expired event should be emitted$`, testCtx.aSessionExpiredEventShouldBeEmitted)
+	ctx.Step(`^I have an expired session$`, testCtx.iHaveAnExpiredSession)
+	ctx.Step(`^I attempt to access the expired session$`, testCtx.iAttemptToAccessTheExpiredSession)
+	ctx.Step(`^the session access should fail$`, testCtx.theSessionAccessShouldFail)
+	ctx.Step(`^I have an expired token for refresh$`, testCtx.iHaveAnExpiredTokenForRefresh)
+	ctx.Step(`^I attempt to refresh the expired token$`, testCtx.iAttemptToRefreshTheExpiredToken)
+	ctx.Step(`^the token refresh should fail$`, testCtx.theTokenRefreshShouldFail)
 }
 
 // TestAuthModule runs the BDD tests for the auth module
@@ -1117,4 +1130,99 @@ func (ctx *AuthBDDTestContext) getEmittedEventTypes() []string {
 		types = append(types, event.Type())
 	}
 	return types
+}
+
+// Additional step definitions for missing events
+
+func (ctx *AuthBDDTestContext) iGenerateAJWTTokenForAUser() error {
+	return ctx.iGenerateAJWTTokenForTheUser()
+}
+
+func (ctx *AuthBDDTestContext) aTokenExpiredEventShouldBeEmitted() error {
+	return ctx.checkEventEmitted(EventTypeTokenExpired)
+}
+
+func (ctx *AuthBDDTestContext) aTokenRefreshedEventShouldBeEmitted() error {
+	return ctx.checkEventEmitted(EventTypeTokenRefreshed)
+}
+
+func (ctx *AuthBDDTestContext) aSessionExpiredEventShouldBeEmitted() error {
+	return ctx.checkEventEmitted(EventTypeSessionExpired)
+}
+
+func (ctx *AuthBDDTestContext) iHaveAnExpiredSession() error {
+	ctx.userID = "expired-session-user"
+	// Create session that expires immediately
+	session := &Session{
+		ID:        "expired-session-123",
+		UserID:    ctx.userID,
+		CreatedAt: time.Now().Add(-2 * time.Hour),
+		ExpiresAt: time.Now().Add(-1 * time.Hour), // Already expired
+		Active:    true,
+		Metadata: map[string]interface{}{
+			"test": "expired_session",
+		},
+	}
+
+	// Store the expired session directly in the session store
+	err := ctx.service.sessionStore.Store(context.Background(), session)
+	if err != nil {
+		return fmt.Errorf("failed to create expired session: %v", err)
+	}
+
+	ctx.sessionID = session.ID
+	ctx.session = session
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) iAttemptToAccessTheExpiredSession() error {
+	// This should trigger the session expired event
+	_, err := ctx.service.GetSession(ctx.sessionID)
+	ctx.lastError = err // Store error but don't return it as this is expected behavior
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) theSessionAccessShouldFail() error {
+	if ctx.lastError == nil {
+		return fmt.Errorf("expected session access to fail for expired session")
+	}
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) iHaveAnExpiredTokenForRefresh() error {
+	// Create a token that's already expired for testing expired token during refresh
+	now := time.Now().Add(-2 * time.Hour) // 2 hours ago
+	claims := jwt.MapClaims{
+		"user_id": "expired-refresh-user",
+		"type":    "refresh",
+		"iat":     now.Unix(),
+		"exp":     now.Add(-1 * time.Hour).Unix(), // Expired 1 hour ago
+	}
+
+	if ctx.service.config.JWT.Issuer != "" {
+		claims["iss"] = ctx.service.config.JWT.Issuer
+	}
+	claims["sub"] = "expired-refresh-user"
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	expiredToken, err := token.SignedString([]byte(ctx.service.config.JWT.Secret))
+	if err != nil {
+		return fmt.Errorf("failed to create expired token: %w", err)
+	}
+
+	ctx.token = expiredToken
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) iAttemptToRefreshTheExpiredToken() error {
+	_, err := ctx.service.RefreshToken(ctx.token)
+	ctx.lastError = err // Store error but don't return it as this is expected behavior
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) theTokenRefreshShouldFail() error {
+	if ctx.lastError == nil {
+		return fmt.Errorf("expected token refresh to fail for expired token")
+	}
+	return nil
 }

@@ -136,3 +136,22 @@ Feature: Authentication Module
     Then an OAuth2 auth URL event should be emitted
     When I exchange an OAuth2 code for tokens
     Then an OAuth2 exchange event should be emitted
+
+  Scenario: Emit session expired event
+    Given I have an auth module with event observation enabled
+    When I access an expired session
+    Then a session expired event should be emitted
+    And the session access should fail
+
+  Scenario: Emit token expired event
+    Given I have an auth module with event observation enabled
+    When I validate an expired token
+    Then a token expired event should be emitted
+    And the token should be rejected
+
+  Scenario: Emit token refreshed event
+    Given I have an auth module with event observation enabled
+    And I have a valid refresh token
+    When I refresh the token
+    Then a token refreshed event should be emitted
+    And a new access token should be provided

@@ -149,14 +149,15 @@ const ServiceName = "httpclient"
 //
 // The HTTP client is thread-safe and can be used concurrently from multiple goroutines.
 type HTTPClientModule struct {
-	config     *Config
-	app        modular.Application
-	logger     modular.Logger
-	fileLogger *FileLogger
-	httpClient *http.Client
-	transport  *http.Transport
-	modifier   RequestModifierFunc
-	subject    modular.Subject
+	config         *Config
+	app            modular.Application
+	logger         modular.Logger
+	fileLogger     *FileLogger
+	httpClient     *http.Client
+	transport      *http.Transport
+	modifier       RequestModifierFunc
+	namedModifiers map[string]func(*http.Request) error // For named modifier management
+	subject        modular.Subject
 }
 
 // Make sure HTTPClientModule implements necessary interfaces
@@ -174,7 +175,8 @@ var (
 //	app.RegisterModule(httpclient.NewHTTPClientModule())
 func NewHTTPClientModule() modular.Module {
 	return &HTTPClientModule{
-		modifier: func(r *http.Request) *http.Request { return r }, // Default no-op modifier
+		modifier:       func(r *http.Request) *http.Request { return r }, // Default no-op modifier
+		namedModifiers: make(map[string]func(*http.Request) error),       // Initialize named modifiers map
 	}
 }
 
@@ -300,18 +302,8 @@ func (m *HTTPClientModule) Init(app modular.Application) error {
 		Timeout:   m.config.RequestTimeout,
 	}
 
-	// Emit configuration loaded event
+	// Emit client created event (but not config loaded yet - that happens in Start)
 	ctx := context.Background()
-	m.emitEvent(ctx, EventTypeConfigLoaded, map[string]interface{}{
-		"request_timeout_seconds": m.config.RequestTimeout.Seconds(),
-		"max_idle_conns":          m.config.MaxIdleConns,
-		"max_idle_conns_per_host": m.config.MaxIdleConnsPerHost,
-		"compression_disabled":    m.config.DisableCompression,
-		"keep_alive_disabled":     m.config.DisableKeepAlives,
-		"verbose_enabled":         m.config.Verbose,
-	})
-
-	// Emit client created event
 	m.emitEvent(ctx, EventTypeClientCreated, map[string]interface{}{
 		"timeout_seconds": m.config.RequestTimeout.Seconds(),
 	})
@@ -322,6 +314,22 @@ func (m *HTTPClientModule) Init(app modular.Application) error {
 // Start performs startup logic for the module.
 func (m *HTTPClientModule) Start(ctx context.Context) error {
 	m.logger.Info("Starting HTTP client module")
+
+	// Emit configuration loaded event (now that observers are set up)
+	m.emitEvent(ctx, EventTypeConfigLoaded, map[string]interface{}{
+		"request_timeout":         m.config.RequestTimeout.Seconds(),
+		"max_idle_conns":          m.config.MaxIdleConns,
+		"max_idle_conns_per_host": m.config.MaxIdleConnsPerHost,
+		"compression_disabled":    m.config.DisableCompression,
+		"keep_alive_disabled":     m.config.DisableKeepAlives,
+		"verbose_enabled":         m.config.Verbose,
+	})
+
+	// Emit client started event
+	m.emitEvent(ctx, EventTypeClientStarted, map[string]interface{}{
+		"request_timeout_seconds": m.config.RequestTimeout.Seconds(),
+		"max_idle_conns":          m.config.MaxIdleConns,
+	})
 
 	// Emit module started event
 	m.emitEvent(ctx, EventTypeModuleStarted, map[string]interface{}{
@@ -398,8 +406,15 @@ func (m *HTTPClientModule) WithTimeout(timeoutSeconds int) *http.Client {
 		Timeout:   time.Duration(timeoutSeconds) * time.Second,
 	}
 
-	// Emit client configured event
+	// Emit timeout changed event
 	ctx := context.Background()
+	m.emitEvent(ctx, EventTypeTimeoutChanged, map[string]interface{}{
+		"old_timeout":    m.httpClient.Timeout.Seconds(),
+		"new_timeout":    timeoutSeconds,
+		"timeout_source": "custom",
+	})
+
+	// Emit client configured event
 	m.emitEvent(ctx, EventTypeClientConfigured, map[string]interface{}{
 		"timeout_seconds": timeoutSeconds,
 		"custom_timeout":  true,
@@ -416,6 +431,43 @@ func (m *HTTPClientModule) SetRequestModifier(modifier RequestModifierFunc) {
 		// Emit modifier set event
 		ctx := context.Background()
 		m.emitEvent(ctx, EventTypeModifierSet, map[string]interface{}{})
+	}
+}
+
+// AddRequestModifier adds a named request modifier function.
+// Named modifiers can be added and removed individually, providing fine-grained
+// control over request modification. Multiple modifiers can be active simultaneously.
+//
+// The modifier function should return an error if the request modification fails.
+// If any modifier returns an error, the request will not be sent.
+func (m *HTTPClientModule) AddRequestModifier(name string, modifier func(*http.Request) error) {
+	if name != "" && modifier != nil {
+		if m.namedModifiers == nil {
+			m.namedModifiers = make(map[string]func(*http.Request) error)
+		}
+		m.namedModifiers[name] = modifier
+
+		// Emit modifier added event
+		ctx := context.Background()
+		m.emitEvent(ctx, EventTypeModifierAdded, map[string]interface{}{
+			"modifier_name": name,
+		})
+	}
+}
+
+// RemoveRequestModifier removes a named request modifier function.
+// If the named modifier does not exist, this operation is a no-op.
+func (m *HTTPClientModule) RemoveRequestModifier(name string) {
+	if name != "" && m.namedModifiers != nil {
+		if _, exists := m.namedModifiers[name]; exists {
+			delete(m.namedModifiers, name)
+
+			// Emit modifier removed event
+			ctx := context.Background()
+			m.emitEvent(ctx, EventTypeModifierRemoved, map[string]interface{}{
+				"modifier_name": name,
+			})
+		}
 	}
 }
 

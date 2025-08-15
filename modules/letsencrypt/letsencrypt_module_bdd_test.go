@@ -316,7 +316,7 @@ func (ctx *LetsEncryptBDDTestContext) certificateRequestsShouldUseStagingEndpoin
 		return fmt.Errorf("LetsEncrypt configuration not available")
 	}
 	
-	if !ctx.config.Staging {
+	if !ctx.config.UseStaging {
 		return fmt.Errorf("staging mode should be enabled for staging environment")
 	}
 	

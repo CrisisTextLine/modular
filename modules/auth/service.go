@@ -158,6 +158,14 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 
 	if err != nil {
 		if strings.Contains(err.Error(), "token is expired") {
+			// Emit token expired event
+			tokenPrefix := tokenString
+			if len(tokenString) > 20 {
+				tokenPrefix = tokenString[:20] + "..."
+			}
+			s.emitEvent(context.Background(), EventTypeTokenExpired, map[string]interface{}{
+				"tokenString": tokenPrefix, // Only log prefix for security
+			}, nil)
 			return nil, ErrTokenExpired
 		}
 		return nil, ErrTokenInvalid
@@ -298,7 +306,18 @@ func (s *Service) RefreshToken(refreshTokenString string) (*TokenPair, error) {
 		"permissions": user.Permissions,
 	}
 
-	return s.GenerateToken(userID, customClaims)
+	tokenPair, err := s.GenerateToken(userID, customClaims)
+	if err != nil {
+		return nil, err
+	}
+
+	// Emit token refreshed event
+	s.emitEvent(context.Background(), EventTypeTokenRefreshed, map[string]interface{}{
+		"userID":    userID,
+		"expiresAt": tokenPair.ExpiresAt,
+	}, nil)
+
+	return tokenPair, nil
 }
 
 // HashPassword hashes a password using bcrypt

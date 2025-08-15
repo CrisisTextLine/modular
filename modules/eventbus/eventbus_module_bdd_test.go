@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/cucumber/godog"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/cucumber/godog"
 )
 
 // EventBus BDD Test Context

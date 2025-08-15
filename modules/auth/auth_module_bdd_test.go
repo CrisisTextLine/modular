@@ -13,27 +13,27 @@ import (
 
 // Auth BDD Test Context
 type AuthBDDTestContext struct {
-	app             modular.Application
-	module          *Module
-	service         *Service
-	token           string
-	refreshToken    string
-	newToken        string
-	claims          *Claims
-	password        string
-	hashedPassword  string
-	verifyResult    bool
-	strengthError   error
-	session         *Session
-	sessionID       string
+	app               modular.Application
+	module            *Module
+	service           *Service
+	token             string
+	refreshToken      string
+	newToken          string
+	claims            *Claims
+	password          string
+	hashedPassword    string
+	verifyResult      bool
+	strengthError     error
+	session           *Session
+	sessionID         string
 	originalExpiresAt time.Time
-	user            *User
-	userID          string
-	authResult      *User
-	authError       error
-	oauthURL        string
-	lastError       error
-	originalFeeders []modular.Feeder
+	user              *User
+	userID            string
+	authResult        *User
+	authError         error
+	oauthURL          string
+	lastError         error
+	originalFeeders   []modular.Feeder
 	// Event observation fields
 	observableApp  *modular.ObservableApplication
 	capturedEvents []cloudevents.Event
@@ -352,7 +352,7 @@ func (ctx *AuthBDDTestContext) iRefreshTheToken() error {
 	}
 
 	ctx.token = newTokenPair.AccessToken
-	ctx.newToken = newTokenPair.AccessToken  // Set the new token for validation
+	ctx.newToken = newTokenPair.AccessToken // Set the new token for validation
 	return nil
 }
 
@@ -1154,15 +1154,15 @@ func (ctx *AuthBDDTestContext) iAccessAnExpiredSession() error {
 		Active:    true,
 		Metadata:  map[string]interface{}{"test": "data"},
 	}
-	
+
 	// Store the expired session
 	err := ctx.service.sessionStore.Store(context.Background(), expiredSession)
 	if err != nil {
 		return fmt.Errorf("failed to store expired session: %w", err)
 	}
-	
+
 	ctx.sessionID = expiredSession.ID
-	
+
 	// Try to access the expired session
 	_, err = ctx.service.GetSession(ctx.sessionID)
 	ctx.lastError = err
@@ -1190,22 +1190,22 @@ func (ctx *AuthBDDTestContext) iValidateAnExpiredToken() error {
 	// Generate a token with very short expiration
 	oldExpiration := ctx.service.config.JWT.Expiration
 	ctx.service.config.JWT.Expiration = 1 * time.Millisecond // Very short expiration
-	
+
 	err = ctx.iGenerateAJWTTokenForTheUser()
 	if err != nil {
 		return err
 	}
-	
+
 	// Restore original expiration
 	ctx.service.config.JWT.Expiration = oldExpiration
-	
+
 	// Wait for token to expire
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Try to validate the expired token
 	_, err = ctx.service.ValidateToken(ctx.token)
 	ctx.lastError = err
-	
+
 	return nil
 }
 
@@ -1219,7 +1219,7 @@ func (ctx *AuthBDDTestContext) iHaveAValidRefreshToken() error {
 	if err != nil {
 		return err
 	}
-	
+
 	return ctx.iGenerateAJWTTokenForTheUser()
 }
 

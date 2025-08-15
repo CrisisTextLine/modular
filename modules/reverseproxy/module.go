@@ -139,9 +139,12 @@ func (m *ReverseProxyModule) Name() string {
 // It also stores the provided app as a TenantApplication for later use with
 // tenant-specific functionality.
 func (m *ReverseProxyModule) RegisterConfig(app modular.Application) error {
-	// Store app as TenantApplication if it implements the interface
+	// Always store the application reference
+	m.app = app
+
+	// Store tenant application if it implements the interface
 	if ta, ok := app.(modular.TenantApplication); ok {
-		m.app = ta
+		m.tenantApp = ta
 	}
 
 	// Bind subject early for events that may be emitted during Init
@@ -662,8 +665,22 @@ func (m *ReverseProxyModule) loadTenantConfigs() {
 	if m.app != nil && m.app.Logger() != nil {
 		m.app.Logger().Debug("Loading tenant configs", "count", len(m.tenants))
 	}
+
+	// Ensure we have a tenant application reference (tests may call this before Init)
+	var ta modular.TenantApplication = m.tenantApp
+	if ta == nil {
+		if cast, ok := any(m.app).(modular.TenantApplication); ok {
+			ta = cast
+			m.tenantApp = cast
+		} else {
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Warn("Tenant application not available; skipping tenant config load")
+			}
+			return
+		}
+	}
 	for tenantID := range m.tenants {
-		cp, err := m.tenantApp.GetTenantConfig(tenantID, m.Name())
+		cp, err := ta.GetTenantConfig(tenantID, m.Name())
 		if err != nil {
 			m.app.Logger().Error("Failed to get config for tenant", "tenant", tenantID, "module", m.Name(), "error", err)
 			continue
@@ -1537,6 +1554,19 @@ func (m *ReverseProxyModule) applyPatternReplacement(path, pattern, replacement 
 	return replacement
 }
 
+// statusCapturingResponseWriter wraps http.ResponseWriter to capture the status code
+type statusCapturingResponseWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (w *statusCapturingResponseWriter) WriteHeader(code int) {
+	w.status = code
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
 // createBackendProxyHandler creates an http.HandlerFunc that handles proxying requests
 // to a specific backend, with support for tenant-specific backends and feature flag evaluation
 func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.HandlerFunc {
@@ -1674,8 +1704,27 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 				}
 			}
 		} else {
-			// No circuit breaker, use the proxy directly
-			proxy.ServeHTTP(w, r)
+			// No circuit breaker, use the proxy directly but capture status
+			sw := &statusCapturingResponseWriter{ResponseWriter: w, status: http.StatusOK}
+			proxy.ServeHTTP(sw, r)
+
+			// Emit success or failure event based on status code
+			if sw.status >= 400 {
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"status":  sw.status,
+					"error":   fmt.Sprintf("upstream returned status %d", sw.status),
+				})
+			} else {
+				m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"status":  sw.status,
+				})
+			}
 		}
 	}
 }
@@ -1708,6 +1757,14 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Emit request received event (tenant-aware)
+		m.emitEvent(r.Context(), EventTypeRequestReceived, map[string]interface{}{
+			"backend": backend,
+			"method":  r.Method,
+			"path":    r.URL.Path,
+			"tenant":  string(tenantID),
+		})
+
 		// Record request to backend for health checking
 		if m.healthChecker != nil {
 			m.healthChecker.RecordBackendRequest(backend)
@@ -1762,10 +1819,27 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 						m.app.Logger().Error("Failed to write circuit breaker response", "error", err)
 					}
 				}
+				// Emit failed event for tenant path when circuit is open
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"tenant":  string(tenantID),
+					"status":  http.StatusServiceUnavailable,
+					"error":   "circuit open",
+				})
 				return
 			} else if err != nil {
 				// Some other error occurred
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"tenant":  string(tenantID),
+					"status":  http.StatusInternalServerError,
+					"error":   err.Error(),
+				})
 				return
 			}
 
@@ -1784,9 +1858,50 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 					m.app.Logger().Error("Failed to copy response body", "error", err)
 				}
 			}
+
+			// Emit event based on response status
+			if resp.StatusCode >= 400 {
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"tenant":  string(tenantID),
+					"status":  resp.StatusCode,
+					"error":   fmt.Sprintf("upstream returned status %d", resp.StatusCode),
+				})
+			} else {
+				m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"tenant":  string(tenantID),
+					"status":  resp.StatusCode,
+				})
+			}
 		} else {
-			// No circuit breaker, use the proxy directly
-			proxy.ServeHTTP(w, r)
+			// No circuit breaker, use the proxy directly but capture status
+			sw := &statusCapturingResponseWriter{ResponseWriter: w, status: http.StatusOK}
+			proxy.ServeHTTP(sw, r)
+
+			// Emit success or failure event based on status code
+			if sw.status >= 400 {
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"tenant":  string(tenantID),
+					"status":  sw.status,
+					"error":   fmt.Sprintf("upstream returned status %d", sw.status),
+				})
+			} else {
+				m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"tenant":  string(tenantID),
+					"status":  sw.status,
+				})
+			}
 		}
 	}
 }

@@ -35,6 +35,9 @@ type ReverseProxyBDDTestContext struct {
 	// HTTP testing support
 	httpRecorder     *httptest.ResponseRecorder
 	lastResponseBody []byte
+
+	// Additional fields for new BDD steps
+	metricsEndpointPath string
 }
 
 // testEventObserver captures CloudEvents during testing
@@ -103,6 +106,7 @@ func (ctx *ReverseProxyBDDTestContext) resetContext() {
 	ctx.featureFlagService = nil
 	ctx.dryRunEnabled = false
 	ctx.controlledFailureMode = nil
+	ctx.metricsEndpointPath = ""
 }
 
 // ensureServiceInitialized guarantees the reverseproxy service is initialized and started.
@@ -111,8 +115,18 @@ func (ctx *ReverseProxyBDDTestContext) ensureServiceInitialized() error {
 		return fmt.Errorf("application not initialized")
 	}
 
-	// If service already available, we're good
+	// If service already appears available, still ensure the app is started and routes are registered
 	if ctx.service != nil {
+		// Verify router has routes; if not, ensure Start is called
+		var router *testRouter
+		if err := ctx.app.GetService("router", &router); err == nil && router != nil {
+			if len(router.routes) == 0 {
+				if err := ctx.app.Start(); err != nil {
+					ctx.lastError = err
+					return fmt.Errorf("failed to start application: %w", err)
+				}
+			}
+		}
 		return nil
 	}
 
@@ -1474,6 +1488,181 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithEventObservationEna
 	return nil
 }
 
+// === Metrics steps ===
+func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithMetricsEnabled() error {
+	// Fresh app with metrics enabled
+	ctx.resetContext()
+
+	// Simple backend
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	ctx.testServers = append(ctx.testServers, backend)
+
+	ctx.config = &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"b1": backend.URL,
+		},
+		Routes: map[string]string{
+			"/api/*": "b1",
+		},
+		MetricsEnabled:  true,
+		MetricsEndpoint: "/metrics/reverseproxy",
+	}
+	ctx.metricsEndpointPath = ctx.config.MetricsEndpoint
+
+	return ctx.setupApplicationWithConfig()
+}
+
+func (ctx *ReverseProxyBDDTestContext) whenRequestsAreProcessedThroughTheProxy() error {
+	// Make a couple requests to generate metrics
+	for i := 0; i < 2; i++ {
+		resp, err := ctx.makeRequestThroughModule("GET", "/api/ping", nil)
+		if err != nil {
+			return err
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) thenMetricsShouldBeCollectedAndExposed() error {
+	// Hit metrics endpoint
+	resp, err := ctx.makeRequestThroughModule("GET", ctx.metricsEndpointPath, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("expected metrics 200, got %d", resp.StatusCode)
+	}
+	var data map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return fmt.Errorf("invalid metrics json: %w", err)
+	}
+	if _, ok := data["backends"]; !ok {
+		return fmt.Errorf("metrics missing backends section")
+	}
+	return nil
+}
+
+// Custom metrics endpoint path
+func (ctx *ReverseProxyBDDTestContext) iHaveACustomMetricsEndpointConfigured() error {
+	if ctx.service == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	ctx.service.config.MetricsEndpoint = "/metrics/custom"
+	ctx.metricsEndpointPath = "/metrics/custom"
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) whenTheMetricsEndpointIsAccessed() error {
+	resp, err := ctx.makeRequestThroughModule("GET", ctx.metricsEndpointPath, nil)
+	if err != nil {
+		return err
+	}
+	ctx.lastResponse = resp
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) thenMetricsShouldBeAvailableAtTheConfiguredPath() error {
+	if ctx.lastResponse == nil {
+		return fmt.Errorf("no metrics response")
+	}
+	defer ctx.lastResponse.Body.Close()
+	if ctx.lastResponse.StatusCode != http.StatusOK {
+		return fmt.Errorf("expected 200 at metrics endpoint, got %d", ctx.lastResponse.StatusCode)
+	}
+	if ct := ctx.lastResponse.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		return fmt.Errorf("unexpected content-type for metrics: %s", ct)
+	}
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) andMetricsDataShouldBeProperlyFormatted() error {
+	var data map[string]interface{}
+	if err := json.NewDecoder(ctx.lastResponse.Body).Decode(&data); err != nil {
+		return fmt.Errorf("invalid metrics json: %w", err)
+	}
+	// basic shape assertion
+	if _, ok := data["uptime_seconds"]; !ok {
+		return fmt.Errorf("metrics missing uptime_seconds")
+	}
+	return nil
+}
+
+// === Debug endpoints steps ===
+func (ctx *ReverseProxyBDDTestContext) iHaveADebugEndpointsEnabledReverseProxy() error {
+	ctx.resetContext()
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	ctx.testServers = append(ctx.testServers, backend)
+
+	ctx.config = &ReverseProxyConfig{
+		BackendServices: map[string]string{"b1": backend.URL},
+		Routes:          map[string]string{"/api/*": "b1"},
+		DebugEndpoints:  DebugEndpointsConfig{Enabled: true, BasePath: "/debug"},
+	}
+	return ctx.setupApplicationWithConfig()
+}
+
+func (ctx *ReverseProxyBDDTestContext) whenDebugEndpointsAreAccessed() error {
+	// Access a few debug endpoints
+	paths := []string{"/debug/info", "/debug/backends"}
+	for _, p := range paths {
+		resp, err := ctx.makeRequestThroughModule("GET", p, nil)
+		if err != nil {
+			return err
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) thenConfigurationInformationShouldBeExposed() error {
+	resp, err := ctx.makeRequestThroughModule("GET", "/debug/info", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("debug info status %d", resp.StatusCode)
+	}
+	var info map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return fmt.Errorf("invalid debug info json: %w", err)
+	}
+	if _, ok := info["backendServices"]; !ok {
+		return fmt.Errorf("debug info missing backendServices")
+	}
+	return nil
+}
+
+func (ctx *ReverseProxyBDDTestContext) andDebugDataShouldBeProperlyFormatted() error {
+	resp, err := ctx.makeRequestThroughModule("GET", "/debug/backends", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("debug backends status %d", resp.StatusCode)
+	}
+	var data map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return fmt.Errorf("invalid debug backends json: %w", err)
+	}
+	if _, ok := data["backendServices"]; !ok {
+		return fmt.Errorf("debug backends missing backendServices")
+	}
+	return nil
+}
+
 func (ctx *ReverseProxyBDDTestContext) theReverseProxyModuleStarts() error {
 	// Start the application
 	if err := ctx.app.Start(); err != nil {
@@ -1708,9 +1897,23 @@ func (ctx *ReverseProxyBDDTestContext) theEventShouldContainBackendAndResponseDe
 }
 
 func (ctx *ReverseProxyBDDTestContext) iHaveAnUnavailableBackendServiceConfigured() error {
-	// Configure with an invalid backend URL to simulate unavailability
+	// Configure with an unreachable backend and ensure routing targets it
 	ctx.config.BackendServices = map[string]string{
-		"unavailable-backend": "http://localhost:99999", // Invalid port
+		"unavailable-backend": "http://127.0.0.1:9", // Unreachable well-known discard port
+	}
+	// Route the test path to the unavailable backend and set it as default
+	ctx.config.Routes = map[string]string{
+		"/api/test": "unavailable-backend",
+	}
+	ctx.config.DefaultBackend = "unavailable-backend"
+
+	// Ensure the module has a proxy entry for the unavailable backend before Start registers routes
+	// This is necessary because proxies are created during Init based on the initial config,
+	// and we updated the config after Init in this scenario.
+	if ctx.module != nil {
+		if err := ctx.module.createBackendProxy("unavailable-backend", "http://127.0.0.1:9"); err != nil {
+			return fmt.Errorf("failed to create proxy for unavailable backend: %w", err)
+		}
 	}
 	return nil
 }
@@ -1863,6 +2066,24 @@ func TestReverseProxyModuleBDD(t *testing.T) {
 			s.When(`^the request fails to reach the backend$`, ctx.theRequestFailsToReachTheBackend)
 			s.Then(`^a request failed event should be emitted$`, ctx.aRequestFailedEventShouldBeEmitted)
 			s.Then(`^the event should contain error details$`, ctx.theEventShouldContainErrorDetails)
+
+			// Metrics scenarios
+			s.Given(`^I have a reverse proxy with metrics enabled$`, ctx.iHaveAReverseProxyWithMetricsEnabled)
+			s.When(`^requests are processed through the proxy$`, ctx.whenRequestsAreProcessedThroughTheProxy)
+			s.Then(`^metrics should be collected and exposed$`, ctx.thenMetricsShouldBeCollectedAndExposed)
+
+			// Metrics endpoint configuration
+			s.Given(`^I have a reverse proxy with custom metrics endpoint$`, ctx.iHaveAReverseProxyWithMetricsEnabled)
+			s.Given(`^I have a custom metrics endpoint configured$`, ctx.iHaveACustomMetricsEndpointConfigured)
+			s.When(`^the metrics endpoint is accessed$`, ctx.whenTheMetricsEndpointIsAccessed)
+			s.Then(`^metrics should be available at the configured path$`, ctx.thenMetricsShouldBeAvailableAtTheConfiguredPath)
+			s.Then(`^metrics data should be properly formatted$`, ctx.andMetricsDataShouldBeProperlyFormatted)
+
+			// Debug endpoints
+			s.Given(`^I have a reverse proxy with debug endpoints enabled$`, ctx.iHaveADebugEndpointsEnabledReverseProxy)
+			s.When(`^debug endpoints are accessed$`, ctx.whenDebugEndpointsAreAccessed)
+			s.Then(`^configuration information should be exposed$`, ctx.thenConfigurationInformationShouldBeExposed)
+			s.Then(`^debug data should be properly formatted$`, ctx.andDebugDataShouldBeProperlyFormatted)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",

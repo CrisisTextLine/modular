@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ type JSONSchemaBDDTestContext struct {
 
 // testEventObserver captures events for testing
 type testEventObserver struct {
+	mu     sync.RWMutex
 	events []cloudevents.Event
 	id     string
 }
@@ -39,6 +41,8 @@ func newTestEventObserver() *testEventObserver {
 }
 
 func (o *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.events = append(o.events, event)
 	return nil
 }
@@ -48,10 +52,17 @@ func (o *testEventObserver) ObserverID() string {
 }
 
 func (o *testEventObserver) GetEvents() []cloudevents.Event {
-	return o.events
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	// Return a copy of the slice to avoid race conditions
+	result := make([]cloudevents.Event, len(o.events))
+	copy(result, o.events)
+	return result
 }
 
 func (o *testEventObserver) ClearEvents() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.events = nil
 }
 

@@ -957,9 +957,23 @@ func (ctx *HTTPClientBDDTestContext) theEventShouldContainTheNewTimeoutValue() e
 
 			// Check for timeout value
 			if timeoutValue, exists := data["new_timeout"]; exists {
-				if timeoutValue == int(ctx.customTimeout.Seconds()) {
+				expectedTimeout := int(ctx.customTimeout.Seconds())
+				
+				// Handle type conversion - CloudEvents may convert integers to float64
+				var actualTimeout int
+				switch v := timeoutValue.(type) {
+				case int:
+					actualTimeout = v
+				case float64:
+					actualTimeout = int(v)
+				default:
+					return fmt.Errorf("timeout changed event new_timeout has unexpected type: %T", timeoutValue)
+				}
+				
+				if actualTimeout == expectedTimeout {
 					return nil
 				}
+				return fmt.Errorf("timeout changed event new_timeout mismatch: expected %d, got %d", expectedTimeout, actualTimeout)
 			}
 
 			return fmt.Errorf("timeout changed event should contain correct new_timeout value")
@@ -1055,7 +1069,7 @@ func TestHTTPClientModuleBDD(t *testing.T) {
 			ctx.When(`^the httpclient module starts$`, func() error { return nil }) // Already started in Given step
 			ctx.Then(`^a client started event should be emitted$`, testCtx.aClientStartedEventShouldBeEmitted)
 			ctx.Then(`^a config loaded event should be emitted$`, testCtx.aConfigLoadedEventShouldBeEmitted)
-			ctx.And(`^the events should contain client configuration details$`, testCtx.theEventsShouldContainClientConfigurationDetails)
+			ctx.Then(`^the events should contain client configuration details$`, testCtx.theEventsShouldContainClientConfigurationDetails)
 
 			// Request modification events
 			ctx.When(`^I add a request modifier$`, testCtx.iAddARequestModifier)
@@ -1066,7 +1080,7 @@ func TestHTTPClientModuleBDD(t *testing.T) {
 			// Timeout change events  
 			ctx.When(`^I change the client timeout$`, testCtx.iChangeTheClientTimeout)
 			ctx.Then(`^a timeout changed event should be emitted$`, testCtx.aTimeoutChangedEventShouldBeEmitted)
-			ctx.And(`^the event should contain the new timeout value$`, testCtx.theEventShouldContainTheNewTimeoutValue)
+			ctx.Then(`^the event should contain the new timeout value$`, testCtx.theEventShouldContainTheNewTimeoutValue)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",

@@ -945,23 +945,31 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 
 	// Create httpserver configuration for testing
 	ctx.serverConfig = &HTTPServerConfig{
-		Host:            "localhost",
-		Port:            0, // Use random port for testing
+		Host:            "127.0.0.1",
+		Port:            8091, // Use a fixed port for event testing
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		IdleTimeout:     120 * time.Second,
 		ShutdownTimeout: 10 * time.Second,
 	}
 
+	// Create a copy of the config to avoid issues
+	configCopy := &HTTPServerConfig{
+		Host:            ctx.serverConfig.Host,
+		Port:            ctx.serverConfig.Port,
+		ReadTimeout:     ctx.serverConfig.ReadTimeout,
+		WriteTimeout:    ctx.serverConfig.WriteTimeout,
+		IdleTimeout:     ctx.serverConfig.IdleTimeout,
+		ShutdownTimeout: ctx.serverConfig.ShutdownTimeout,
+		TLS:             nil, // No TLS for basic event testing
+	}
+
 	// Create provider with the httpserver config
-	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
+	serverConfigProvider := modular.NewStdConfigProvider(configCopy)
 
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
-
-	// Create and register httpserver module
-	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
 
 	// Create test event observer
 	ctx.eventObserver = newTestEventObserver()
@@ -971,19 +979,30 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 		return fmt.Errorf("failed to register test observer: %w", err)
 	}
 
-	// Register module
-	ctx.app.RegisterModule(ctx.module)
-
-
-	// Register a mock router service that provides the required http.Handler
-	mockRouter := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create a proper router service like the working tests
+	router := http.NewServeMux()
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	ctx.app.RegisterService("router", mockRouter)
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	})
 
-	// Now override the config section with our direct configuration
+	// Register the router service
+	if err := ctx.app.RegisterService("router", router); err != nil {
+		return fmt.Errorf("failed to register router service: %w", err)
+	}
+
+	// Create and register httpserver module
+	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
+
+	// Register the HTTP server config section first
 	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)
+
+	// Register module
+	ctx.app.RegisterModule(ctx.module)
 
 	// Initialize the application (this triggers automatic RegisterObservers)
 	if err := ctx.app.Init(); err != nil {
@@ -1017,8 +1036,8 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 
 	// Create httpserver configuration with TLS for testing
 	ctx.serverConfig = &HTTPServerConfig{
-		Host:            "localhost",
-		Port:            0, // Use random port for testing
+		Host:            "127.0.0.1",
+		Port:            8092, // Use a fixed port for TLS event testing
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		IdleTimeout:     120 * time.Second,
@@ -1032,15 +1051,35 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 		},
 	}
 
+	// Create a copy of the config to avoid issues
+	configCopy := &HTTPServerConfig{
+		Host:            ctx.serverConfig.Host,
+		Port:            ctx.serverConfig.Port,
+		ReadTimeout:     ctx.serverConfig.ReadTimeout,
+		WriteTimeout:    ctx.serverConfig.WriteTimeout,
+		IdleTimeout:     ctx.serverConfig.IdleTimeout,
+		ShutdownTimeout: ctx.serverConfig.ShutdownTimeout,
+	}
+
+	// Copy TLS config properly
+	if ctx.serverConfig.TLS != nil {
+		configCopy.TLS = &TLSConfig{
+			Enabled:      ctx.serverConfig.TLS.Enabled,
+			AutoGenerate: ctx.serverConfig.TLS.AutoGenerate,
+			CertFile:     ctx.serverConfig.TLS.CertFile,
+			KeyFile:      ctx.serverConfig.TLS.KeyFile,
+			Domains:      make([]string, len(ctx.serverConfig.TLS.Domains)),
+			UseService:   ctx.serverConfig.TLS.UseService,
+		}
+		copy(configCopy.TLS.Domains, ctx.serverConfig.TLS.Domains)
+	}
+
 	// Create provider with the httpserver config
-	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
+	serverConfigProvider := modular.NewStdConfigProvider(configCopy)
 
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
-
-	// Create and register httpserver module
-	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
 
 	// Create test event observer
 	ctx.eventObserver = newTestEventObserver()
@@ -1050,19 +1089,30 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 		return fmt.Errorf("failed to register test observer: %w", err)
 	}
 
-	// Register module
-	ctx.app.RegisterModule(ctx.module)
-
-
-	// Register a mock router service that provides the required http.Handler
-	mockRouter := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create a proper router service like the working tests
+	router := http.NewServeMux()
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	ctx.app.RegisterService("router", mockRouter)
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	})
 
-	// Now override the config section with our direct configuration
+	// Register the router service
+	if err := ctx.app.RegisterService("router", router); err != nil {
+		return fmt.Errorf("failed to register router service: %w", err)
+	}
+
+	// Create and register httpserver module
+	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
+
+	// Register the HTTP server config section first
 	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)
+
+	// Register module
+	ctx.app.RegisterModule(ctx.module)
 
 	// Initialize the application (this triggers automatic RegisterObservers)
 	if err := ctx.app.Init(); err != nil {
@@ -1217,20 +1267,23 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerProcessesARequest() error {
 	}
 	
 	// Give the server a moment to fully start
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	
-	// Make a simple request
+	// Make a simple request using the configured port
 	client := &http.Client{Timeout: 5 * time.Second}
-	url := fmt.Sprintf("http://localhost:%d/", ctx.service.config.Port)
+	url := fmt.Sprintf("http://127.0.0.1:%d/", ctx.service.config.Port)
 	
 	resp, err := client.Get(url)
 	if err != nil {
-		return fmt.Errorf("failed to make request: %v", err)
+		return fmt.Errorf("failed to make request to %s: %v", url, err)
 	}
 	defer resp.Body.Close()
 	
+	// Read the response to ensure the request completes
+	_, _ = resp.Body.Read(make([]byte, 100))
+	
 	// Give time for async event emission
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	
 	return nil
 }

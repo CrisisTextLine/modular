@@ -107,3 +107,41 @@ Feature: LetsEncrypt Module
     Then storage read events should be emitted
     When storage errors occur
     Then storage error events should be emitted
+
+  Scenario: Emit events during configuration loading
+    Given I have a LetsEncrypt module with event observation enabled
+    When the module configuration is loaded
+    Then a config loaded event should be emitted
+    And the event should contain configuration details
+    When the configuration is validated
+    Then a config validated event should be emitted
+
+  Scenario: Emit events for certificate expiry monitoring
+    Given I have a LetsEncrypt module with event observation enabled
+    And I have certificates approaching expiry
+    When certificate expiry monitoring runs
+    Then certificate expiring events should be emitted
+    And the events should contain expiry details
+    When certificates have expired
+    Then certificate expired events should be emitted
+
+  Scenario: Emit events during certificate revocation
+    Given I have a LetsEncrypt module with event observation enabled
+    When a certificate is revoked
+    Then a certificate revoked event should be emitted
+    And the event should contain revocation reason
+
+  Scenario: Emit events during module startup
+    Given I have a LetsEncrypt module with event observation enabled
+    When the module starts up
+    Then a module started event should be emitted
+    And the event should contain module information
+
+  Scenario: Emit events for error and warning conditions
+    Given I have a LetsEncrypt module with event observation enabled
+    When an error condition occurs
+    Then an error event should be emitted
+    And the event should contain error details
+    When a warning condition occurs  
+    Then a warning event should be emitted
+    And the event should contain warning details

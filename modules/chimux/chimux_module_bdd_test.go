@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cucumber/godog"
 	"github.com/go-chi/chi/v5"
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // ChiMux BDD Test Context
@@ -690,7 +690,7 @@ func (ctx *ChiMuxBDDTestContext) routeRegisteredEventsShouldBeEmitted() error {
 func (ctx *ChiMuxBDDTestContext) theEventsShouldContainTheCorrectRouteInformation() error {
 	events := ctx.eventObserver.GetEvents()
 	routePaths := []string{}
-	
+
 	for _, event := range events {
 		if event.Type() == EventTypeRouteRegistered {
 			// Extract data from CloudEvent
@@ -780,7 +780,7 @@ func (ctx *ChiMuxBDDTestContext) middlewareAddedEventsShouldBeEmitted() error {
 
 func (ctx *ChiMuxBDDTestContext) theEventsShouldContainMiddlewareInformation() error {
 	events := ctx.eventObserver.GetEvents()
-	
+
 	for _, event := range events {
 		if event.Type() == EventTypeMiddlewareAdded {
 			// Extract data from CloudEvent
@@ -1073,12 +1073,12 @@ func (ctx *ChiMuxBDDTestContext) iMakeAnHTTPRequestToTheRouter() error {
 	if ctx.eventObserver != nil {
 		// Request received event
 		event := modular.NewCloudEvent(EventTypeRequestReceived, "chimux-service", map[string]interface{}{
-			"method":     "GET",
-			"path":       "/test-request",
-			"timestamp":  time.Now(),
+			"method":    "GET",
+			"path":      "/test-request",
+			"timestamp": time.Now(),
 		}, nil)
 		ctx.eventObserver.OnEvent(context.Background(), event)
-		
+
 		// Request processed event
 		event = modular.NewCloudEvent(EventTypeRequestProcessed, "chimux-service", map[string]interface{}{
 			"method":      "GET",
@@ -1152,11 +1152,11 @@ func (ctx *ChiMuxBDDTestContext) iMakeARequestThatCausesAFailure() error {
 	// Simulate request failure and emit event
 	if ctx.eventObserver != nil {
 		event := modular.NewCloudEvent(EventTypeRequestFailed, "chimux-service", map[string]interface{}{
-			"method":     "GET",
-			"path":       "/failing-route",
-			"error":      "Internal Server Error",
+			"method":      "GET",
+			"path":        "/failing-route",
+			"error":       "Internal Server Error",
 			"status_code": 500,
-			"timestamp":  time.Now(),
+			"timestamp":   time.Now(),
 		}, nil)
 		ctx.eventObserver.OnEvent(context.Background(), event)
 	}

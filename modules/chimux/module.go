@@ -740,9 +740,7 @@ func (m *ChiMuxModule) EmitEvent(ctx context.Context, event cloudevents.Event) e
 func (m *ChiMuxModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	event := modular.NewCloudEvent(eventType, "chimux-service", data, nil)
 
-	go func() {
-		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			fmt.Printf("Failed to emit chimux event %s: %v\n", eventType, emitErr)
-		}
-	}()
+	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		fmt.Printf("Failed to emit chimux event %s: %v\n", eventType, emitErr)
+	}
 }

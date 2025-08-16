@@ -152,6 +152,15 @@ func (m *ReverseProxyModule) RegisterConfig(app modular.Application) error {
 // It retrieves the module's configuration and sets up the internal data structures
 // for each configured backend, including tenant-specific configurations.
 func (m *ReverseProxyModule) Init(app modular.Application) error {
+	fmt.Printf("DEBUG: ReverseProxyModule.Init called, app type: %T\n", app)
+	// Store reference to app for event emission FIRST if it supports observer pattern
+	if observable, ok := app.(modular.Subject); ok {
+		m.subject = observable
+		fmt.Printf("DEBUG: Subject set successfully, subject is nil: %v\n", m.subject == nil)
+	} else {
+		fmt.Printf("DEBUG: Application does not support Subject interface\n")
+	}
+	
 	// Get the config section
 	cfg, err := app.GetConfigSection(m.Name())
 	if err != nil {
@@ -1556,6 +1565,15 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 		// Get the appropriate proxy for this backend and tenant
 		proxy, exists := m.getProxyForBackendAndTenant(finalBackend, tenantID)
 		if !exists {
+			// Emit request failed event
+			m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				"backend":     finalBackend,
+				"method":      r.Method,
+				"path":        r.URL.Path,
+				"remote_addr": r.RemoteAddr,
+				"error":       "Backend not found",
+				"error_code":  "BACKEND_NOT_FOUND",
+			})
 			http.Error(w, fmt.Sprintf("Backend %s not found", finalBackend), http.StatusInternalServerError)
 			return
 		}
@@ -1618,6 +1636,17 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 					m.app.Logger().Warn("Circuit breaker open, denying request",
 						"backend", finalBackend, "tenant", tenantID, "path", r.URL.Path)
 				}
+				
+				// Emit request failed event for circuit breaker open
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend":     finalBackend,
+					"method":      r.Method,
+					"path":        r.URL.Path,
+					"remote_addr": r.RemoteAddr,
+					"error":       "Circuit breaker open",
+					"error_code":  "CIRCUIT_OPEN",
+				})
+				
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusServiceUnavailable)
 				if _, err := w.Write([]byte(`{"error":"Service temporarily unavailable","code":"CIRCUIT_OPEN"}`)); err != nil {
@@ -1627,6 +1656,15 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 				}
 				return
 			} else if err != nil {
+				// Emit request failed event for general error
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend":     finalBackend,
+					"method":      r.Method,
+					"path":        r.URL.Path,
+					"remote_addr": r.RemoteAddr,
+					"error":       err.Error(),
+					"error_code":  "PROXY_ERROR",
+				})
 				// Some other error occurred
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
@@ -1650,6 +1688,14 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 		} else {
 			// No circuit breaker, use the proxy directly
 			proxy.ServeHTTP(w, r)
+			
+			// Emit request proxied event after successful proxying
+			m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+				"backend":     finalBackend,
+				"method":      r.Method,
+				"path":        r.URL.Path,
+				"remote_addr": r.RemoteAddr,
+			})
 		}
 	}
 }
@@ -1688,6 +1734,16 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 		}
 
 		if !proxyExists {
+			// Emit request failed event
+			m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				"backend":     backend,
+				"method":      r.Method,
+				"path":        r.URL.Path,
+				"remote_addr": r.RemoteAddr,
+				"tenant_id":   string(tenantID),
+				"error":       "Backend not found",
+				"error_code":  "BACKEND_NOT_FOUND",
+			})
 			http.Error(w, fmt.Sprintf("Backend %s not found", backend), http.StatusInternalServerError)
 			return
 		}
@@ -1729,6 +1785,17 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 					m.app.Logger().Warn("Circuit breaker open, denying request",
 						"backend", backend, "tenant", tenantID, "path", r.URL.Path)
 				}
+				
+				// Emit request failed event for circuit breaker open
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend":     backend,
+					"method":      r.Method,
+					"path":        r.URL.Path,
+					"remote_addr": r.RemoteAddr,
+					"tenant_id":   string(tenantID),
+					"error":       "Circuit breaker open",
+					"error_code":  "CIRCUIT_OPEN",
+				})
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusServiceUnavailable)
 				if _, err := w.Write([]byte(`{"error":"Service temporarily unavailable","code":"CIRCUIT_OPEN"}`)); err != nil {
@@ -1739,6 +1806,16 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 				return
 			} else if err != nil {
 				// Some other error occurred
+				// Emit request failed event for general error
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend":     backend,
+					"method":      r.Method,
+					"path":        r.URL.Path,
+					"remote_addr": r.RemoteAddr,
+					"tenant_id":   string(tenantID),
+					"error":       err.Error(),
+					"error_code":  "PROXY_ERROR",
+				})
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
 			}
@@ -1761,6 +1838,15 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 		} else {
 			// No circuit breaker, use the proxy directly
 			proxy.ServeHTTP(w, r)
+			
+			// Emit request proxied event after successful proxying
+			m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+				"backend":     backend,
+				"method":      r.Method,
+				"path":        r.URL.Path,
+				"remote_addr": r.RemoteAddr,
+				"tenant_id":   string(tenantID),
+			})
 		}
 	}
 }
@@ -2762,3 +2848,10 @@ func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, da
 		fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
 	}
 }
+
+// Compile-time interface compliance checks
+var _ modular.Module = (*ReverseProxyModule)(nil)
+var _ modular.ObservableModule = (*ReverseProxyModule)(nil)
+var _ modular.TenantAwareModule = (*ReverseProxyModule)(nil)
+var _ modular.Startable = (*ReverseProxyModule)(nil)
+var _ modular.Stoppable = (*ReverseProxyModule)(nil)

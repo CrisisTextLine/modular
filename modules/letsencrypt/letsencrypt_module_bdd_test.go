@@ -847,7 +847,8 @@ func TestLetsEncryptModuleBDD(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
 			ctx := &LetsEncryptBDDTestContext{}
-			// Event observation scenarios
+
+      // Event observation scenarios
 			s.Given(`^I have a LetsEncrypt module with event observation enabled$`, ctx.iHaveALetsEncryptModuleWithEventObservationEnabled)
 			s.When(`^the LetsEncrypt module starts$`, ctx.theLetsEncryptModuleStarts)
 			s.Then(`^a service started event should be emitted$`, ctx.aServiceStartedEventShouldBeEmitted)

@@ -439,7 +439,8 @@ func (ctx *SchedulerBDDTestContext) theSchedulerIsRestarted() error {
 
 	// Brief pause to ensure clean shutdown
 	time.Sleep(100 * time.Millisecond)
-	// If persistence is enabled, recreate the application to trigger load in Init
+
+  // If persistence is enabled, recreate the application to trigger load in Init
 	if ctx.config != nil && ctx.config.EnablePersistence {
 		logger := &testLogger{}
 		mainConfigProvider := modular.NewStdConfigProvider(struct{}{})

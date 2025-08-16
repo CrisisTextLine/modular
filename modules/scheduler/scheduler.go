@@ -179,10 +179,10 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		s.wg.Add(1)
 		//nolint:contextcheck // Context is passed through s.ctx field
 		go s.worker(i)
-		
+
 		// Emit worker started event
 		s.emitEvent(context.Background(), EventTypeWorkerStarted, map[string]interface{}{
-			"worker_id":    i,
+			"worker_id":     i,
 			"total_workers": s.workerCount,
 		})
 	}
@@ -195,14 +195,14 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	go s.dispatchPendingJobs()
 
 	s.isStarted = true
-	
+
 	// Emit scheduler started event
 	s.emitEvent(context.Background(), EventTypeSchedulerStarted, map[string]interface{}{
-		"worker_count": s.workerCount,
-		"queue_size":   s.queueSize,
+		"worker_count":   s.workerCount,
+		"queue_size":     s.queueSize,
 		"check_interval": s.checkInterval.String(),
 	})
-	
+
 	return nil
 }
 
@@ -234,6 +234,7 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 		close(done)
 	}()
 
+	var shutdownErr error
 	select {
 	case <-done:
 		if s.logger != nil {
@@ -243,7 +244,7 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 		if s.logger != nil {
 			s.logger.Warn("Scheduler shutdown timed out")
 		}
-		return ErrSchedulerShutdownTimeout
+		shutdownErr = ErrSchedulerShutdownTimeout
 	case <-cronCtx.Done():
 		if s.logger != nil {
 			s.logger.Info("Cron scheduler stopped")
@@ -251,13 +252,13 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 	}
 
 	s.isStarted = false
-	
-	// Emit scheduler stopped event
+
+	// Always emit scheduler stopped event, regardless of shutdown result
 	s.emitEvent(context.Background(), EventTypeSchedulerStopped, map[string]interface{}{
 		"worker_count": s.workerCount,
 	})
-	
-	return nil
+
+	return shutdownErr
 }
 
 // worker processes jobs from the queue
@@ -274,12 +275,12 @@ func (s *Scheduler) worker(id int) {
 			if s.logger != nil {
 				s.logger.Debug("Worker stopping", "id", id)
 			}
-			
+
 			// Emit worker stopped event
 			s.emitEvent(context.Background(), EventTypeWorkerStopped, map[string]interface{}{
 				"worker_id": id,
 			})
-			
+
 			return
 		case job := <-s.jobQueue:
 			// Emit worker busy event
@@ -288,9 +289,9 @@ func (s *Scheduler) worker(id int) {
 				"job_id":    job.ID,
 				"job_name":  job.Name,
 			})
-			
+
 			s.executeJob(job)
-			
+
 			// Emit worker idle event
 			s.emitEvent(context.Background(), EventTypeWorkerIdle, map[string]interface{}{
 				"worker_id": id,
@@ -307,8 +308,8 @@ func (s *Scheduler) executeJob(job Job) {
 
 	// Emit job started event
 	s.emitEvent(context.Background(), EventTypeJobStarted, map[string]interface{}{
-		"job_id":   job.ID,
-		"job_name": job.Name,
+		"job_id":     job.ID,
+		"job_name":   job.Name,
 		"start_time": time.Now().Format(time.RFC3339),
 	})
 
@@ -346,26 +347,26 @@ func (s *Scheduler) executeJob(job Job) {
 		if s.logger != nil {
 			s.logger.Error("Job execution failed", "id", job.ID, "name", job.Name, "error", err)
 		}
-		
+
 		// Emit job failed event
 		s.emitEvent(context.Background(), EventTypeJobFailed, map[string]interface{}{
-			"job_id":     job.ID,
-			"job_name":   job.Name,
-			"error":      err.Error(),
-			"end_time":   time.Now().Format(time.RFC3339),
+			"job_id":   job.ID,
+			"job_name": job.Name,
+			"error":    err.Error(),
+			"end_time": time.Now().Format(time.RFC3339),
 		})
 	} else {
 		execution.Status = string(JobStatusCompleted)
 		if s.logger != nil {
 			s.logger.Debug("Job execution completed", "id", job.ID, "name", job.Name)
 		}
-		
+
 		// Emit job completed event
 		s.emitEvent(context.Background(), EventTypeJobCompleted, map[string]interface{}{
-			"job_id":     job.ID,
-			"job_name":   job.Name,
-			"end_time":   time.Now().Format(time.RFC3339),
-			"duration":   execution.EndTime.Sub(execution.StartTime).String(),
+			"job_id":   job.ID,
+			"job_name": job.Name,
+			"end_time": time.Now().Format(time.RFC3339),
+			"duration": execution.EndTime.Sub(execution.StartTime).String(),
 		})
 	}
 	if updateErr := s.jobStore.UpdateJobExecution(execution); updateErr != nil && s.logger != nil {
@@ -588,6 +589,13 @@ func (s *Scheduler) CancelJob(jobID string) error {
 		}
 		s.entryMutex.Unlock()
 	}
+
+	// Emit job cancelled event
+	s.emitEvent(context.Background(), EventTypeJobCancelled, map[string]interface{}{
+		"job_id":       job.ID,
+		"job_name":     job.Name,
+		"cancelled_at": time.Now().Format(time.RFC3339),
+	})
 
 	return nil
 }

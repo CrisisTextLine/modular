@@ -381,6 +381,7 @@ func (app *StdApplication) GetService(name string, target any) error {
 
 // Init initializes the application with the provided modules
 func (app *StdApplication) Init() error {
+	fmt.Printf("DEBUG: StdApplication.Init() called, app type: %T\n", app)
 	errs := make([]error, 0)
 	for name, module := range app.moduleRegistry {
 		configurableModule, ok := module.(Configurable)

@@ -110,7 +110,6 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyM
 
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
-	fmt.Printf("DEBUG: Created app type: %T\n", ctx.app)
 
 	// Create and register a mock router service (required by ReverseProxy)
 	mockRouter := &testRouter{
@@ -160,7 +159,6 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 	ctx.app.RegisterModule(ctx.module)
 
 	// Initialize the application with the complete configuration
-	fmt.Printf("DEBUG: About to call ctx.app.Init(), app type: %T\n", ctx.app)
 	return ctx.app.Init()
 }
 

@@ -152,7 +152,14 @@ func (m *ReverseProxyModule) RegisterConfig(app modular.Application) error {
 // It retrieves the module's configuration and sets up the internal data structures
 // for each configured backend, including tenant-specific configurations.
 func (m *ReverseProxyModule) Init(app modular.Application) error {
-	fmt.Printf("DEBUG: ReverseProxyModule.Init() called, subject is nil: %v\n", m.subject == nil)
+	fmt.Printf("DEBUG: ReverseProxyModule.Init called, app type: %T\n", app)
+	// Store reference to app for event emission FIRST if it supports observer pattern
+	if observable, ok := app.(modular.Subject); ok {
+		m.subject = observable
+		fmt.Printf("DEBUG: Subject set successfully, subject is nil: %v\n", m.subject == nil)
+	} else {
+		fmt.Printf("DEBUG: Application does not support Subject interface\n")
+	}
 	
 	// Get the config section
 	cfg, err := app.GetConfigSection(m.Name())
@@ -2816,9 +2823,7 @@ func isEmptyComparisonResult(result ComparisonResult) bool {
 // RegisterObservers implements the ObservableModule interface.
 // This allows the reverseproxy module to register as an observer for events it's interested in.
 func (m *ReverseProxyModule) RegisterObservers(subject modular.Subject) error {
-	fmt.Printf("DEBUG: ReverseProxyModule.RegisterObservers() called\n")
 	m.subject = subject
-	fmt.Printf("DEBUG: ReverseProxyModule subject set, nil: %v\n", m.subject == nil)
 	return nil
 }
 
@@ -2841,8 +2846,6 @@ func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, da
 
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
 		fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
-		// Add debug info to see when this is called
-		fmt.Printf("Event emission failed for %s in module subject state: %v\n", eventType, m.subject != nil)
 	}
 }
 

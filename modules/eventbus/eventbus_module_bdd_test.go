@@ -1004,6 +1004,58 @@ func (ctx *EventBusBDDTestContext) aSubscriptionRemovedEventShouldBeEmitted() er
 		eventTypes[i] = event.Type()
 	}
 	return fmt.Errorf("subscription removed event not found. Available events: %v", eventTypes)
+}
+
+func (ctx *EventBusBDDTestContext) aTopicCreatedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeTopicCreated {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeTopicCreated, eventTypes)
+}
+
+func (ctx *EventBusBDDTestContext) aTopicDeletedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeTopicDeleted {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeTopicDeleted, eventTypes)
+}
+
+func (ctx *EventBusBDDTestContext) aMessageFailedEventShouldBeEmitted() error {
+	time.Sleep(500 * time.Millisecond) // Allow more time for handler processing and event emission
+
+	events := ctx.eventObserver.GetEvents()
+	for _, event := range events {
+		if event.Type() == EventTypeMessageFailed {
+			return nil
+		}
+	}
+
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeMessageFailed, eventTypes)
+}
 
 // Multi-engine scenario implementations
 
@@ -2073,6 +2125,10 @@ func TestEventBusModuleBDD(t *testing.T) {
 			ctx.Then(`^a message published event should be emitted$`, testCtx.aMessagePublishedEventShouldBeEmitted)
 			ctx.Then(`^a subscription created event should be emitted$`, testCtx.aSubscriptionCreatedEventShouldBeEmitted)
 			ctx.Then(`^a subscription removed event should be emitted$`, testCtx.aSubscriptionRemovedEventShouldBeEmitted)
+			ctx.Then(`^a message received event should be emitted$`, testCtx.aMessageReceivedEventShouldBeEmitted)
+			ctx.Then(`^a topic created event should be emitted$`, testCtx.aTopicCreatedEventShouldBeEmitted)
+			ctx.Then(`^a topic deleted event should be emitted$`, testCtx.aTopicDeletedEventShouldBeEmitted)
+			ctx.Then(`^a message failed event should be emitted$`, testCtx.aMessageFailedEventShouldBeEmitted)
 			ctx.When(`^the eventbus module starts$`, testCtx.theEventbusModuleStarts)
 			ctx.Then(`^a config loaded event should be emitted$`, testCtx.aConfigLoadedEventShouldBeEmitted)
 			ctx.Then(`^a bus started event should be emitted$`, testCtx.aBusStartedEventShouldBeEmitted)

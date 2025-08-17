@@ -1178,17 +1178,23 @@ func (ctx *SchedulerBDDTestContext) theJobStartsExecution() error {
 }
 
 func (ctx *SchedulerBDDTestContext) aJobStartedEventShouldBeEmitted() error {
-	time.Sleep(200 * time.Millisecond) // Allow time for async event emission
-
-	events := ctx.eventObserver.GetEvents()
-	for _, event := range events {
-		if event.Type() == EventTypeJobStarted {
-			return nil
+	// Poll for events with timeout
+	timeout := 2 * time.Second
+	start := time.Now()
+	
+	for time.Since(start) < timeout {
+		events := ctx.eventObserver.GetEvents()
+		for _, event := range events {
+			if event.Type() == EventTypeJobStarted {
+				return nil
+			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
-  
-  eventTypes := make([]string, len(events))
+
+	// Final check and error reporting
+	events := ctx.eventObserver.GetEvents()
+	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
@@ -1294,17 +1300,21 @@ func (ctx *SchedulerBDDTestContext) theJobFailsDuringExecution() error {
 }
 
 func (ctx *SchedulerBDDTestContext) aJobFailedEventShouldBeEmitted() error {
-	time.Sleep(200 * time.Millisecond) // Allow time for async event emission
-
-	events := ctx.eventObserver.GetEvents()
-	for _, event := range events {
-		if event.Type() == EventTypeJobFailed {
-			return nil
+	// Poll for events with timeout
+	timeout := 2 * time.Second
+	start := time.Now()
+	
+	for time.Since(start) < timeout {
+		events := ctx.eventObserver.GetEvents()
+		for _, event := range events {
+			if event.Type() == EventTypeJobFailed {
+				return nil
+			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
-  
+	// Final check and error reporting
 	events := ctx.eventObserver.GetEvents()
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
@@ -1422,19 +1432,17 @@ func (ctx *SchedulerBDDTestContext) workersBecomeBusyProcessingJobs() error {
 
 func (ctx *SchedulerBDDTestContext) workerBusyEventsShouldBeEmitted() error {
 	// Use polling approach to wait for worker busy events
-	maxWait := 2 * time.Second
-	checkInterval := 100 * time.Millisecond
+	timeout := 2 * time.Second
+	start := time.Now()
 
-	for waited := time.Duration(0); waited < maxWait; waited += checkInterval {
-		time.Sleep(checkInterval)
-
+	for time.Since(start) < timeout {
 		events := ctx.eventObserver.GetEvents()
 		for _, event := range events {
 			if event.Type() == EventTypeWorkerBusy {
 				return nil
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// If we get here, no worker busy events were captured
@@ -1456,19 +1464,17 @@ func (ctx *SchedulerBDDTestContext) workersBecomeIdleAfterJobCompletion() error 
 
 func (ctx *SchedulerBDDTestContext) workerIdleEventsShouldBeEmitted() error {
 	// Use polling approach to wait for worker idle events
-	maxWait := 2 * time.Second
-	checkInterval := 100 * time.Millisecond
+	timeout := 2 * time.Second
+	start := time.Now()
 
-	for waited := time.Duration(0); waited < maxWait; waited += checkInterval {
-		time.Sleep(checkInterval)
-
+	for time.Since(start) < timeout {
 		events := ctx.eventObserver.GetEvents()
 		for _, event := range events {
 			if event.Type() == EventTypeWorkerIdle {
 				return nil
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// If we get here, no worker idle events were captured

@@ -905,19 +905,31 @@ func (ctx *DatabaseBDDTestContext) aDatabaseMigrationIsInitiated() error {
 	// Reset event observer to capture only this scenario's events
 	ctx.eventObserver.Reset()
 
-	// Simulate migration start by emitting the event manually for testing
-	// In real implementation, this would be triggered by migration logic
-	if ctx.eventObserver != nil && ctx.app != nil {
-		event := cloudevents.NewEvent()
-		event.SetType(EventTypeMigrationStarted)
-		event.SetSource("database-module")
-		event.SetSubject("migration")
-		event.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
-			"migration_id": "test-migration-001",
-			"version":      "1.0.0",
-		})
+	// Create a simple test migration
+	migration := Migration{
+		ID:      "test-migration-001",
+		Version: "1.0.0",
+		SQL:     "CREATE TABLE IF NOT EXISTS test_table (id INTEGER PRIMARY KEY, name TEXT)",
+		Up:      true,
+	}
 
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// Get the database service and set up event emission
+	if ctx.service != nil {
+		// Set the database module as the event emitter for the service
+		ctx.service.SetEventEmitter(ctx.module)
+
+		// Create migrations table first
+		err := ctx.service.CreateMigrationsTable(context.Background())
+		if err != nil {
+			return fmt.Errorf("failed to create migrations table: %w", err)
+		}
+
+		// Run the migration - this should emit the migration started event
+		err = ctx.service.RunMigration(context.Background(), migration)
+		if err != nil {
+			ctx.lastError = err
+			return fmt.Errorf("migration failed: %w", err)
+		}
 	}
 
 	return nil
@@ -958,26 +970,39 @@ func (ctx *DatabaseBDDTestContext) aDatabaseMigrationCompletesSuccessfully() err
 	// Reset event observer to capture only this scenario's events
 	ctx.eventObserver.Reset()
 
-	// Simulate migration completion by emitting the event manually for testing
-	if ctx.eventObserver != nil && ctx.app != nil {
-		event := cloudevents.NewEvent()
-		event.SetType(EventTypeMigrationCompleted)
-		event.SetSource("database-module")
-		event.SetSubject("migration")
-		event.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
-			"migration_id":    "test-migration-001",
-			"version":         "1.0.0",
-			"duration_ms":     150,
-			"tables_modified": 3,
-		})
+	// Create a test migration that will complete successfully
+	migration := Migration{
+		ID:      "test-migration-002",
+		Version: "1.1.0", 
+		SQL:     "CREATE TABLE IF NOT EXISTS completed_table (id INTEGER PRIMARY KEY, status TEXT DEFAULT 'completed')",
+		Up:      true,
+	}
 
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// Get the database service and set up event emission
+	if ctx.service != nil {
+		// Set the database module as the event emitter for the service
+		ctx.service.SetEventEmitter(ctx.module)
+
+		// Create migrations table first
+		err := ctx.service.CreateMigrationsTable(context.Background())
+		if err != nil {
+			return fmt.Errorf("failed to create migrations table: %w", err)
+		}
+
+		// Run the migration - this should emit migration started and completed events
+		err = ctx.service.RunMigration(context.Background(), migration)
+		if err != nil {
+			ctx.lastError = err
+			return fmt.Errorf("migration failed: %w", err)
+		}
 	}
 
 	return nil
 }
 
 func (ctx *DatabaseBDDTestContext) aMigrationCompletedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeMigrationCompleted {
@@ -1012,20 +1037,25 @@ func (ctx *DatabaseBDDTestContext) aDatabaseMigrationFailsWithErrors() error {
 	// Reset event observer to capture only this scenario's events
 	ctx.eventObserver.Reset()
 
-	// Simulate migration failure by emitting the event manually for testing
-	if ctx.eventObserver != nil && ctx.app != nil {
-		event := cloudevents.NewEvent()
-		event.SetType(EventTypeMigrationFailed)
-		event.SetSource("database-module")
-		event.SetSubject("migration")
-		event.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
-			"migration_id": "test-migration-002",
-			"version":      "1.1.0",
-			"error":        "table constraint violation",
-			"duration_ms":  75,
-		})
+	// Create a migration with invalid SQL that will fail
+	migration := Migration{
+		ID:      "test-migration-fail",
+		Version: "1.2.0",
+		SQL:     "CREATE TABLE duplicate_table (id INTEGER PRIMARY KEY); CREATE TABLE duplicate_table (name TEXT);", // This will fail due to duplicate table
+		Up:      true,
+	}
 
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// Get the database service and set up event emission
+	if ctx.service != nil {
+		// Set the database module as the event emitter for the service
+		ctx.service.SetEventEmitter(ctx.module)
+
+		// Run the migration - this should fail and emit migration failed event
+		err := ctx.service.RunMigration(context.Background(), migration)
+		if err != nil {
+			// This is expected - the migration should fail
+			ctx.lastError = err
+		}
 	}
 
 	return nil

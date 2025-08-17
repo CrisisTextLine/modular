@@ -321,6 +321,39 @@ func (l *lazyDefaultService) Begin() (*sql.Tx, error) {
 	return tx, nil
 }
 
+// Migration methods for lazyDefaultService
+
+func (l *lazyDefaultService) RunMigration(ctx context.Context, migration Migration) error {
+	service := l.module.GetDefaultService()
+	if service == nil {
+		return ErrNoDefaultService
+	}
+	return service.RunMigration(ctx, migration)
+}
+
+func (l *lazyDefaultService) GetAppliedMigrations(ctx context.Context) ([]string, error) {
+	service := l.module.GetDefaultService()
+	if service == nil {
+		return nil, ErrNoDefaultService
+	}
+	return service.GetAppliedMigrations(ctx)
+}
+
+func (l *lazyDefaultService) CreateMigrationsTable(ctx context.Context) error {
+	service := l.module.GetDefaultService()
+	if service == nil {
+		return ErrNoDefaultService
+	}
+	return service.CreateMigrationsTable(ctx)
+}
+
+func (l *lazyDefaultService) SetEventEmitter(emitter EventEmitter) {
+	service := l.module.GetDefaultService()
+	if service != nil {
+		service.SetEventEmitter(emitter)
+	}
+}
+
 // Module represents the database module and implements the modular.Module interface.
 // It manages multiple database connections and provides services for database access.
 //

@@ -61,6 +61,19 @@ type DatabaseService interface {
 
 	// Begin starts a transaction with default options
 	Begin() (*sql.Tx, error)
+
+	// Migration operations
+	// RunMigration executes a database migration
+	RunMigration(ctx context.Context, migration Migration) error
+
+	// GetAppliedMigrations returns a list of applied migration IDs
+	GetAppliedMigrations(ctx context.Context) ([]string, error)
+
+	// CreateMigrationsTable ensures the migrations tracking table exists
+	CreateMigrationsTable(ctx context.Context) error
+
+	// SetEventEmitter sets the event emitter for migration events
+	SetEventEmitter(emitter EventEmitter)
 }
 
 // databaseServiceImpl implements the DatabaseService interface
@@ -68,6 +81,8 @@ type databaseServiceImpl struct {
 	config           ConnectionConfig
 	db               *sql.DB
 	awsTokenProvider *AWSIAMTokenProvider
+	migrationService MigrationService
+	eventEmitter     EventEmitter
 	ctx              context.Context
 	cancel           context.CancelFunc
 }
@@ -158,6 +173,12 @@ func (s *databaseServiceImpl) Connect() error {
 	}
 
 	s.db = db
+	
+	// Initialize migration service after successful connection
+	if s.eventEmitter != nil {
+		s.migrationService = NewMigrationService(s.db, s.eventEmitter)
+	}
+	
 	return nil
 }
 
@@ -280,4 +301,36 @@ func (s *databaseServiceImpl) PrepareContext(ctx context.Context, query string) 
 
 func (s *databaseServiceImpl) Prepare(query string) (*sql.Stmt, error) {
 	return s.PrepareContext(context.Background(), query)
+}
+
+// SetEventEmitter sets the event emitter for migration events
+func (s *databaseServiceImpl) SetEventEmitter(emitter EventEmitter) {
+	s.eventEmitter = emitter
+	// Re-initialize migration service if database is already connected
+	if s.db != nil {
+		s.migrationService = NewMigrationService(s.db, s.eventEmitter)
+	}
+}
+
+// Migration methods - delegate to migration service
+
+func (s *databaseServiceImpl) RunMigration(ctx context.Context, migration Migration) error {
+	if s.migrationService == nil {
+		return fmt.Errorf("migration service not initialized")
+	}
+	return s.migrationService.RunMigration(ctx, migration)
+}
+
+func (s *databaseServiceImpl) GetAppliedMigrations(ctx context.Context) ([]string, error) {
+	if s.migrationService == nil {
+		return nil, fmt.Errorf("migration service not initialized")
+	}
+	return s.migrationService.GetAppliedMigrations(ctx)
+}
+
+func (s *databaseServiceImpl) CreateMigrationsTable(ctx context.Context) error {
+	if s.migrationService == nil {
+		return fmt.Errorf("migration service not initialized")
+	}
+	return s.migrationService.CreateMigrationsTable(ctx)
 }

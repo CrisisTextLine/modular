@@ -442,7 +442,7 @@ func (ctx *SchedulerBDDTestContext) theSchedulerIsRestarted() error {
 	// Brief pause to ensure clean shutdown
 	time.Sleep(100 * time.Millisecond)
 
-  // If persistence is enabled, recreate the application to trigger load in Init
+	// If persistence is enabled, recreate the application to trigger load in Init
 	if ctx.config != nil && ctx.config.EnablePersistence {
 		logger := &testLogger{}
 		mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
@@ -1052,7 +1052,7 @@ func (ctx *SchedulerBDDTestContext) aSchedulerStoppedEventShouldBeEmitted() erro
 		return nil
 	}
 
-  eventTypes := make([]string, len(events))
+	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
@@ -1174,14 +1174,14 @@ func (ctx *SchedulerBDDTestContext) theJobStartsExecution() error {
 	}
 
 	// If we get here, we didn't detect job execution within the timeout
-	return nil
+	return fmt.Errorf("job did not start execution within timeout")
 }
 
 func (ctx *SchedulerBDDTestContext) aJobStartedEventShouldBeEmitted() error {
 	// Poll for events with timeout
 	timeout := 2 * time.Second
 	start := time.Now()
-	
+
 	for time.Since(start) < timeout {
 		events := ctx.eventObserver.GetEvents()
 		for _, event := range events {
@@ -1198,7 +1198,7 @@ func (ctx *SchedulerBDDTestContext) aJobStartedEventShouldBeEmitted() error {
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-  
+
 	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeJobStarted, eventTypes)
 }
 
@@ -1296,14 +1296,14 @@ func (ctx *SchedulerBDDTestContext) theJobFailsDuringExecution() error {
 	}
 
 	// If we get here, we didn't detect job failure within the timeout
-	return nil
+	return fmt.Errorf("job did not fail within timeout")
 }
 
 func (ctx *SchedulerBDDTestContext) aJobFailedEventShouldBeEmitted() error {
 	// Poll for events with timeout
 	timeout := 2 * time.Second
 	start := time.Now()
-	
+
 	for time.Since(start) < timeout {
 		events := ctx.eventObserver.GetEvents()
 		for _, event := range events {

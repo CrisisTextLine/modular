@@ -507,7 +507,14 @@ func (m *SchedulerModule) EmitEvent(ctx context.Context, event cloudevents.Event
 
 // emitEvent is a helper method to create and emit CloudEvents for the scheduler module.
 // This centralizes the event creation logic and ensures consistent event formatting.
+// If no subject is available for event emission, it silently skips the event emission
+// to avoid noisy error messages in tests and non-observable applications.
 func (m *SchedulerModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+	// Skip event emission if no subject is available (non-observable application)
+	if m.subject == nil {
+		return
+	}
+
 	event := modular.NewCloudEvent(eventType, "scheduler-service", data, nil)
 
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {

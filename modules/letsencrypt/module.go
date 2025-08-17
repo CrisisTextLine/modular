@@ -303,6 +303,11 @@ func (m *LetsEncryptModule) Stop(ctx context.Context) error {
 		close(m.shutdownChan)
 	}
 
+	// Emit service stopped event
+	m.emitEvent(ctx, EventTypeServiceStopped, map[string]interface{}{
+		"certificates_count": len(m.certificates),
+	})
+
 	// Emit module stopped event
 	m.emitEvent(ctx, EventTypeModuleStopped, map[string]interface{}{
 		"certificates_count": len(m.certificates),

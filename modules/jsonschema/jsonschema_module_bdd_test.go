@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/cucumber/godog"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/cucumber/godog"
 )
 
 // JSONSchema BDD Test Context
@@ -28,6 +29,7 @@ type JSONSchemaBDDTestContext struct {
 
 // testEventObserver captures events for testing
 type testEventObserver struct {
+	mu     sync.RWMutex
 	events []cloudevents.Event
 	id     string
 }
@@ -39,6 +41,8 @@ func newTestEventObserver() *testEventObserver {
 }
 
 func (o *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.events = append(o.events, event)
 	return nil
 }
@@ -48,10 +52,17 @@ func (o *testEventObserver) ObserverID() string {
 }
 
 func (o *testEventObserver) GetEvents() []cloudevents.Event {
-	return o.events
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	// Return a copy of the slice to avoid race conditions
+	result := make([]cloudevents.Event, len(o.events))
+	copy(result, o.events)
+	return result
 }
 
 func (o *testEventObserver) ClearEvents() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.events = nil
 }
 
@@ -338,39 +349,39 @@ func (ctx *JSONSchemaBDDTestContext) aSchemaCompilationErrorShouldBeReturned() e
 // Event observation step methods
 func (ctx *JSONSchemaBDDTestContext) iHaveAJSONSchemaServiceWithEventObservationEnabled() error {
 	ctx.resetContext()
-	
+
 	// Create application with jsonschema config - use ObservableApplication for event support
 	logger := &testLogger{}
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
-	
+
 	// Create jsonschema module
 	ctx.module = NewModule()
 	ctx.service = ctx.module.schemaService
-	
-	// Register the module  
+
+	// Register the module
 	ctx.app.RegisterModule(ctx.module)
-	
+
 	// Initialize
 	if err := ctx.app.Init(); err != nil {
 		return err
 	}
-	
+
 	// Start the application
 	if err := ctx.app.Start(); err != nil {
 		return fmt.Errorf("failed to start application: %w", err)
 	}
-	
+
 	// Register the event observer with the jsonschema module
 	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
 		return fmt.Errorf("failed to register observers: %w", err)
 	}
-	
+
 	// Register our test observer to capture events
 	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
 		return fmt.Errorf("failed to register test observer: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -384,19 +395,19 @@ func (ctx *JSONSchemaBDDTestContext) iCompileAValidSchema() error {
 		},
 		"required": ["name"]
 	}`
-	
+
 	// Create temporary file for schema
 	tempFile, err := os.CreateTemp("", "test-schema-*.json")
 	if err != nil {
 		return err
 	}
 	defer tempFile.Close()
-	
+
 	ctx.tempFile = tempFile.Name()
 	if _, err := tempFile.WriteString(schemaJSON); err != nil {
 		return err
 	}
-	
+
 	// Compile the schema
 	ctx.compiledSchema, ctx.lastError = ctx.service.CompileSchema(ctx.tempFile)
 	return nil
@@ -404,25 +415,25 @@ func (ctx *JSONSchemaBDDTestContext) iCompileAValidSchema() error {
 
 func (ctx *JSONSchemaBDDTestContext) aSchemaCompiledEventShouldBeEmitted() error {
 	time.Sleep(100 * time.Millisecond) // Give time for async event emission
-	
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeSchemaCompiled {
 			return nil
 		}
 	}
-	
+
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-	
+
 	return fmt.Errorf("schema compiled event not found. Captured events: %v", eventTypes)
 }
 
 func (ctx *JSONSchemaBDDTestContext) theEventShouldContainTheSourceInformation() error {
 	time.Sleep(100 * time.Millisecond) // Give time for async event emission
-	
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeSchemaCompiled {
@@ -435,25 +446,25 @@ func (ctx *JSONSchemaBDDTestContext) theEventShouldContainTheSourceInformation()
 			}
 		}
 	}
-	
+
 	return fmt.Errorf("schema compiled event with source information not found")
 }
 
 func (ctx *JSONSchemaBDDTestContext) aSchemaErrorEventShouldBeEmitted() error {
 	time.Sleep(100 * time.Millisecond) // Give time for async event emission
-	
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeSchemaError {
 			return nil
 		}
 	}
-	
+
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-	
+
 	return fmt.Errorf("schema error event not found. Captured events: %v", eventTypes)
 }
 
@@ -464,7 +475,7 @@ func (ctx *JSONSchemaBDDTestContext) iValidateValidUserJSONDataWithBytesMethod()
 			return err
 		}
 	}
-	
+
 	validJSON := `{"name": "John Doe", "age": 30}`
 	ctx.lastError = ctx.service.ValidateBytes(ctx.compiledSchema, []byte(validJSON))
 	return nil
@@ -477,7 +488,7 @@ func (ctx *JSONSchemaBDDTestContext) iValidateInvalidUserJSONDataWithBytesMethod
 			return err
 		}
 	}
-	
+
 	invalidJSON := `{"age": "not a number"}` // missing required "name" field and age is not a number
 	ctx.lastError = ctx.service.ValidateBytes(ctx.compiledSchema, []byte(invalidJSON))
 	return nil
@@ -485,55 +496,55 @@ func (ctx *JSONSchemaBDDTestContext) iValidateInvalidUserJSONDataWithBytesMethod
 
 func (ctx *JSONSchemaBDDTestContext) aValidateBytesEventShouldBeEmitted() error {
 	time.Sleep(100 * time.Millisecond) // Give time for async event emission
-	
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeValidateBytes {
 			return nil
 		}
 	}
-	
+
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-	
+
 	return fmt.Errorf("validate bytes event not found. Captured events: %v", eventTypes)
 }
 
 func (ctx *JSONSchemaBDDTestContext) aValidationSuccessEventShouldBeEmitted() error {
 	time.Sleep(100 * time.Millisecond) // Give time for async event emission
-	
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeValidationSuccess {
 			return nil
 		}
 	}
-	
+
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-	
+
 	return fmt.Errorf("validation success event not found. Captured events: %v", eventTypes)
 }
 
 func (ctx *JSONSchemaBDDTestContext) aValidationFailedEventShouldBeEmitted() error {
 	time.Sleep(100 * time.Millisecond) // Give time for async event emission
-	
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeValidationFailed {
 			return nil
 		}
 	}
-	
+
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-	
+
 	return fmt.Errorf("validation failed event not found. Captured events: %v", eventTypes)
 }
 
@@ -544,7 +555,7 @@ func (ctx *JSONSchemaBDDTestContext) iValidateDataUsingTheReaderMethod() error {
 			return err
 		}
 	}
-	
+
 	validJSON := `{"name": "John Doe", "age": 30}`
 	reader := strings.NewReader(validJSON)
 	ctx.lastError = ctx.service.ValidateReader(ctx.compiledSchema, reader)
@@ -558,7 +569,7 @@ func (ctx *JSONSchemaBDDTestContext) iValidateDataUsingTheInterfaceMethod() erro
 			return err
 		}
 	}
-	
+
 	userData := map[string]interface{}{
 		"name": "John Doe",
 		"age":  30,
@@ -569,37 +580,37 @@ func (ctx *JSONSchemaBDDTestContext) iValidateDataUsingTheInterfaceMethod() erro
 
 func (ctx *JSONSchemaBDDTestContext) aValidateReaderEventShouldBeEmitted() error {
 	time.Sleep(100 * time.Millisecond) // Give time for async event emission
-	
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeValidateReader {
 			return nil
 		}
 	}
-	
+
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-	
+
 	return fmt.Errorf("validate reader event not found. Captured events: %v", eventTypes)
 }
 
 func (ctx *JSONSchemaBDDTestContext) aValidateInterfaceEventShouldBeEmitted() error {
 	time.Sleep(100 * time.Millisecond) // Give time for async event emission
-	
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeValidateInterface {
 			return nil
 		}
 	}
-	
+
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-	
+
 	return fmt.Errorf("validate interface event not found. Captured events: %v", eventTypes)
 }
 

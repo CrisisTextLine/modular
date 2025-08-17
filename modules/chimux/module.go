@@ -448,7 +448,10 @@ func (m *ChiMuxModule) Constructor() modular.ModuleConstructor {
 // The actual configuration loading is deferred to avoid deadlocks
 // during the tenant registration process.
 func (m *ChiMuxModule) OnTenantRegistered(tenantID modular.TenantID) {
-	m.logger.Info("Tenant registered in chimux module", "tenantID", tenantID)
+	// Check if logger is available (module might not be fully initialized yet)
+	if m.logger != nil {
+		m.logger.Info("Tenant registered in chimux module", "tenantID", tenantID)
+	}
 
 	// Just register the tenant ID and defer config loading to avoid deadlock
 	// The actual configuration will be loaded during Start() or when needed
@@ -458,7 +461,10 @@ func (m *ChiMuxModule) OnTenantRegistered(tenantID modular.TenantID) {
 // OnTenantRemoved is called when a tenant is removed.
 // This method cleans up any tenant-specific configurations and resources.
 func (m *ChiMuxModule) OnTenantRemoved(tenantID modular.TenantID) {
-	m.logger.Info("Tenant removed from chimux module", "tenantID", tenantID)
+	// Check if logger is available (module might not be fully initialized yet)
+	if m.logger != nil {
+		m.logger.Info("Tenant removed from chimux module", "tenantID", tenantID)
+	}
 	delete(m.tenantConfigs, tenantID)
 }
 
@@ -740,9 +746,7 @@ func (m *ChiMuxModule) EmitEvent(ctx context.Context, event cloudevents.Event) e
 func (m *ChiMuxModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	event := modular.NewCloudEvent(eventType, "chimux-service", data, nil)
 
-	go func() {
-		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			fmt.Printf("Failed to emit chimux event %s: %v\n", eventType, emitErr)
-		}
-	}()
+	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		fmt.Printf("Failed to emit chimux event %s: %v\n", eventType, emitErr)
+	}
 }

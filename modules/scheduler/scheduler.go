@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -89,6 +90,20 @@ type Scheduler struct {
 	wg             sync.WaitGroup
 	isStarted      bool
 	schedulerMutex sync.Mutex
+}
+
+// debugEnabled returns true when SCHEDULER_DEBUG env var is set to a non-empty value
+func debugEnabled() bool { return os.Getenv("SCHEDULER_DEBUG") != "" }
+
+// dbg prints verbose scheduler debugging information when SCHEDULER_DEBUG is set
+func dbg(format string, args ...interface{}) {
+	if !debugEnabled() {
+		return
+	}
+	ts := time.Now().Format(time.RFC3339Nano)
+	// Render the message first to avoid placeholder issues
+	msg := fmt.Sprintf(format, args...)
+	fmt.Printf("[SCHEDULER_DEBUG %s] %s\n", ts, msg)
 }
 
 // SchedulerOption defines a function that can configure a scheduler
@@ -194,6 +209,10 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.wg.Add(1)
 	go s.dispatchPendingJobs()
 
+	// Immediately check for due jobs (e.g., recovered from persistence) so execution resumes promptly
+	dbg("Start: running initial due-jobs dispatch (checkInterval=%s)", s.checkInterval.String())
+	s.checkAndDispatchJobs()
+
 	s.isStarted = true
 
 	// Emit scheduler started event
@@ -253,7 +272,7 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 
 	s.isStarted = false
 
-	// Always emit scheduler stopped event, regardless of shutdown result
+	// Emit scheduler stopped event
 	s.emitEvent(context.Background(), EventTypeSchedulerStopped, map[string]interface{}{
 		"worker_count": s.workerCount,
 	})
@@ -283,6 +302,7 @@ func (s *Scheduler) worker(id int) {
 
 			return
 		case job := <-s.jobQueue:
+			dbg("Worker %d: picked job id=%s name=%s nextRun=%v status=%s", id, job.ID, job.Name, job.NextRun, job.Status)
 			// Emit worker busy event
 			s.emitEvent(context.Background(), EventTypeWorkerBusy, map[string]interface{}{
 				"worker_id": id,
@@ -296,6 +316,7 @@ func (s *Scheduler) worker(id int) {
 			s.emitEvent(context.Background(), EventTypeWorkerIdle, map[string]interface{}{
 				"worker_id": id,
 			})
+			dbg("Worker %d: completed job id=%s", id, job.ID)
 		}
 	}
 }
@@ -439,12 +460,22 @@ func (s *Scheduler) emitEvent(ctx context.Context, eventType string, data map[st
 // checkAndDispatchJobs checks for due jobs and dispatches them
 func (s *Scheduler) checkAndDispatchJobs() {
 	now := time.Now()
+	dbg("Dispatcher: checking due jobs at %s", now.Format(time.RFC3339Nano))
 	dueJobs, err := s.jobStore.GetDueJobs(now)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Error("Failed to get due jobs", "error", err)
 		}
+		dbg("Dispatcher: error retrieving due jobs: %v", err)
 		return
+	}
+
+	if len(dueJobs) == 0 {
+		dbg("Dispatcher: no due jobs found")
+	} else {
+		for _, j := range dueJobs {
+			dbg("Dispatcher: due job id=%s name=%s nextRun=%v", j.ID, j.Name, j.NextRun)
+		}
 	}
 
 	for _, job := range dueJobs {
@@ -453,10 +484,12 @@ func (s *Scheduler) checkAndDispatchJobs() {
 			if s.logger != nil {
 				s.logger.Debug("Dispatched job", "id", job.ID, "name", job.Name)
 			}
+			dbg("Dispatcher: queued job id=%s", job.ID)
 		default:
 			if s.logger != nil {
 				s.logger.Warn("Job queue is full, job execution delayed", "id", job.ID, "name", job.Name)
 			}
+			dbg("Dispatcher: queue full for job id=%s", job.ID)
 			// If queue is full, we'll try again next tick
 		}
 	}

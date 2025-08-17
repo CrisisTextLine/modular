@@ -160,11 +160,11 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 		if strings.Contains(err.Error(), "token is expired") {
 			// Emit token expired event
 			tokenPrefix := tokenString
-			if len(tokenString) > 10 {
-				tokenPrefix = tokenString[:10] + "..."
+			if len(tokenString) > 20 {
+				tokenPrefix = tokenString[:20] + "..."
 			}
 			s.emitEvent(context.Background(), EventTypeTokenExpired, map[string]interface{}{
-				"token": tokenPrefix, // Only show first 10 chars for security
+				"tokenString": tokenPrefix, // Only log prefix for security
 			}, nil)
 			return nil, ErrTokenExpired
 		}
@@ -316,7 +316,7 @@ func (s *Service) RefreshToken(refreshTokenString string) (*TokenPair, error) {
 	}
 
 	newTokenPair, err := s.GenerateToken(userID, customClaims)
-	if err != nil {
+  if err != nil {
 		return nil, err
 	}
 

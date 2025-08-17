@@ -238,6 +238,9 @@ func (m *EventBusModule) Init(app modular.Application) error {
 		return fmt.Errorf("failed to create engine router: %w", err)
 	}
 
+	// Set module reference for memory engines to enable event emission
+	m.router.SetModuleReference(m)
+
 	if m.config.IsMultiEngine() {
 		m.logger.Info("Initialized multi-engine eventbus",
 			"engines", len(m.config.Engines),

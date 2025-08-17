@@ -454,9 +454,9 @@ func TestService_OAuth2(t *testing.T) {
 					ClientSecret: "test-client-secret",
 					RedirectURL:  "http://localhost:8080/auth/google/callback",
 					Scopes:       []string{"openid", "email", "profile"},
-					AuthURL:      "https://accounts.google.com/o/oauth2/auth",
-					TokenURL:     "https://oauth2.googleapis.com/token",
-					UserInfoURL:  "https://www.googleapis.com/oauth2/v2/userinfo",
+					AuthURL:      "http://localhost:9999/oauth2/auth",
+					TokenURL:     "http://localhost:9999/oauth2/token",
+					UserInfoURL:  "http://localhost:9999/oauth2/userinfo",
 				},
 			},
 		},
@@ -469,7 +469,7 @@ func TestService_OAuth2(t *testing.T) {
 	// Test getting OAuth2 auth URL
 	authURL, err := service.GetOAuth2AuthURL("google", "test-state")
 	require.NoError(t, err)
-	assert.Contains(t, authURL, "accounts.google.com")
+	assert.Contains(t, authURL, "localhost:9999")
 	assert.Contains(t, authURL, "test-client-id")
 	assert.Contains(t, authURL, "test-state")
 

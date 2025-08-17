@@ -149,9 +149,9 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 					ClientSecret: "test-client-secret",
 					RedirectURL:  "http://localhost:8080/auth/callback",
 					Scopes:       []string{"openid", "email", "profile"},
-					AuthURL:      "https://accounts.google.com/o/oauth2/auth",
-					TokenURL:     "https://oauth2.googleapis.com/token",
-					UserInfoURL:  "https://www.googleapis.com/oauth2/v2/userinfo",
+					AuthURL:      "http://localhost:9999/oauth2/auth",
+					TokenURL:     "http://localhost:9999/oauth2/token",
+					UserInfoURL:  "http://localhost:9999/oauth2/userinfo",
 				},
 			},
 		},
@@ -1184,13 +1184,7 @@ func (ctx *AuthBDDTestContext) iGenerateAJWTTokenForAUser() error {
 	return ctx.iGenerateAJWTTokenForTheUser()
 }
 
-func (ctx *AuthBDDTestContext) aTokenExpiredEventShouldBeEmitted() error {
-	return ctx.checkEventEmitted(EventTypeTokenExpired)
-}
 
-func (ctx *AuthBDDTestContext) aTokenRefreshedEventShouldBeEmitted() error {
-	return ctx.checkEventEmitted(EventTypeTokenRefreshed)
-}
 
 func (ctx *AuthBDDTestContext) aSessionExpiredEventShouldBeEmitted() error {
 	return ctx.checkEventEmitted(EventTypeSessionExpired)
@@ -1254,10 +1248,6 @@ func (ctx *AuthBDDTestContext) iAccessAnExpiredSession() error {
 	return nil
 }
 
-func (ctx *AuthBDDTestContext) aSessionExpiredEventShouldBeEmitted() error {
-	return ctx.checkEventEmitted(EventTypeSessionExpired)
-}
-
 func (ctx *AuthBDDTestContext) theSessionAccessShouldFail() error {
 	if ctx.lastError == nil {
 		return fmt.Errorf("expected session access to fail for expired session")
@@ -1299,8 +1289,8 @@ func (ctx *AuthBDDTestContext) iAttemptToRefreshTheExpiredToken() error {
 func (ctx *AuthBDDTestContext) theTokenRefreshShouldFail() error {
 	if ctx.lastError == nil {
 		return fmt.Errorf("expected token refresh to fail for expired token")
-  }
-  return nil
+	}
+	return nil
 }
 
 func (ctx *AuthBDDTestContext) iValidateAnExpiredToken() error {

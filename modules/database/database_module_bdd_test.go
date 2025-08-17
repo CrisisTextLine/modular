@@ -693,22 +693,52 @@ func (ctx *DatabaseBDDTestContext) aDatabaseConnectionFailsWithInvalidCredential
 	// Reset event observer to capture only this scenario's events
 	ctx.eventObserver.Reset()
 
-	// Simulate a connection error event manually for testing
-	// In real implementation, this would be triggered by actual connection failure
-	if ctx.eventObserver != nil {
-		event := cloudevents.NewEvent()
-		event.SetType(EventTypeConnectionError)
-		event.SetSource("database-module")
-		event.SetSubject("connection")
-		event.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
-			"error":  "connection failed",
-			"driver": "mysql",
-			"dsn":    "invalid_user:wrong_password@tcp(nonexistent:3306)/nonexistent_db",
-		})
-
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// Create a database configuration with invalid connection details that will cause real connection failure
+	invalidDbConfig := &Config{
+		Connections: map[string]*ConnectionConfig{
+			"invalid": {
+				Driver:             "sqlite3", // Use sqlite3 driver which is available
+				DSN:                "/root/nonexistent/path/database.db", // This path should fail due to permissions/nonexistent directory
+				MaxOpenConnections: 10,
+				MaxIdleConnections: 5,
+			},
+		},
+		Default: "invalid",
 	}
 
+	// Create provider with the invalid database config
+	dbConfigProvider := modular.NewStdConfigProvider(invalidDbConfig)
+
+	// Create a new observable application for this test
+	logger := &testLogger{}
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	invalidApp := modular.NewObservableApplication(mainConfigProvider, logger)
+
+	// Register our event observer with the invalid app
+	err := invalidApp.RegisterObserver(ctx.eventObserver)
+	if err != nil {
+		return fmt.Errorf("failed to register event observer: %w", err)
+	}
+
+	// Create and configure database module
+	invalidModule := NewModule()
+
+	// Register the database config section
+	invalidApp.RegisterConfigSection("database", dbConfigProvider)
+
+	// Register the module
+	invalidApp.RegisterModule(invalidModule)
+
+	// Initialize the app - this will trigger the connection attempt and should fail
+	err = invalidApp.Init()
+	if err == nil {
+		return fmt.Errorf("expected database initialization to fail with invalid credentials, but it succeeded")
+	}
+
+	// Debug: print the error that occurred
+	fmt.Printf("Database initialization failed as expected with error: %v\n", err)
+
+	// The connection error event should have been emitted during the failed initialization
 	return nil
 }
 

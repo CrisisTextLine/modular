@@ -33,8 +33,11 @@ type AuthBDDTestContext struct {
 	authResult        *User
 	authError         error
 	oauthURL          string
+	oauthResult       *OAuth2Result
 	lastError         error
 	originalFeeders   []modular.Feeder
+	// OAuth2 mock server for testing
+	mockOAuth2Server  *MockOAuth2Server
 	// Event observation fields
 	observableApp  *modular.ObservableApplication
 	capturedEvents []cloudevents.Event
@@ -79,6 +82,12 @@ func (ctx *AuthBDDTestContext) resetContext() {
 		ctx.originalFeeders = nil
 	}
 
+	// Clean up mock OAuth2 server
+	if ctx.mockOAuth2Server != nil {
+		ctx.mockOAuth2Server.Close()
+		ctx.mockOAuth2Server = nil
+	}
+
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -96,6 +105,7 @@ func (ctx *AuthBDDTestContext) resetContext() {
 	ctx.authResult = nil
 	ctx.authError = nil
 	ctx.oauthURL = ""
+	ctx.oauthResult = nil
 	ctx.lastError = nil
 	ctx.refreshToken = ""
 	ctx.newToken = ""
@@ -113,10 +123,21 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 	ctx.originalFeeders = modular.ConfigFeeders
 	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
 
+	// Create mock OAuth2 server for realistic testing
+	ctx.mockOAuth2Server = NewMockOAuth2Server()
+	
+	// Set up realistic user info for OAuth2 testing
+	ctx.mockOAuth2Server.SetUserInfo(map[string]interface{}{
+		"id":      "oauth-user-123",
+		"email":   "oauth.user@example.com",
+		"name":    "OAuth Test User",
+		"picture": "https://example.com/avatar.jpg",
+	})
+
 	// Create application
 	logger := &MockLogger{}
 
-	// Create proper auth configuration
+	// Create proper auth configuration using the mock OAuth2 server
 	authConfig := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret-key-for-bdd-tests",
@@ -144,15 +165,7 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 		},
 		OAuth2: OAuth2Config{
 			Providers: map[string]OAuth2Provider{
-				"google": {
-					ClientID:     "test-client-id",
-					ClientSecret: "test-client-secret",
-					RedirectURL:  "http://localhost:8080/auth/callback",
-					Scopes:       []string{"openid", "email", "profile"},
-					AuthURL:      "http://localhost:9999/oauth2/auth",
-					TokenURL:     "http://localhost:9999/oauth2/token",
-					UserInfoURL:  "http://localhost:9999/oauth2/userinfo",
-				},
+				"google": ctx.mockOAuth2Server.OAuth2Config("http://localhost:8080/auth/callback"),
 			},
 		},
 	}
@@ -923,7 +936,18 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 	ctx.originalFeeders = modular.ConfigFeeders
 	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
 
-	// Create proper auth configuration
+	// Create mock OAuth2 server for realistic testing
+	ctx.mockOAuth2Server = NewMockOAuth2Server()
+	
+	// Set up realistic user info for OAuth2 testing
+	ctx.mockOAuth2Server.SetUserInfo(map[string]interface{}{
+		"id":      "oauth-user-123",
+		"email":   "oauth.user@example.com",
+		"name":    "OAuth Test User",
+		"picture": "https://example.com/avatar.jpg",
+	})
+
+	// Create proper auth configuration using the mock OAuth2 server
 	authConfig := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret-key-for-event-tests",
@@ -946,14 +970,7 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 		},
 		OAuth2: OAuth2Config{
 			Providers: map[string]OAuth2Provider{
-				"test-provider": {
-					ClientID:     "test-client-id",
-					ClientSecret: "test-client-secret",
-					RedirectURL:  "http://127.0.0.1:8080/callback",
-					AuthURL:      "http://127.0.0.1:8080/auth",
-					TokenURL:     "http://127.0.0.1:8080/token",
-					Scopes:       []string{"openid", "profile"},
-				},
+				"google": ctx.mockOAuth2Server.OAuth2Config("http://127.0.0.1:8080/callback"),
 			},
 		},
 	}
@@ -1092,7 +1109,7 @@ func (ctx *AuthBDDTestContext) iHaveOAuth2ProvidersConfigured() error {
 }
 
 func (ctx *AuthBDDTestContext) iGetAnOAuth2AuthorizationURL() error {
-	url, err := ctx.service.GetOAuth2AuthURL("test-provider", "test-state")
+	url, err := ctx.service.GetOAuth2AuthURL("google", "test-state")
 	if err != nil {
 		return fmt.Errorf("failed to get OAuth2 auth URL: %w", err)
 	}
@@ -1106,37 +1123,19 @@ func (ctx *AuthBDDTestContext) anOAuth2AuthURLEventShouldBeEmitted() error {
 }
 
 func (ctx *AuthBDDTestContext) iExchangeAnOAuth2CodeForTokens() error {
-	// Instead of trying to make a real OAuth2 exchange work with invalid codes,
-	// let's test the event emission by directly calling the event emission logic
-	// or by mocking a successful OAuth2 result.
-
-	// For BDD testing purposes, we'll simulate the event emission that would happen
-	// during a successful OAuth2 exchange. The actual OAuth2 exchange logic is tested
-	// separately from the event emission logic.
-
-	// Simulate the data that would be passed to the event during a successful exchange
-	provider := "test-provider"
-	userInfo := map[string]interface{}{
-		"provider": provider,
-		"email":    "oauth.user@example.com",
-		"name":     "OAuth Test User",
+	// Use the real OAuth2 exchange with the mock server's valid code
+	if ctx.mockOAuth2Server == nil {
+		return fmt.Errorf("mock OAuth2 server not initialized")
 	}
 
-	// Emit the OAuth2 exchange event directly to test the event emission code path
-	if ctx.service.eventEmitter != nil {
-		event := modular.NewCloudEvent(EventTypeOAuth2Exchange, "auth-service", map[string]interface{}{
-			"provider": provider,
-			"userInfo": userInfo,
-		}, map[string]interface{}{
-			"expiresAt": time.Now().Add(1 * time.Hour),
-		})
-		err := ctx.service.eventEmitter.EmitEvent(context.Background(), event)
-		if err != nil {
-			ctx.lastError = err
-			return nil
-		}
+	// Perform real OAuth2 code exchange using the mock server
+	result, err := ctx.service.ExchangeOAuth2Code("google", ctx.mockOAuth2Server.GetValidCode(), "test-state")
+	if err != nil {
+		ctx.lastError = err
+		return fmt.Errorf("OAuth2 code exchange failed: %w", err)
 	}
 
+	ctx.oauthResult = result
 	return nil
 }
 

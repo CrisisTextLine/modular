@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -574,12 +577,49 @@ func (s *Service) fetchOAuth2UserInfo(provider, accessToken string) (map[string]
 		return nil, fmt.Errorf("%w: %s", ErrUserInfoURLNotConfigured, provider)
 	}
 
-	// This is a simplified implementation - in practice, you'd make an HTTP request
-	// to the provider's user info endpoint using the access token
-	userInfo := map[string]interface{}{
-		"provider": provider,
-		"token":    accessToken,
+	// Create HTTP request to fetch user info from OAuth2 provider
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", providerConfig.UserInfoURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating user info request: %w", err)
 	}
+
+	// Set authorization header with the access token
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+
+	// Make the HTTP request
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching user info from provider %s: %w", provider, err)
+	}
+	defer resp.Body.Close()
+
+	// Check for successful response
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("user info request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read and parse the response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading user info response: %w", err)
+	}
+
+	var userInfo map[string]interface{}
+	if err := json.Unmarshal(body, &userInfo); err != nil {
+		return nil, fmt.Errorf("parsing user info JSON: %w", err)
+	}
+
+	// Add provider information to the user info
+	userInfo["provider"] = provider
 
 	return userInfo, nil
 }

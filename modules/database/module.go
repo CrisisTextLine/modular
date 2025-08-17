@@ -321,6 +321,24 @@ func (l *lazyDefaultService) Begin() (*sql.Tx, error) {
 	return tx, nil
 }
 
+// CommitTransaction commits a transaction and emits appropriate events
+func (l *lazyDefaultService) CommitTransaction(ctx context.Context, tx *sql.Tx) error {
+	service := l.module.GetDefaultService()
+	if service == nil {
+		return ErrNoDefaultService
+	}
+	return service.CommitTransaction(ctx, tx)
+}
+
+// RollbackTransaction rolls back a transaction and emits appropriate events  
+func (l *lazyDefaultService) RollbackTransaction(ctx context.Context, tx *sql.Tx) error {
+	service := l.module.GetDefaultService()
+	if service == nil {
+		return ErrNoDefaultService
+	}
+	return service.RollbackTransaction(ctx, tx)
+}
+
 // Migration methods for lazyDefaultService
 
 func (l *lazyDefaultService) RunMigration(ctx context.Context, migration Migration) error {

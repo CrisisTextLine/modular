@@ -1183,8 +1183,6 @@ func (ctx *AuthBDDTestContext) iGenerateAJWTTokenForAUser() error {
 	return ctx.iGenerateAJWTTokenForTheUser()
 }
 
-
-
 func (ctx *AuthBDDTestContext) aSessionExpiredEventShouldBeEmitted() error {
 	return ctx.checkEventEmitted(EventTypeSessionExpired)
 }

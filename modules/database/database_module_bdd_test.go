@@ -782,6 +782,9 @@ func (ctx *DatabaseBDDTestContext) iHaveStartedADatabaseTransaction() error {
 	// Reset event observer to capture only this scenario's events  
 	ctx.eventObserver.Reset()
 
+	// Set the database module as the event emitter for the service
+	ctx.service.SetEventEmitter(ctx.module)
+
 	tx, err := ctx.service.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
@@ -795,29 +798,18 @@ func (ctx *DatabaseBDDTestContext) iCommitTheTransactionSuccessfully() error {
 		return fmt.Errorf("no transaction available to commit")
 	}
 
-	err := ctx.transaction.Commit()
+	// Use the real service method to commit transaction and emit events
+	err := ctx.service.CommitTransaction(context.Background(), ctx.transaction)
 	if err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Simulate transaction committed event for BDD testing
-	if ctx.eventObserver != nil {
-		event := cloudevents.NewEvent()
-		event.SetType(EventTypeTransactionCommitted)
-		event.SetSource("database-module")
-		event.SetSubject("transaction")
-		event.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
-			"connection":   "default",
-			"committed_at": time.Now().Format(time.RFC3339),
-		})
-
-		ctx.eventObserver.OnEvent(context.Background(), event)
 	}
 
 	return nil
 }
 
 func (ctx *DatabaseBDDTestContext) aTransactionCommittedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeTransactionCommitted {
@@ -850,30 +842,18 @@ func (ctx *DatabaseBDDTestContext) iRollbackTheTransaction() error {
 		return fmt.Errorf("no transaction available to rollback")
 	}
 
-	err := ctx.transaction.Rollback()
+	// Use the real service method to rollback transaction and emit events
+	err := ctx.service.RollbackTransaction(context.Background(), ctx.transaction)
 	if err != nil {
 		return fmt.Errorf("failed to rollback transaction: %w", err)
-	}
-
-	// Simulate transaction rolled back event for BDD testing
-	if ctx.eventObserver != nil {
-		event := cloudevents.NewEvent()
-		event.SetType(EventTypeTransactionRolledBack)
-		event.SetSource("database-module")
-		event.SetSubject("transaction")
-		event.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
-			"connection":    "default",
-			"rolled_back_at": time.Now().Format(time.RFC3339),
-			"reason":        "manual rollback",
-		})
-
-		ctx.eventObserver.OnEvent(context.Background(), event)
 	}
 
 	return nil
 }
 
 func (ctx *DatabaseBDDTestContext) aTransactionRolledBackEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Give time for async event emission
+
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
 		if event.Type() == EventTypeTransactionRolledBack {

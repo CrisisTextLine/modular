@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/CrisisTextLine/modular"
 )
 
 // Define static errors
@@ -61,6 +63,12 @@ type DatabaseService interface {
 
 	// Begin starts a transaction with default options
 	Begin() (*sql.Tx, error)
+
+	// CommitTransaction commits a transaction and emits appropriate events
+	CommitTransaction(ctx context.Context, tx *sql.Tx) error
+
+	// RollbackTransaction rolls back a transaction and emits appropriate events
+	RollbackTransaction(ctx context.Context, tx *sql.Tx) error
 
 	// Migration operations
 	// RunMigration executes a database migration
@@ -286,6 +294,71 @@ func (s *databaseServiceImpl) Begin() (*sql.Tx, error) {
 		return nil, fmt.Errorf("beginning database transaction: %w", err)
 	}
 	return tx, nil
+}
+
+// CommitTransaction commits a transaction and emits appropriate events
+func (s *databaseServiceImpl) CommitTransaction(ctx context.Context, tx *sql.Tx) error {
+	if tx == nil {
+		return fmt.Errorf("transaction cannot be nil")
+	}
+
+	startTime := time.Now()
+	err := tx.Commit()
+	duration := time.Since(startTime)
+	
+	// Emit transaction committed event
+	if s.eventEmitter != nil {
+		go func() {
+			event := modular.NewCloudEvent(EventTypeTransactionCommitted, "database-service", map[string]interface{}{
+				"connection":   "default",
+				"committed_at": startTime.Format(time.RFC3339),
+				"duration_ms":  duration.Milliseconds(),
+			}, nil)
+			
+			if emitErr := s.eventEmitter.EmitEvent(ctx, event); emitErr != nil {
+				fmt.Printf("Failed to emit transaction committed event: %v\n", emitErr)
+			}
+		}()
+	}
+	
+	if err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	
+	return nil
+}
+
+// RollbackTransaction rolls back a transaction and emits appropriate events  
+func (s *databaseServiceImpl) RollbackTransaction(ctx context.Context, tx *sql.Tx) error {
+	if tx == nil {
+		return fmt.Errorf("transaction cannot be nil")
+	}
+
+	startTime := time.Now()
+	err := tx.Rollback()
+	duration := time.Since(startTime)
+	
+	// Emit transaction rolled back event
+	if s.eventEmitter != nil {
+		go func() {
+			event := modular.NewCloudEvent(EventTypeTransactionRolledBack, "database-service", map[string]interface{}{
+				"connection":    "default", 
+				"rolled_back_at": startTime.Format(time.RFC3339),
+				"duration_ms":   duration.Milliseconds(),
+				"reason":        "manual rollback",
+			}, nil)
+			
+			if emitErr := s.eventEmitter.EmitEvent(ctx, event); emitErr != nil {
+				fmt.Printf("Failed to emit transaction rolled back event: %v\n", emitErr)
+			}
+		}()
+	}
+	
+	if err != nil {
+		return fmt.Errorf("failed to rollback transaction: %w", err)
+	}
+	
+	return nil
 }
 
 func (s *databaseServiceImpl) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {

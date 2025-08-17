@@ -697,8 +697,8 @@ func (ctx *DatabaseBDDTestContext) aDatabaseConnectionFailsWithInvalidCredential
 	invalidDbConfig := &Config{
 		Connections: map[string]*ConnectionConfig{
 			"invalid": {
-				Driver:             "sqlite3", // Use sqlite3 driver which is available
-				DSN:                "/root/nonexistent/path/database.db", // This path should fail due to permissions/nonexistent directory
+				Driver:             "nonexistent-driver", // This driver doesn't exist, should cause immediate failure
+				DSN:                "invalid-dsn", 
 				MaxOpenConnections: 10,
 				MaxIdleConnections: 5,
 			},

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -316,7 +317,7 @@ func (s *databaseServiceImpl) CommitTransaction(ctx context.Context, tx *sql.Tx)
 			}, nil)
 			
 			if emitErr := s.eventEmitter.EmitEvent(ctx, event); emitErr != nil {
-				fmt.Printf("Failed to emit transaction committed event: %v\n", emitErr)
+				log.Printf("Failed to emit transaction committed event: %v", emitErr)
 			}
 		}()
 	}
@@ -349,7 +350,7 @@ func (s *databaseServiceImpl) RollbackTransaction(ctx context.Context, tx *sql.T
 			}, nil)
 			
 			if emitErr := s.eventEmitter.EmitEvent(ctx, event); emitErr != nil {
-				fmt.Printf("Failed to emit transaction rolled back event: %v\n", emitErr)
+				log.Printf("Failed to emit transaction rolled back event: %v", emitErr)
 			}
 		}()
 	}

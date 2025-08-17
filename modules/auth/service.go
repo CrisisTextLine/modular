@@ -590,9 +590,15 @@ func (s *Service) fetchOAuth2UserInfo(provider, accessToken string) (map[string]
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 
-	// Make the HTTP request
+	// Use a reusable HTTP client with appropriate timeout
 	client := &http.Client{
 		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        10,
+			IdleConnTimeout:     90 * time.Second,
+			DisableCompression:  false,
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
 	}
 
 	resp, err := client.Do(req)

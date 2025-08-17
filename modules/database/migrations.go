@@ -40,6 +40,7 @@ type migrationServiceImpl struct {
 
 // EventEmitter interface for emitting migration events
 type EventEmitter interface {
+	// EmitEvent emits a cloud event with the provided context
 	EmitEvent(ctx context.Context, event cloudevents.Event) error
 }
 

@@ -137,6 +137,26 @@ Feature: Authentication Module
     When I exchange an OAuth2 code for tokens
     Then an OAuth2 exchange event should be emitted
 
+  Scenario: Emit events during token refresh
+    Given I have an auth module with event observation enabled
+    And I have a valid JWT token
+    When I refresh the token
+    Then a token refreshed event should be emitted
+
+  Scenario: Emit events during session expiration
+    Given I have an auth module with event observation enabled
+    And I have an expired session
+    When I attempt to access the expired session
+    Then the session access should fail
+    And a session expired event should be emitted
+
+  Scenario: Emit events during token expiration
+    Given I have an auth module with event observation enabled
+    And I have an expired token for refresh
+    When I attempt to refresh the expired token
+    Then the token refresh should fail
+    And a token expired event should be emitted
+
   Scenario: Emit session expired event
     Given I have an auth module with event observation enabled
     When I access an expired session

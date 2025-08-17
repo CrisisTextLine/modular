@@ -9,6 +9,7 @@ import (
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cucumber/godog"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // Auth BDD Test Context
@@ -32,8 +33,11 @@ type AuthBDDTestContext struct {
 	authResult        *User
 	authError         error
 	oauthURL          string
+	oauthResult       *OAuth2Result
 	lastError         error
 	originalFeeders   []modular.Feeder
+	// OAuth2 mock server for testing
+	mockOAuth2Server  *MockOAuth2Server
 	// Event observation fields
 	observableApp  *modular.ObservableApplication
 	capturedEvents []cloudevents.Event
@@ -78,6 +82,12 @@ func (ctx *AuthBDDTestContext) resetContext() {
 		ctx.originalFeeders = nil
 	}
 
+	// Clean up mock OAuth2 server
+	if ctx.mockOAuth2Server != nil {
+		ctx.mockOAuth2Server.Close()
+		ctx.mockOAuth2Server = nil
+	}
+
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -95,6 +105,7 @@ func (ctx *AuthBDDTestContext) resetContext() {
 	ctx.authResult = nil
 	ctx.authError = nil
 	ctx.oauthURL = ""
+	ctx.oauthResult = nil
 	ctx.lastError = nil
 	ctx.refreshToken = ""
 	ctx.newToken = ""
@@ -112,10 +123,21 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 	ctx.originalFeeders = modular.ConfigFeeders
 	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
 
+	// Create mock OAuth2 server for realistic testing
+	ctx.mockOAuth2Server = NewMockOAuth2Server()
+	
+	// Set up realistic user info for OAuth2 testing
+	ctx.mockOAuth2Server.SetUserInfo(map[string]interface{}{
+		"id":      "oauth-user-123",
+		"email":   "oauth.user@example.com",
+		"name":    "OAuth Test User",
+		"picture": "https://example.com/avatar.jpg",
+	})
+
 	// Create application
 	logger := &MockLogger{}
 
-	// Create proper auth configuration
+	// Create proper auth configuration using the mock OAuth2 server
 	authConfig := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret-key-for-bdd-tests",
@@ -143,15 +165,7 @@ func (ctx *AuthBDDTestContext) iHaveAModularApplicationWithAuthModuleConfigured(
 		},
 		OAuth2: OAuth2Config{
 			Providers: map[string]OAuth2Provider{
-				"google": {
-					ClientID:     "test-client-id",
-					ClientSecret: "test-client-secret",
-					RedirectURL:  "http://localhost:8080/auth/callback",
-					Scopes:       []string{"openid", "email", "profile"},
-					AuthURL:      "https://accounts.google.com/o/oauth2/auth",
-					TokenURL:     "https://oauth2.googleapis.com/token",
-					UserInfoURL:  "https://www.googleapis.com/oauth2/v2/userinfo",
-				},
+				"google": ctx.mockOAuth2Server.OAuth2Config("http://localhost:8080/auth/callback"),
 			},
 		},
 	}
@@ -871,6 +885,17 @@ func InitializeAuthScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^I exchange an OAuth2 code for tokens$`, testCtx.iExchangeAnOAuth2CodeForTokens)
 	ctx.Step(`^an OAuth2 exchange event should be emitted$`, testCtx.anOAuth2ExchangeEventShouldBeEmitted)
 
+	// Additional event observation steps
+	ctx.Step(`^I generate a JWT token for a user$`, testCtx.iGenerateAJWTTokenForAUser)
+	ctx.Step(`^a token expired event should be emitted$`, testCtx.aTokenExpiredEventShouldBeEmitted)
+	ctx.Step(`^a token refreshed event should be emitted$`, testCtx.aTokenRefreshedEventShouldBeEmitted)
+	ctx.Step(`^a session expired event should be emitted$`, testCtx.aSessionExpiredEventShouldBeEmitted)
+	ctx.Step(`^I have an expired session$`, testCtx.iHaveAnExpiredSession)
+	ctx.Step(`^I attempt to access the expired session$`, testCtx.iAttemptToAccessTheExpiredSession)
+	ctx.Step(`^the session access should fail$`, testCtx.theSessionAccessShouldFail)
+	ctx.Step(`^I have an expired token for refresh$`, testCtx.iHaveAnExpiredTokenForRefresh)
+	ctx.Step(`^I attempt to refresh the expired token$`, testCtx.iAttemptToRefreshTheExpiredToken)
+	ctx.Step(`^the token refresh should fail$`, testCtx.theTokenRefreshShouldFail)
 	// Session expired event testing
 	ctx.Step(`^I access an expired session$`, testCtx.iAccessAnExpiredSession)
 	ctx.Step(`^a session expired event should be emitted$`, testCtx.aSessionExpiredEventShouldBeEmitted)
@@ -911,7 +936,18 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 	ctx.originalFeeders = modular.ConfigFeeders
 	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
 
-	// Create proper auth configuration
+	// Create mock OAuth2 server for realistic testing
+	ctx.mockOAuth2Server = NewMockOAuth2Server()
+	
+	// Set up realistic user info for OAuth2 testing
+	ctx.mockOAuth2Server.SetUserInfo(map[string]interface{}{
+		"id":      "oauth-user-123",
+		"email":   "oauth.user@example.com",
+		"name":    "OAuth Test User",
+		"picture": "https://example.com/avatar.jpg",
+	})
+
+	// Create proper auth configuration using the mock OAuth2 server
 	authConfig := &Config{
 		JWT: JWTConfig{
 			Secret:            "test-secret-key-for-event-tests",
@@ -934,14 +970,7 @@ func (ctx *AuthBDDTestContext) iHaveAnAuthModuleWithEventObservationEnabled() er
 		},
 		OAuth2: OAuth2Config{
 			Providers: map[string]OAuth2Provider{
-				"test-provider": {
-					ClientID:     "test-client-id",
-					ClientSecret: "test-client-secret",
-					RedirectURL:  "http://127.0.0.1:8080/callback",
-					AuthURL:      "http://127.0.0.1:8080/auth",
-					TokenURL:     "http://127.0.0.1:8080/token",
-					Scopes:       []string{"openid", "profile"},
-				},
+				"google": ctx.mockOAuth2Server.OAuth2Config("http://127.0.0.1:8080/callback"),
 			},
 		},
 	}
@@ -1080,7 +1109,7 @@ func (ctx *AuthBDDTestContext) iHaveOAuth2ProvidersConfigured() error {
 }
 
 func (ctx *AuthBDDTestContext) iGetAnOAuth2AuthorizationURL() error {
-	url, err := ctx.service.GetOAuth2AuthURL("test-provider", "test-state")
+	url, err := ctx.service.GetOAuth2AuthURL("google", "test-state")
 	if err != nil {
 		return fmt.Errorf("failed to get OAuth2 auth URL: %w", err)
 	}
@@ -1094,19 +1123,25 @@ func (ctx *AuthBDDTestContext) anOAuth2AuthURLEventShouldBeEmitted() error {
 }
 
 func (ctx *AuthBDDTestContext) iExchangeAnOAuth2CodeForTokens() error {
-	// This will fail due to invalid code, but should still emit event
-	_, err := ctx.service.ExchangeOAuth2Code("test-provider", "invalid-code", "test-state")
-	ctx.lastError = err // Store the error but don't return it
+	// Use the real OAuth2 exchange with the mock server's valid code
+	if ctx.mockOAuth2Server == nil {
+		return fmt.Errorf("mock OAuth2 server not initialized")
+	}
+
+	// Perform real OAuth2 code exchange using the mock server
+	result, err := ctx.service.ExchangeOAuth2Code("google", ctx.mockOAuth2Server.GetValidCode(), "test-state")
+	if err != nil {
+		ctx.lastError = err
+		return fmt.Errorf("OAuth2 code exchange failed: %w", err)
+	}
+
+	ctx.oauthResult = result
 	return nil
 }
 
 func (ctx *AuthBDDTestContext) anOAuth2ExchangeEventShouldBeEmitted() error {
-	// Note: This event might not be emitted if the exchange fails early
-	// For now, we'll just check that we attempted the exchange
-	if ctx.lastError == nil {
-		return fmt.Errorf("expected OAuth2 exchange to fail with invalid code")
-	}
-	return nil
+	// Now we can properly check for the OAuth2 exchange event emission
+	return ctx.checkEventEmitted(EventTypeOAuth2Exchange)
 }
 
 // Helper methods for event validation
@@ -1142,6 +1177,47 @@ func (ctx *AuthBDDTestContext) getEmittedEventTypes() []string {
 	return types
 }
 
+// Additional step definitions for missing events
+
+func (ctx *AuthBDDTestContext) iGenerateAJWTTokenForAUser() error {
+	return ctx.iGenerateAJWTTokenForTheUser()
+}
+
+func (ctx *AuthBDDTestContext) aSessionExpiredEventShouldBeEmitted() error {
+	return ctx.checkEventEmitted(EventTypeSessionExpired)
+}
+
+func (ctx *AuthBDDTestContext) iHaveAnExpiredSession() error {
+	ctx.userID = "expired-session-user"
+	// Create session that expires immediately
+	session := &Session{
+		ID:        "expired-session-123",
+		UserID:    ctx.userID,
+		CreatedAt: time.Now().Add(-2 * time.Hour),
+		ExpiresAt: time.Now().Add(-1 * time.Hour), // Already expired
+		Active:    true,
+		Metadata: map[string]interface{}{
+			"test": "expired_session",
+		},
+	}
+
+	// Store the expired session directly in the session store
+	err := ctx.service.sessionStore.Store(context.Background(), session)
+	if err != nil {
+		return fmt.Errorf("failed to create expired session: %v", err)
+	}
+
+	ctx.sessionID = session.ID
+	ctx.session = session
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) iAttemptToAccessTheExpiredSession() error {
+	// This should trigger the session expired event
+	_, err := ctx.service.GetSession(ctx.sessionID)
+	ctx.lastError = err // Store error but don't return it as this is expected behavior
+	return nil
+}
 // Additional BDD step implementations for missing events
 
 func (ctx *AuthBDDTestContext) iAccessAnExpiredSession() error {
@@ -1169,13 +1245,47 @@ func (ctx *AuthBDDTestContext) iAccessAnExpiredSession() error {
 	return nil
 }
 
-func (ctx *AuthBDDTestContext) aSessionExpiredEventShouldBeEmitted() error {
-	return ctx.checkEventEmitted(EventTypeSessionExpired)
-}
-
 func (ctx *AuthBDDTestContext) theSessionAccessShouldFail() error {
 	if ctx.lastError == nil {
-		return fmt.Errorf("expected session access to fail, but it succeeded")
+		return fmt.Errorf("expected session access to fail for expired session")
+	}
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) iHaveAnExpiredTokenForRefresh() error {
+	// Create a token that's already expired for testing expired token during refresh
+	now := time.Now().Add(-2 * time.Hour) // 2 hours ago
+	claims := jwt.MapClaims{
+		"user_id": "expired-refresh-user",
+		"type":    "refresh",
+		"iat":     now.Unix(),
+		"exp":     now.Add(-1 * time.Hour).Unix(), // Expired 1 hour ago
+	}
+
+	if ctx.service.config.JWT.Issuer != "" {
+		claims["iss"] = ctx.service.config.JWT.Issuer
+	}
+	claims["sub"] = "expired-refresh-user"
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	expiredToken, err := token.SignedString([]byte(ctx.service.config.JWT.Secret))
+	if err != nil {
+		return fmt.Errorf("failed to create expired token: %w", err)
+	}
+
+	ctx.token = expiredToken
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) iAttemptToRefreshTheExpiredToken() error {
+	_, err := ctx.service.RefreshToken(ctx.token)
+	ctx.lastError = err // Store error but don't return it as this is expected behavior
+	return nil
+}
+
+func (ctx *AuthBDDTestContext) theTokenRefreshShouldFail() error {
+	if ctx.lastError == nil {
+		return fmt.Errorf("expected token refresh to fail for expired token")
 	}
 	return nil
 }

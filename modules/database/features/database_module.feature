@@ -65,3 +65,41 @@ Feature: Database Module
     And a database connected event should be emitted
     When the database module stops
     Then a database disconnected event should be emitted
+
+  Scenario: Emit connection error events
+    Given I have a database service with event observation enabled
+    When a database connection fails with invalid credentials
+    Then a connection error event should be emitted
+    And the event should contain connection failure details
+
+  Scenario: Emit transaction commit events
+    Given I have a database service with event observation enabled
+    And I have started a database transaction
+    When I commit the transaction successfully
+    Then a transaction committed event should be emitted
+    And the event should contain transaction details
+
+  Scenario: Emit transaction rollback events
+    Given I have a database service with event observation enabled
+    And I have started a database transaction
+    When I rollback the transaction
+    Then a transaction rolled back event should be emitted
+    And the event should contain rollback details
+
+  Scenario: Emit migration started events
+    Given I have a database service with event observation enabled
+    When a database migration is initiated
+    Then a migration started event should be emitted
+    And the event should contain migration metadata
+
+  Scenario: Emit migration completed events
+    Given I have a database service with event observation enabled
+    When a database migration completes successfully
+    Then a migration completed event should be emitted
+    And the event should contain migration results
+
+  Scenario: Emit migration failed events
+    Given I have a database service with event observation enabled
+    When a database migration fails with errors
+    Then a migration failed event should be emitted
+    And the event should contain failure details

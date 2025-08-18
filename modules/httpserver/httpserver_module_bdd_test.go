@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -59,6 +60,14 @@ func (t *testEventObserver) GetEvents() []cloudevents.Event {
 }
 
 func (ctx *HTTPServerBDDTestContext) resetContext() {
+	// Stop any running server before resetting
+	if ctx.service != nil {
+		ctx.service.Stop(context.Background()) // Stop the server first
+	}
+	if ctx.app != nil {
+		ctx.app.Stop() // Stop the application
+	}
+	
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -1268,7 +1277,7 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerProcessesARequest() error {
 	defer resp.Body.Close()
 
 	// Read the response to ensure the request completes
-	_, _ = resp.Body.Read(make([]byte, 100))
+	_, _ = io.ReadAll(resp.Body)
 
 	// Give time for async event emission
 	time.Sleep(300 * time.Millisecond)

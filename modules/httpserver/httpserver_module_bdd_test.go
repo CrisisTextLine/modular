@@ -953,19 +953,8 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 		ShutdownTimeout: 10 * time.Second,
 	}
 
-	// Create a copy of the config to avoid issues
-	configCopy := &HTTPServerConfig{
-		Host:            ctx.serverConfig.Host,
-		Port:            ctx.serverConfig.Port,
-		ReadTimeout:     ctx.serverConfig.ReadTimeout,
-		WriteTimeout:    ctx.serverConfig.WriteTimeout,
-		IdleTimeout:     ctx.serverConfig.IdleTimeout,
-		ShutdownTimeout: ctx.serverConfig.ShutdownTimeout,
-		TLS:             nil, // No TLS for basic event testing
-	}
-
 	// Create provider with the httpserver config
-	serverConfigProvider := modular.NewStdConfigProvider(configCopy)
+	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
 
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
@@ -1008,9 +997,6 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 	if err := ctx.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
 	}
-	// WORKAROUND: Fix config loading bug
-	ctx.module.config = ctx.serverConfig
-
 
 	if err := ctx.app.Start(); err != nil {
 		return fmt.Errorf("failed to start app: %v", err)
@@ -1054,31 +1040,9 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 		},
 	}
 
-	// Create a copy of the config to avoid issues
-	configCopy := &HTTPServerConfig{
-		Host:            ctx.serverConfig.Host,
-		Port:            ctx.serverConfig.Port,
-		ReadTimeout:     ctx.serverConfig.ReadTimeout,
-		WriteTimeout:    ctx.serverConfig.WriteTimeout,
-		IdleTimeout:     ctx.serverConfig.IdleTimeout,
-		ShutdownTimeout: ctx.serverConfig.ShutdownTimeout,
-	}
-
-	// Copy TLS config properly
-	if ctx.serverConfig.TLS != nil {
-		configCopy.TLS = &TLSConfig{
-			Enabled:      ctx.serverConfig.TLS.Enabled,
-			AutoGenerate: ctx.serverConfig.TLS.AutoGenerate,
-			CertFile:     ctx.serverConfig.TLS.CertFile,
-			KeyFile:      ctx.serverConfig.TLS.KeyFile,
-			Domains:      make([]string, len(ctx.serverConfig.TLS.Domains)),
-			UseService:   ctx.serverConfig.TLS.UseService,
-		}
-		copy(configCopy.TLS.Domains, ctx.serverConfig.TLS.Domains)
-	}
 
 	// Create provider with the httpserver config
-	serverConfigProvider := modular.NewStdConfigProvider(configCopy)
+	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
 	
 
 	// Create app with empty main config - USE OBSERVABLE for events
@@ -1122,9 +1086,6 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 	if err := ctx.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
 	}
-	// WORKAROUND: Fix config loading bug
-	ctx.module.config = ctx.serverConfig
-
 
 	if err := ctx.app.Start(); err != nil {
 		return fmt.Errorf("failed to start app: %v", err)

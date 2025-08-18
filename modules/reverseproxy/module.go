@@ -160,7 +160,7 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 	} else {
 		app.Logger().Debug("Application does not support Subject interface")
 	}
-	
+
 	// Get the config section
 	cfg, err := app.GetConfigSection(m.Name())
 	if err != nil {
@@ -541,10 +541,10 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 		"health_checker_enabled": m.healthChecker != nil,
 		"metrics_enabled":        m.enableMetrics,
 	})
-	
+
 	// Emit proxy started event
 	m.emitEvent(ctx, EventTypeProxyStarted, map[string]interface{}{
-		"backend_count": len(m.config.BackendServices),
+		"backend_count":  len(m.config.BackendServices),
 		"server_running": true,
 	})
 
@@ -613,10 +613,10 @@ func (m *ReverseProxyModule) Stop(ctx context.Context) error {
 
 	// Emit proxy stopped event
 	m.emitEvent(ctx, EventTypeProxyStopped, map[string]interface{}{
-		"backend_count": len(m.config.BackendServices),
+		"backend_count":  len(m.config.BackendServices),
 		"server_running": false,
 	})
-	
+
 	// Emit module stopped event
 	m.emitEvent(ctx, EventTypeModuleStopped, map[string]interface{}{
 		"cleanup_complete": true,
@@ -1190,7 +1190,7 @@ func (m *ReverseProxyModule) SetHttpClient(client *http.Client) {
 // createReverseProxyForBackend creates a reverse proxy for a specific backend with per-backend configuration.
 func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backendID string, endpoint string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	
+
 	// Emit proxy created event
 	m.emitEvent(context.Background(), EventTypeProxyCreated, map[string]interface{}{
 		"backend_id": backendID,
@@ -1636,7 +1636,7 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 					m.app.Logger().Warn("Circuit breaker open, denying request",
 						"backend", finalBackend, "tenant", tenantID, "path", r.URL.Path)
 				}
-				
+
 				// Emit request failed event for circuit breaker open
 				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
 					"backend":     finalBackend,
@@ -1646,7 +1646,7 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 					"error":       "Circuit breaker open",
 					"error_code":  "CIRCUIT_OPEN",
 				})
-				
+
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusServiceUnavailable)
 				if _, err := w.Write([]byte(`{"error":"Service temporarily unavailable","code":"CIRCUIT_OPEN"}`)); err != nil {
@@ -1688,7 +1688,7 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 		} else {
 			// No circuit breaker, use the proxy directly
 			proxy.ServeHTTP(w, r)
-			
+
 			// Emit request proxied event after successful proxying
 			m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
 				"backend":     finalBackend,
@@ -1785,7 +1785,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 					m.app.Logger().Warn("Circuit breaker open, denying request",
 						"backend", backend, "tenant", tenantID, "path", r.URL.Path)
 				}
-				
+
 				// Emit request failed event for circuit breaker open
 				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
 					"backend":     backend,
@@ -1838,7 +1838,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 		} else {
 			// No circuit breaker, use the proxy directly
 			proxy.ServeHTTP(w, r)
-			
+
 			// Emit request proxied event after successful proxying
 			m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
 				"backend":     backend,

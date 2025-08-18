@@ -124,18 +124,12 @@ func (m *HTTPServerModule) Name() string {
 // Default values are provided for common use cases, but can be
 // overridden through configuration files or environment variables.
 func (m *HTTPServerModule) RegisterConfig(app modular.Application) error {
-	// DEBUG: Print that RegisterConfig is called
-	fmt.Printf("DEBUG: HTTPServerModule.RegisterConfig called\n")
-	
 	// Check if httpserver config is already registered (e.g., by tests)
 	if _, err := app.GetConfigSection(m.Name()); err == nil {
 		// Config already registered, skip to avoid overriding
-		fmt.Printf("DEBUG: Config section already exists, skipping default registration\n")
 		return nil
 	}
 
-	fmt.Printf("DEBUG: Registering default httpserver config\n")
-	
 	// Register default config only if not already present
 	defaultConfig := &HTTPServerConfig{
 		Host:            "0.0.0.0",
@@ -171,14 +165,6 @@ func (m *HTTPServerModule) Init(app modular.Application) error {
 		return fmt.Errorf("failed to get config section '%s': %w", m.Name(), err)
 	}
 	m.config = cfg.GetConfig().(*HTTPServerConfig)
-
-	// DEBUG: Print the loaded configuration
-	fmt.Printf("DEBUG: Loaded httpserver config - Host: %s, Port: %d, TLS: %v\n", 
-		m.config.Host, m.config.Port, m.config.TLS != nil)
-	if m.config.TLS != nil {
-		fmt.Printf("DEBUG: TLS config - Enabled: %v, AutoGenerate: %v, Domains: %v\n",
-			m.config.TLS.Enabled, m.config.TLS.AutoGenerate, m.config.TLS.Domains)
-	}
 
 	// NOTE: Event emission is deferred to after RegisterObservers is called
 	// This will happen automatically when the application initialization completes
@@ -246,9 +232,6 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 
 		// Start server with or without TLS based on configuration
 		if m.config.TLS != nil && m.config.TLS.Enabled {
-			// DEBUG: Print TLS configuration
-			fmt.Printf("DEBUG: TLS is enabled, UseService=%v, AutoGenerate=%v\n", m.config.TLS.UseService, m.config.TLS.AutoGenerate)
-			
 			// Configure TLS
 			tlsConfig := &tls.Config{
 				MinVersion: tls.VersionTLS12,
@@ -290,7 +273,6 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 				}
 			} else if m.config.TLS.AutoGenerate {
 				// Auto-generate self-signed certificates
-				fmt.Printf("DEBUG: Auto-generating self-signed certificates for domains: %v\n", m.config.TLS.Domains)
 				m.logger.Info("Auto-generating self-signed certificates", "domains", m.config.TLS.Domains)
 
 				// Emit TLS enabled event SYNCHRONOUSLY before starting server
@@ -300,9 +282,6 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 				}, nil)
 				if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
 					m.logger.Debug("Failed to emit TLS auto-generate event", "error", emitErr)
-					fmt.Printf("DEBUG: Failed to emit TLS enabled event: %v\n", emitErr)
-				} else {
-					fmt.Printf("DEBUG: Successfully emitted TLS enabled event\n")
 				}
 
 				cert, key, err := m.generateSelfSignedCertificate(m.config.TLS.Domains)

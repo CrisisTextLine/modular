@@ -2845,7 +2845,7 @@ func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, da
 	event := modular.NewCloudEvent(eventType, "reverseproxy-service", data, nil)
 
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-		if m.app != nil {
+		if m.app != nil && m.app.Logger() != nil {
 			m.app.Logger().Error("Failed to emit reverseproxy event", "event_type", eventType, "error", emitErr)
 		}
 	}

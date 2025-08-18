@@ -63,9 +63,13 @@ func (ctx *HTTPServerBDDTestContext) resetContext() {
 	// Stop any running server before resetting
 	if ctx.service != nil {
 		ctx.service.Stop(context.Background()) // Stop the server first
+		// Give some time for the port to be released
+		time.Sleep(100 * time.Millisecond)
 	}
 	if ctx.app != nil {
 		ctx.app.Stop() // Stop the application
+		// Give some time for cleanup
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	ctx.app = nil
@@ -959,10 +963,10 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 		modular.ConfigFeeders = originalFeeders
 	}()
 
-	// Create httpserver configuration for testing
+	// Create httpserver configuration for testing - use high port to avoid conflicts
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:            "127.0.0.1",
-		Port:            8091, // Use a fixed port for event testing
+		Port:            9091, // Use a higher port to avoid conflicts with previous tests
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		IdleTimeout:     120 * time.Second,
@@ -1279,8 +1283,9 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerProcessesARequest() error {
 	// Read the response to ensure the request completes
 	_, _ = io.ReadAll(resp.Body)
 
-	// Give time for async event emission
-	time.Sleep(300 * time.Millisecond)
+	// Since events are now synchronous, they should be emitted immediately
+	// But give a small buffer for any remaining async processing
+	time.Sleep(100 * time.Millisecond)
 
 	return nil
 }

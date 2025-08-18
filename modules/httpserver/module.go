@@ -613,7 +613,10 @@ func (m *HTTPServerModule) EmitEvent(ctx context.Context, event cloudevents.Even
 
 	// For request events, emit synchronously to ensure immediate delivery in tests
 	if event.Type() == EventTypeRequestReceived || event.Type() == EventTypeRequestHandled {
-		return m.subject.NotifyObservers(ctx, event)
+		if err := m.subject.NotifyObservers(ctx, event); err != nil {
+			return fmt.Errorf("failed to notify observers for event %s: %w", event.Type(), err)
+		}
+		return nil
 	}
 
 	// Use a goroutine to prevent blocking server operations with other event emission

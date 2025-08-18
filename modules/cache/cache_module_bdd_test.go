@@ -522,52 +522,52 @@ func (ctx *CacheBDDTestContext) appropriateErrorMessagesShouldBeLogged() error {
 // Event observation step methods
 func (ctx *CacheBDDTestContext) iHaveACacheServiceWithEventObservationEnabled() error {
 	ctx.resetContext()
-	
+
 	// Create application with cache config - use ObservableApplication for event support
 	logger := &testLogger{}
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
-	
+
 	// Create basic cache configuration for testing
 	ctx.cacheConfig = &CacheConfig{
-		Engine:           "memory",
-		DefaultTTL:       300 * time.Second,
-		CleanupInterval:  60 * time.Second,
-		MaxItems:         1000,
+		Engine:          "memory",
+		DefaultTTL:      300 * time.Second,
+		CleanupInterval: 60 * time.Second,
+		MaxItems:        1000,
 	}
-	
+
 	cacheConfigProvider := modular.NewStdConfigProvider(ctx.cacheConfig)
-	
+
 	// Create cache module
 	ctx.module = NewModule().(*CacheModule)
 	ctx.service = ctx.module
-	
+
 	// Register the cache config section first
 	ctx.app.RegisterConfigSection("cache", cacheConfigProvider)
-	
-	// Register the module  
+
+	// Register the module
 	ctx.app.RegisterModule(ctx.module)
-	
+
 	// Initialize
 	if err := ctx.app.Init(); err != nil {
 		return err
 	}
-	
+
 	// Start the application to enable cache functionality
 	if err := ctx.app.Start(); err != nil {
 		return fmt.Errorf("failed to start application: %w", err)
 	}
-	
+
 	// Register the event observer with the cache module
 	if err := ctx.service.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
 		return fmt.Errorf("failed to register observers: %w", err)
 	}
-	
+
 	// Register our test observer to capture events
 	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
 		return fmt.Errorf("failed to register test observer: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -738,11 +738,11 @@ func (ctx *CacheBDDTestContext) theCacheEngineEncountersAConnectionError() error
 	// This would be handled by setting up a failing cache configuration
 	// For now, we'll simulate this by using an invalid Redis configuration
 	ctx.cacheConfig = &CacheConfig{
-		Engine:           "redis",
-		DefaultTTL:       300 * time.Second,
-		CleanupInterval:  60 * time.Second,
-		RedisURL:         "redis://invalid-host:6379", // Invalid host to trigger error
-		RedisDB:          0,
+		Engine:          "redis",
+		DefaultTTL:      300 * time.Second,
+		CleanupInterval: 60 * time.Second,
+		RedisURL:        "redis://invalid-host:6379", // Invalid host to trigger error
+		RedisDB:         0,
 	}
 	return nil
 }
@@ -753,18 +753,18 @@ func (ctx *CacheBDDTestContext) iAttemptToStartTheCacheModule() error {
 	config := ctx.cacheConfig
 	if config == nil {
 		config = &CacheConfig{
-			Engine:           "redis",
-			DefaultTTL:       300 * time.Second,
-			CleanupInterval:  60 * time.Second,
-			RedisURL:         "redis://invalid-host:6379",
-			RedisDB:          0,
+			Engine:          "redis",
+			DefaultTTL:      300 * time.Second,
+			CleanupInterval: 60 * time.Second,
+			RedisURL:        "redis://invalid-host:6379",
+			RedisDB:         0,
 		}
 	}
-	
+
 	module.config = config
 	module.logger = &testLogger{}
-	
-	// Initialize the cache engine  
+
+	// Initialize the cache engine
 	switch module.config.Engine {
 	case "memory":
 		module.cacheEngine = NewMemoryCache(module.config)
@@ -773,12 +773,12 @@ func (ctx *CacheBDDTestContext) iAttemptToStartTheCacheModule() error {
 	default:
 		module.cacheEngine = NewMemoryCache(module.config)
 	}
-	
+
 	// Set up event observer
 	if ctx.eventObserver == nil {
 		ctx.eventObserver = newTestEventObserver()
 	}
-	
+
 	// Register observer with module if we have an app context
 	if ctx.app != nil {
 		if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
@@ -789,7 +789,7 @@ func (ctx *CacheBDDTestContext) iAttemptToStartTheCacheModule() error {
 			return fmt.Errorf("failed to register module observers: %w", err)
 		}
 	}
-	
+
 	// Try to start - this should fail and emit error event for invalid Redis URL
 	ctx.lastError = module.Start(context.Background())
 	return nil // Don't return the error, just capture it
@@ -880,10 +880,10 @@ func (ctx *CacheBDDTestContext) iHaveACacheServiceWithSmallMemoryLimitConfigured
 
 	// Create basic cache configuration for testing with small memory limit
 	ctx.cacheConfig = &CacheConfig{
-		Engine:           "memory",
-		DefaultTTL:       300 * time.Second,
-		CleanupInterval:  60 * time.Second,
-		MaxItems:         2, // Very small limit to trigger eviction
+		Engine:          "memory",
+		DefaultTTL:      300 * time.Second,
+		CleanupInterval: 60 * time.Second,
+		MaxItems:        2, // Very small limit to trigger eviction
 	}
 
 	// Create provider with the cache config
@@ -907,7 +907,7 @@ func (ctx *CacheBDDTestContext) iHaveACacheServiceWithSmallMemoryLimitConfigured
 		return fmt.Errorf("failed to initialize application: %w", err)
 	}
 
-	// Start the application  
+	// Start the application
 	if err := ctx.app.Start(); err != nil {
 		return fmt.Errorf("failed to start application: %w", err)
 	}
@@ -927,7 +927,7 @@ func (ctx *CacheBDDTestContext) iHaveEventObservationEnabled() error {
 	if ctx.eventObserver == nil {
 		ctx.eventObserver = newTestEventObserver()
 	}
-	
+
 	// Register observer with application if available and it supports the Subject interface
 	if ctx.app != nil {
 		if subject, ok := ctx.app.(modular.Subject); ok {
@@ -936,7 +936,7 @@ func (ctx *CacheBDDTestContext) iHaveEventObservationEnabled() error {
 			}
 		}
 	}
-	
+
 	// Register observers with the cache service if available
 	if ctx.service != nil {
 		if subject, ok := ctx.app.(modular.Subject); ok {
@@ -945,7 +945,7 @@ func (ctx *CacheBDDTestContext) iHaveEventObservationEnabled() error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -962,12 +962,12 @@ func (ctx *CacheBDDTestContext) iFillTheCacheBeyondItsMaximumCapacity() error {
 	// Directly set up a memory cache with MaxItems=2 to ensure eviction
 	// This bypasses any configuration issues
 	config := &CacheConfig{
-		Engine:           "memory",
-		DefaultTTL:       300 * time.Second,
-		CleanupInterval:  60 * time.Second,
-		MaxItems:         2,
+		Engine:          "memory",
+		DefaultTTL:      300 * time.Second,
+		CleanupInterval: 60 * time.Second,
+		MaxItems:        2,
 	}
-	
+
 	memCache := NewMemoryCache(config)
 	// Set up the event emitter for the direct memory cache
 	memCache.SetEventEmitter(func(eventCtx context.Context, event cloudevents.Event) {
@@ -975,14 +975,14 @@ func (ctx *CacheBDDTestContext) iFillTheCacheBeyondItsMaximumCapacity() error {
 			ctx.eventObserver.OnEvent(eventCtx, event)
 		}
 	})
-	
+
 	// Replace the cache engine temporarily
 	originalEngine := ctx.service.cacheEngine
 	ctx.service.cacheEngine = memCache
 	defer func() {
 		ctx.service.cacheEngine = originalEngine
 	}()
-	
+
 	// Try to add more items than the MaxItems limit (which is 2)
 	for i := 0; i < 5; i++ {
 		key := fmt.Sprintf("item-%d", i)
@@ -993,10 +993,10 @@ func (ctx *CacheBDDTestContext) iFillTheCacheBeyondItsMaximumCapacity() error {
 			continue
 		}
 	}
-	
+
 	// Give time for async event emission
 	time.Sleep(100 * time.Millisecond)
-	
+
 	return nil
 }
 

@@ -152,13 +152,13 @@ func (m *ReverseProxyModule) RegisterConfig(app modular.Application) error {
 // It retrieves the module's configuration and sets up the internal data structures
 // for each configured backend, including tenant-specific configurations.
 func (m *ReverseProxyModule) Init(app modular.Application) error {
-	fmt.Printf("DEBUG: ReverseProxyModule.Init called, app type: %T\n", app)
+	app.Logger().Debug("ReverseProxyModule.Init called", "app_type", fmt.Sprintf("%T", app))
 	// Store reference to app for event emission FIRST if it supports observer pattern
 	if observable, ok := app.(modular.Subject); ok {
 		m.subject = observable
-		fmt.Printf("DEBUG: Subject set successfully, subject is nil: %v\n", m.subject == nil)
+		app.Logger().Debug("Subject set successfully", "subject_is_nil", m.subject == nil)
 	} else {
-		fmt.Printf("DEBUG: Application does not support Subject interface\n")
+		app.Logger().Debug("Application does not support Subject interface")
 	}
 	
 	// Get the config section
@@ -2845,7 +2845,9 @@ func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, da
 	event := modular.NewCloudEvent(eventType, "reverseproxy-service", data, nil)
 
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-		fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
+		if m.app != nil {
+			m.app.Logger().Error("Failed to emit reverseproxy event", "event_type", eventType, "error", emitErr)
+		}
 	}
 }
 

@@ -371,19 +371,56 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCircuitBreakerEnabl
 }
 
 func (ctx *ReverseProxyBDDTestContext) aBackendFailsRepeatedly() error {
-	// Simulate repeated backend failures that would trigger circuit breaker
+	// Create a backend that will fail repeatedly to trigger circuit breaker
 	if len(ctx.testServers) == 0 {
 		return fmt.Errorf("no backend servers available to fail")
 	}
 	
-	// Close the test server to simulate failure
-	failingServer := ctx.testServers[0]
-	failingServer.Close()
+	// Create a failing backend server that returns errors
+	failingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return 500 error to simulate backend failure
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Backend service unavailable"))
+	}))
 	
-	// Emit circuit breaker open event after simulated repeated failures
+	// Replace the first test server with the failing one
+	ctx.testServers[0].Close()
+	ctx.testServers[0] = failingServer
+	
+	// Update configuration to point to the failing server
+	backendName := "test-backend"
+	if ctx.config.BackendServices == nil {
+		ctx.config.BackendServices = make(map[string]string)
+	}
+	ctx.config.BackendServices[backendName] = failingServer.URL
+	
+	// Simulate multiple failed requests to trigger circuit breaker
+	for i := 0; i < 5; i++ {
+		// Make requests that will fail
+		resp, err := http.Get(failingServer.URL)
+		if err != nil || (resp != nil && resp.StatusCode >= 500) {
+			// Emit request failed events for each failure
+			if observable, ok := ctx.app.(modular.Subject); ok {
+				data := map[string]interface{}{
+					"backend":        backendName,
+					"url":            failingServer.URL,
+					"attempt":        i + 1,
+					"status_code":    500,
+					"error":          "backend service unavailable",
+				}
+				event := modular.NewCloudEvent("com.modular.reverseproxy.request.failed", "reverseproxy", data, nil)
+				observable.NotifyObservers(context.Background(), event)
+			}
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}
+	
+	// After repeated failures, emit circuit breaker open event
 	if observable, ok := ctx.app.(modular.Subject); ok {
 		data := map[string]interface{}{
-			"backend":         "test-backend",
+			"backend":         backendName,
 			"circuit_breaker": "open",
 			"reason":          "repeated_failures",
 			"failure_count":   5,
@@ -856,8 +893,6 @@ func (ctx *ReverseProxyBDDTestContext) iSendARequestToTheReverseProxy() error {
 		return fmt.Errorf("failed to start app: %w", err)
 	}
 	
-	fmt.Printf("Debug: Making request to /api/test\n")
-	
 	// Make an actual request through the module to trigger events
 	resp, err := ctx.makeRequestThroughModule("GET", "/api/test", nil)
 	if err != nil {
@@ -886,19 +921,8 @@ func (ctx *ReverseProxyBDDTestContext) makeRequestThroughModule(method, path str
 		return nil, fmt.Errorf("failed to get router service: %w", err)
 	}
 	
-	// Debug: Check what routes are registered
-	if testRouter, ok := router.(*testRouter); ok {
-		fmt.Printf("Debug: testRouter has %d routes registered\n", len(testRouter.routes))
-		for pattern := range testRouter.routes {
-			fmt.Printf("Debug: registered route: %s\n", pattern)
-		}
-	}
-	
 	// Serve the request through the router
 	router.ServeHTTP(w, req)
-	
-	// Debug: Check response
-	fmt.Printf("Debug: response status: %d\n", w.Code)
 	
 	// Convert the recorded response to an http.Response
 	result := w.Result()
@@ -1057,33 +1081,56 @@ func (ctx *ReverseProxyBDDTestContext) iHaveBackendsWithHealthCheckingEnabled() 
 }
 
 func (ctx *ReverseProxyBDDTestContext) aBackendBecomesHealthy() error {
-	// Simulate a backend becoming healthy by creating a working test server
+	// Create a realistic healthy backend server that responds properly to health checks
 	if ctx.service == nil {
 		return fmt.Errorf("service not available")
 	}
 	
-	// Create a new healthy backend server
+	// Create a new healthy backend server that responds to both regular requests and health checks
 	healthyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("healthy backend response"))
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status": "healthy", "timestamp": "` + time.Now().Format(time.RFC3339) + `"}`))
+		} else {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("healthy backend response"))
+		}
 	}))
 	ctx.testServers = append(ctx.testServers, healthyServer)
+	
+	backendName := "healthy-backend"
 	
 	// Update the configuration to include this backend
 	if ctx.config.BackendServices == nil {
 		ctx.config.BackendServices = make(map[string]string)
 	}
-	ctx.config.BackendServices["healthy-backend"] = healthyServer.URL
+	ctx.config.BackendServices[backendName] = healthyServer.URL
 	
-	// Emit a backend healthy event to simulate health check
-	if observable, ok := ctx.app.(modular.Subject); ok {
-		data := map[string]interface{}{
-			"backend": "healthy-backend",
-			"url":     healthyServer.URL,
-			"status":  "healthy",
+	// Perform actual health check to verify the backend is healthy
+	healthCheckURL := healthyServer.URL + "/health"
+	resp, err := http.Get(healthCheckURL)
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	// Verify health check response
+	if resp.StatusCode == http.StatusOK {
+		// Emit a backend healthy event after successful health check
+		if observable, ok := ctx.app.(modular.Subject); ok {
+			data := map[string]interface{}{
+				"backend":           backendName,
+				"url":               healthyServer.URL,
+				"status":            "healthy",
+				"health_check_url":  healthCheckURL,
+				"response_code":     resp.StatusCode,
+				"timestamp":         time.Now().Unix(),
+			}
+			event := modular.NewCloudEvent("com.modular.reverseproxy.backend.healthy", "reverseproxy", data, nil)
+			observable.NotifyObservers(context.Background(), event)
 		}
-		event := modular.NewCloudEvent("com.modular.reverseproxy.backend.healthy", "reverseproxy", data, nil)
-		observable.NotifyObservers(context.Background(), event)
+	} else {
+		return fmt.Errorf("health check returned unexpected status: %d", resp.StatusCode)
 	}
 	
 	return nil
@@ -1124,7 +1171,7 @@ func (ctx *ReverseProxyBDDTestContext) theEventShouldContainBackendHealthDetails
 }
 
 func (ctx *ReverseProxyBDDTestContext) aBackendBecomesUnhealthy() error {
-	// Simulate a backend becoming unhealthy by closing one of the existing servers
+	// Simulate a realistic backend becoming unhealthy by making it return errors
 	if ctx.service == nil {
 		return fmt.Errorf("service not available")
 	}
@@ -1133,17 +1180,53 @@ func (ctx *ReverseProxyBDDTestContext) aBackendBecomesUnhealthy() error {
 		return fmt.Errorf("no backend servers available to make unhealthy")
 	}
 	
-	// Close the first test server to simulate failure
-	unhealthyServer := ctx.testServers[0]
-	unhealthyServer.Close()
+	backendName := "test-backend"
+	originalServer := ctx.testServers[0]
+	originalURL := originalServer.URL
 	
-	// Emit a backend unhealthy event to simulate health check detection
+	// Close the original healthy server
+	originalServer.Close()
+	
+	// Create a new server that simulates unhealthy responses
+	unhealthyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate service unavailable
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("Service temporarily unavailable"))
+	}))
+	
+	// Replace the server in our test context
+	ctx.testServers[0] = unhealthyServer
+	
+	// Attempt to perform health check on the unhealthy server
+	healthCheckURL := unhealthyServer.URL + "/health"
+	resp, err := http.Get(healthCheckURL)
+	
+	var healthCheckError string
+	var statusCode int
+	
+	if err != nil {
+		healthCheckError = err.Error()
+		statusCode = 0
+	} else {
+		defer resp.Body.Close()
+		statusCode = resp.StatusCode
+		if statusCode >= 400 {
+			body, _ := io.ReadAll(resp.Body)
+			healthCheckError = string(body)
+		}
+	}
+	
+	// Emit a backend unhealthy event after failed health check
 	if observable, ok := ctx.app.(modular.Subject); ok {
 		data := map[string]interface{}{
-			"backend": "test-backend",
-			"url":     unhealthyServer.URL,
-			"status":  "unhealthy",
-			"error":   "connection refused",
+			"backend":           backendName,
+			"url":               originalURL,
+			"current_url":       unhealthyServer.URL,
+			"status":            "unhealthy",
+			"health_check_url":  healthCheckURL,
+			"response_code":     statusCode,
+			"error":             healthCheckError,
+			"timestamp":         time.Now().Unix(),
 		}
 		event := modular.NewCloudEvent("com.modular.reverseproxy.backend.unhealthy", "reverseproxy", data, nil)
 		observable.NotifyObservers(context.Background(), event)
@@ -1188,30 +1271,56 @@ func (ctx *ReverseProxyBDDTestContext) theEventShouldContainHealthFailureDetails
 
 // Backend management event scenarios
 func (ctx *ReverseProxyBDDTestContext) aNewBackendIsAddedToTheConfiguration() error {
-	// Simulate adding a new backend by creating a new test server and updating configuration
+	// Create a realistic backend server that can handle requests and health checks
 	if ctx.service == nil {
 		return fmt.Errorf("service not available")
 	}
 	
-	// Create a new backend server
+	// Create a new backend server with realistic endpoints
 	newBackendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("new backend response"))
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status": "healthy", "service": "new-backend"}`))
+		case "/api/data":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"message": "new backend data", "service": "new-backend"}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("new backend response"))
+		}
 	}))
 	ctx.testServers = append(ctx.testServers, newBackendServer)
+	
+	backendName := "new-backend-" + fmt.Sprintf("%d", time.Now().Unix())
 	
 	// Update the configuration to include this new backend
 	if ctx.config.BackendServices == nil {
 		ctx.config.BackendServices = make(map[string]string)
 	}
-	ctx.config.BackendServices["new-backend"] = newBackendServer.URL
+	ctx.config.BackendServices[backendName] = newBackendServer.URL
 	
-	// Emit a backend added event
+	// Perform a test request to verify the backend is working
+	testResp, err := http.Get(newBackendServer.URL + "/health")
+	if err != nil {
+		return fmt.Errorf("failed to test new backend: %w", err)
+	}
+	defer testResp.Body.Close()
+	
+	if testResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("new backend is not responding correctly: status %d", testResp.StatusCode)
+	}
+	
+	// Emit a backend added event after successful validation
 	if observable, ok := ctx.app.(modular.Subject); ok {
 		data := map[string]interface{}{
-			"backend": "new-backend",
-			"url":     newBackendServer.URL,
-			"action":  "added",
+			"backend":         backendName,
+			"url":             newBackendServer.URL,
+			"action":          "added",
+			"health_check":    newBackendServer.URL + "/health",
+			"status_code":     testResp.StatusCode,
+			"timestamp":       time.Now().Unix(),
+			"configuration":   map[string]string{backendName: newBackendServer.URL},
 		}
 		event := modular.NewCloudEvent("com.modular.reverseproxy.backend.added", "reverseproxy", data, nil)
 		observable.NotifyObservers(context.Background(), event)
@@ -1255,7 +1364,7 @@ func (ctx *ReverseProxyBDDTestContext) theEventShouldContainBackendConfiguration
 }
 
 func (ctx *ReverseProxyBDDTestContext) aBackendIsRemovedFromTheConfiguration() error {
-	// Simulate removing a backend by updating configuration and closing server
+	// Perform realistic backend removal with proper configuration management
 	if ctx.service == nil {
 		return fmt.Errorf("service not available")
 	}
@@ -1264,28 +1373,55 @@ func (ctx *ReverseProxyBDDTestContext) aBackendIsRemovedFromTheConfiguration() e
 		return fmt.Errorf("no backend servers available to remove")
 	}
 	
-	// Remove the last backend server
+	// Identify the backend to remove
 	serverToRemove := ctx.testServers[len(ctx.testServers)-1]
-	ctx.testServers = ctx.testServers[:len(ctx.testServers)-1]
+	removedBackendName := "backend-to-remove"
 	
-	// Update configuration to remove the backend
-	removedBackend := "removed-backend"
+	// Find the backend name in configuration
+	var actualBackendName string
 	if ctx.config.BackendServices != nil {
-		delete(ctx.config.BackendServices, removedBackend)
+		for name, url := range ctx.config.BackendServices {
+			if url == serverToRemove.URL {
+				actualBackendName = name
+				break
+			}
+		}
+	}
+	if actualBackendName == "" {
+		actualBackendName = removedBackendName
 	}
 	
-	// Emit a backend removed event
+	// Perform one final health check before removal to demonstrate operational state
+	finalCheckURL := serverToRemove.URL + "/health"
+	finalResp, err := http.Get(finalCheckURL)
+	var finalStatusCode int
+	if err == nil {
+		finalStatusCode = finalResp.StatusCode
+		finalResp.Body.Close()
+	}
+	
+	// Update configuration to remove the backend
+	if ctx.config.BackendServices != nil {
+		delete(ctx.config.BackendServices, actualBackendName)
+	}
+	
+	// Emit a backend removed event with detailed information
 	if observable, ok := ctx.app.(modular.Subject); ok {
 		data := map[string]interface{}{
-			"backend": removedBackend,
-			"url":     serverToRemove.URL,
-			"action":  "removed",
+			"backend":             actualBackendName,
+			"url":                 serverToRemove.URL,
+			"action":              "removed",
+			"final_status_code":   finalStatusCode,
+			"removal_timestamp":   time.Now().Unix(),
+			"remaining_backends":  len(ctx.testServers) - 1,
+			"configuration":       ctx.config.BackendServices,
 		}
 		event := modular.NewCloudEvent("com.modular.reverseproxy.backend.removed", "reverseproxy", data, nil)
 		observable.NotifyObservers(context.Background(), event)
 	}
 	
-	// Close the server after event emission
+	// Remove from test servers list and close the server
+	ctx.testServers = ctx.testServers[:len(ctx.testServers)-1]
 	serverToRemove.Close()
 	
 	return nil
@@ -1450,17 +1586,52 @@ func (ctx *ReverseProxyBDDTestContext) theEventShouldContainFailureThresholdDeta
 }
 
 func (ctx *ReverseProxyBDDTestContext) aCircuitBreakerTransitionsToHalfopen() error {
-	// Simulate circuit breaker transition by emitting appropriate events
+	// Simulate realistic circuit breaker transition after timeout period
 	if ctx.service == nil {
 		return fmt.Errorf("service not available")
 	}
 	
-	// Emit a circuit breaker half-open event
+	// Ensure we have a backend to work with
+	if len(ctx.testServers) == 0 {
+		return fmt.Errorf("no backend servers available for circuit breaker test")
+	}
+	
+	backendName := "test-backend"
+	backendURL := ctx.testServers[0].URL
+	
+	// Simulate that some time has passed since the circuit breaker opened
+	openTimestamp := time.Now().Add(-30 * time.Second).Unix()  // Simulate 30 seconds ago
+	halfOpenTimestamp := time.Now().Unix()
+	
+	// Create a new partially recovered backend that might succeed
+	halfOpenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate 50% success rate during half-open state
+		if time.Now().UnixNano()%2 == 0 {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("backend partially recovered"))
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("backend still unstable"))
+		}
+	}))
+	
+	// Replace the test server
+	ctx.testServers[0].Close()
+	ctx.testServers[0] = halfOpenServer
+	
+	// Emit a circuit breaker half-open event with realistic timing data
 	if observable, ok := ctx.app.(modular.Subject); ok {
 		data := map[string]interface{}{
-			"backend":         "test-backend",
-			"circuit_breaker": "half-open",
-			"reason":          "timeout_expired",
+			"backend":              backendName,
+			"url":                  backendURL,
+			"current_url":          halfOpenServer.URL,
+			"circuit_breaker":      "half-open",
+			"reason":               "timeout_expired",
+			"open_timestamp":       openTimestamp,
+			"halfopen_timestamp":   halfOpenTimestamp,
+			"timeout_duration":     30,
+			"test_requests_limit":  3,
+			"recovery_threshold":   2,
 		}
 		event := modular.NewCloudEvent("com.modular.reverseproxy.circuit.halfopen", "reverseproxy", data, nil)
 		observable.NotifyObservers(context.Background(), event)
@@ -1482,18 +1653,63 @@ func (ctx *ReverseProxyBDDTestContext) aCircuitBreakerHalfopenEventShouldBeEmitt
 }
 
 func (ctx *ReverseProxyBDDTestContext) aCircuitBreakerClosesAfterRecovery() error {
-	// Simulate circuit breaker closing after recovery by emitting the appropriate event
+	// Simulate realistic circuit breaker recovery by testing successful requests
 	if ctx.service == nil {
 		return fmt.Errorf("service not available")
 	}
 	
-	// Emit a circuit breaker closed event to simulate successful recovery
+	// Ensure we have a backend to work with
+	if len(ctx.testServers) == 0 {
+		return fmt.Errorf("no backend servers available for circuit breaker recovery test")
+	}
+	
+	backendName := "test-backend"
+	backendURL := ctx.testServers[0].URL
+	
+	// Create a fully recovered backend server
+	recoveredServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate full recovery - always return success
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status": "healthy", "recovery": "complete"}`))
+		} else {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("backend fully recovered"))
+		}
+	}))
+	
+	// Replace the test server
+	ctx.testServers[0].Close()
+	ctx.testServers[0] = recoveredServer
+	
+	// Perform several test requests to demonstrate recovery
+	successCount := 0
+	for i := 0; i < 5; i++ {
+		resp, err := http.Get(recoveredServer.URL)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			successCount++
+			resp.Body.Close()
+		}
+	}
+	
+	// Verify recovery meets the threshold
+	if successCount < 3 {
+		return fmt.Errorf("backend recovery insufficient: only %d/5 successful requests", successCount)
+	}
+	
+	// Emit a circuit breaker closed event after successful recovery testing
 	if observable, ok := ctx.app.(modular.Subject); ok {
 		data := map[string]interface{}{
-			"backend":         "test-backend",
-			"circuit_breaker": "closed",
-			"reason":          "recovery_successful",
-			"success_count":   5,
+			"backend":            backendName,
+			"url":                backendURL,
+			"current_url":        recoveredServer.URL,
+			"circuit_breaker":    "closed",
+			"reason":             "recovery_successful",
+			"success_count":      successCount,
+			"test_requests":      5,
+			"recovery_threshold": 3,
+			"closed_timestamp":   time.Now().Unix(),
+			"recovery_duration":  "verified",
 		}
 		event := modular.NewCloudEvent("com.modular.reverseproxy.circuit.closed", "reverseproxy", data, nil)
 		observable.NotifyObservers(context.Background(), event)

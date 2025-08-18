@@ -186,7 +186,7 @@ func (app *ObservableApplication) RegisterService(name string, service any) erro
 // Init initializes the application and emits lifecycle events
 func (app *ObservableApplication) Init() error {
 	ctx := context.Background()
-	
+
 	app.logger.Info("*** ObservableApplication.Init() called ***", "modules", len(app.moduleRegistry))
 
 	// Emit application starting initialization
@@ -196,20 +196,20 @@ func (app *ObservableApplication) Init() error {
 
 	// Register observers for any ObservableModule instances BEFORE calling module Init()
 	for _, module := range app.moduleRegistry {
-		fmt.Printf("DEBUG: Checking module %s for ObservableModule interface\n", module.Name())
+		app.logger.Debug("Checking module for ObservableModule interface", "module", module.Name())
 		if observableModule, ok := module.(ObservableModule); ok {
-			fmt.Printf("DEBUG: ObservableApplication registering observers for module %s\n", module.Name())
+			app.logger.Debug("ObservableApplication registering observers for module", "module", module.Name())
 			if err := observableModule.RegisterObservers(app); err != nil {
 				app.logger.Error("Failed to register observers for module", "module", module.Name(), "error", err)
 			}
 		} else {
-			fmt.Printf("DEBUG: Module %s does not implement ObservableModule\n", module.Name())
+			app.logger.Debug("Module does not implement ObservableModule", "module", module.Name())
 		}
 	}
-	fmt.Printf("DEBUG: ObservableApplication finished registering observers\n")
+	app.logger.Debug("ObservableApplication finished registering observers")
 
-	fmt.Printf("DEBUG: ObservableApplication calling InitWithApp with app type: %T\n", app)
-	err := app.StdApplication.InitWithApp(app)
+	app.logger.Debug("ObservableApplication calling InitWithApp", "app_type", fmt.Sprintf("%T", app))
+	err := app.InitWithApp(app)
 	if err != nil {
 		failureData := map[string]interface{}{
 			"phase": "init",

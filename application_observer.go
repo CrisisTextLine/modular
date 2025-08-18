@@ -207,7 +207,7 @@ func (app *ObservableApplication) Init() error {
 	}
 	app.logger.Debug("ObservableApplication finished registering observers")
 
-	app.logger.Debug("ObservableApplication calling InitWithApp", "app_type", app)
+	app.logger.Debug("ObservableApplication initializing modules with observable application instance")
 	err := app.InitWithApp(app)
 	if err != nil {
 		failureData := map[string]interface{}{

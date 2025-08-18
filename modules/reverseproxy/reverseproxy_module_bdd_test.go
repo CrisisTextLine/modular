@@ -111,6 +111,14 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyM
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 
+	// Verify that the observable application properly implements the required interfaces
+	if _, ok := ctx.app.(modular.Application); !ok {
+		return fmt.Errorf("observable application does not implement Application interface")
+	}
+	if _, ok := ctx.app.(modular.Subject); !ok {
+		return fmt.Errorf("observable application does not implement Subject interface")
+	}
+
 	// Create and register a mock router service (required by ReverseProxy)
 	mockRouter := &testRouter{
 		routes: make(map[string]http.HandlerFunc),
@@ -1280,7 +1288,7 @@ func (ctx *ReverseProxyBDDTestContext) aNewBackendIsAddedToTheConfiguration() er
 	}))
 	ctx.testServers = append(ctx.testServers, newBackendServer)
 
-	backendName := "new-backend-" + fmt.Sprintf("%d", time.Now().Unix())
+	backendName := "new-backend-test"
 
 	// Update the configuration to include this new backend
 	if ctx.config.BackendServices == nil {
@@ -1586,8 +1594,9 @@ func (ctx *ReverseProxyBDDTestContext) aCircuitBreakerTransitionsToHalfopen() er
 
 	// Create a new backend that has intermittent failures (simulating half-open recovery)
 	halfOpenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate 50% success rate during half-open state
-		if time.Now().UnixNano()%2 == 0 {
+		// Simulate deterministic behavior for half-open state testing
+		// Use request path length to determine response (deterministic for testing)
+		if len(r.URL.Path)%2 == 0 {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("backend partially recovered"))
 		} else {

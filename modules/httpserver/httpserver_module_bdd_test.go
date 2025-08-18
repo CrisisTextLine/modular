@@ -1054,10 +1054,8 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 		},
 	}
 
-
 	// Create provider with the httpserver config
 	serverConfigProvider := modular.NewStdConfigProvider(ctx.serverConfig)
-	
 
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
@@ -1247,26 +1245,26 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerProcessesARequest() error {
 	if ctx.service == nil {
 		return fmt.Errorf("server not available")
 	}
-	
+
 	// Give the server a moment to fully start
 	time.Sleep(200 * time.Millisecond)
-	
+
 	// Make a simple request using the configured port
 	client := &http.Client{Timeout: 5 * time.Second}
 	url := fmt.Sprintf("http://127.0.0.1:%d/", ctx.service.config.Port)
-	
+
 	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to make request to %s: %v", url, err)
 	}
 	defer resp.Body.Close()
-	
+
 	// Read the response to ensure the request completes
 	_, _ = resp.Body.Read(make([]byte, 100))
-	
+
 	// Give time for async event emission
 	time.Sleep(300 * time.Millisecond)
-	
+
 	return nil
 }
 
@@ -1277,12 +1275,12 @@ func (ctx *HTTPServerBDDTestContext) aRequestReceivedEventShouldBeEmitted() erro
 			return nil
 		}
 	}
-	
+
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-	
+
 	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestReceived, eventTypes)
 }
 
@@ -1293,18 +1291,18 @@ func (ctx *HTTPServerBDDTestContext) aRequestHandledEventShouldBeEmitted() error
 			return nil
 		}
 	}
-	
+
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-	
+
 	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestHandled, eventTypes)
 }
 
 func (ctx *HTTPServerBDDTestContext) theEventsShouldContainRequestDetails() error {
 	events := ctx.eventObserver.GetEvents()
-	
+
 	// Check request received event has request details
 	for _, event := range events {
 		if event.Type() == EventTypeRequestReceived {
@@ -1312,7 +1310,7 @@ func (ctx *HTTPServerBDDTestContext) theEventsShouldContainRequestDetails() erro
 			if err := event.DataAs(&data); err != nil {
 				return fmt.Errorf("failed to extract request received event data: %v", err)
 			}
-			
+
 			// Check for key request fields
 			if _, exists := data["method"]; !exists {
 				return fmt.Errorf("request received event should contain method field")
@@ -1320,10 +1318,10 @@ func (ctx *HTTPServerBDDTestContext) theEventsShouldContainRequestDetails() erro
 			if _, exists := data["url"]; !exists {
 				return fmt.Errorf("request received event should contain url field")
 			}
-			
+
 			return nil
 		}
 	}
-	
+
 	return fmt.Errorf("request received event not found")
 }

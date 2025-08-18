@@ -168,7 +168,7 @@ func (m *HTTPServerModule) Init(app modular.Application) error {
 
 	// NOTE: Event emission is deferred to after RegisterObservers is called
 	// This will happen automatically when the application initialization completes
-	
+
 	return nil
 }
 
@@ -583,7 +583,7 @@ func (m *HTTPServerModule) createTempFile(pattern, content string) (string, erro
 // This allows the httpserver module to register as an observer for events it's interested in.
 func (m *HTTPServerModule) RegisterObservers(subject modular.Subject) error {
 	m.subject = subject
-	
+
 	// Now that we have a subject, emit the config loaded event
 	if m.config != nil {
 		event := modular.NewCloudEvent(EventTypeConfigLoaded, "httpserver-module", map[string]interface{}{
@@ -598,7 +598,7 @@ func (m *HTTPServerModule) RegisterObservers(subject modular.Subject) error {
 			m.logger.Debug("Failed to emit httpserver config loaded event", "error", emitErr)
 		}
 	}
-	
+
 	// The httpserver module currently does not need to observe other events,
 	// but this method stores the subject for event emission.
 	return nil
@@ -674,5 +674,9 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 func (rw *responseWriter) Write(data []byte) (int, error) {
-	return rw.ResponseWriter.Write(data)
+	n, err := rw.ResponseWriter.Write(data)
+	if err != nil {
+		return n, fmt.Errorf("failed to write response: %w", err)
+	}
+	return n, nil
 }

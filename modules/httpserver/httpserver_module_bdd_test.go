@@ -943,6 +943,13 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 
 	logger := &testLogger{}
 
+	// Save and clear ConfigFeeders to prevent environment interference during tests
+	originalFeeders := modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{}
+	defer func() {
+		modular.ConfigFeeders = originalFeeders
+	}()
+
 	// Create httpserver configuration for testing
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:            "127.0.0.1",
@@ -1022,6 +1029,13 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 	ctx.resetContext()
 
 	logger := &testLogger{}
+
+	// Save and clear ConfigFeeders to prevent environment interference during tests
+	originalFeeders := modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{}
+	defer func() {
+		modular.ConfigFeeders = originalFeeders
+	}()
 
 	// Create httpserver configuration with TLS for testing
 	ctx.serverConfig = &HTTPServerConfig{

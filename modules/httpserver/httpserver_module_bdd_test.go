@@ -67,7 +67,7 @@ func (ctx *HTTPServerBDDTestContext) resetContext() {
 	if ctx.app != nil {
 		ctx.app.Stop() // Stop the application
 	}
-	
+
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil

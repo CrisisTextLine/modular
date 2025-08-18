@@ -1076,6 +1076,14 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 
 	// Create provider with the httpserver config
 	serverConfigProvider := modular.NewStdConfigProvider(configCopy)
+	
+	// DEBUG: Print what config is being registered
+	fmt.Printf("DEBUG: Registering test TLS config - Host: %s, Port: %d, TLS: %v\n",
+		configCopy.Host, configCopy.Port, configCopy.TLS != nil)
+	if configCopy.TLS != nil {
+		fmt.Printf("DEBUG: Test TLS config - Enabled: %v, AutoGenerate: %v\n",
+			configCopy.TLS.Enabled, configCopy.TLS.AutoGenerate)
+	}
 
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
@@ -1140,7 +1148,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 }
 
 func (ctx *HTTPServerBDDTestContext) aServerStartedEventShouldBeEmitted() error {
-	time.Sleep(200 * time.Millisecond) // Allow time for async event emission
+	time.Sleep(500 * time.Millisecond) // Allow time for server startup and event emission
 
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -1200,7 +1208,7 @@ func (ctx *HTTPServerBDDTestContext) theEventsShouldContainServerConfigurationDe
 }
 
 func (ctx *HTTPServerBDDTestContext) aTLSEnabledEventShouldBeEmitted() error {
-	time.Sleep(200 * time.Millisecond) // Allow time for async event emission
+	time.Sleep(500 * time.Millisecond) // Allow time for server startup and event emission
 
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {

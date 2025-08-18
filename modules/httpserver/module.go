@@ -124,12 +124,18 @@ func (m *HTTPServerModule) Name() string {
 // Default values are provided for common use cases, but can be
 // overridden through configuration files or environment variables.
 func (m *HTTPServerModule) RegisterConfig(app modular.Application) error {
+	// DEBUG: Print that RegisterConfig is called
+	fmt.Printf("DEBUG: HTTPServerModule.RegisterConfig called\n")
+	
 	// Check if httpserver config is already registered (e.g., by tests)
 	if _, err := app.GetConfigSection(m.Name()); err == nil {
 		// Config already registered, skip to avoid overriding
+		fmt.Printf("DEBUG: Config section already exists, skipping default registration\n")
 		return nil
 	}
 
+	fmt.Printf("DEBUG: Registering default httpserver config\n")
+	
 	// Register default config only if not already present
 	defaultConfig := &HTTPServerConfig{
 		Host:            "0.0.0.0",
@@ -166,21 +172,17 @@ func (m *HTTPServerModule) Init(app modular.Application) error {
 	}
 	m.config = cfg.GetConfig().(*HTTPServerConfig)
 
-	// Emit config loaded event
-	event := modular.NewCloudEvent(EventTypeConfigLoaded, "httpserver-module", map[string]interface{}{
-		"host":         m.config.Host,
-		"port":         m.config.Port,
-		"http_address": fmt.Sprintf("%s:%d", m.config.Host, m.config.Port),
-		"read_timeout": m.config.ReadTimeout.String(),
-		"tls_enabled":  m.config.TLS != nil && m.config.TLS.Enabled,
-	}, nil)
+	// DEBUG: Print the loaded configuration
+	fmt.Printf("DEBUG: Loaded httpserver config - Host: %s, Port: %d, TLS: %v\n", 
+		m.config.Host, m.config.Port, m.config.TLS != nil)
+	if m.config.TLS != nil {
+		fmt.Printf("DEBUG: TLS config - Enabled: %v, AutoGenerate: %v, Domains: %v\n",
+			m.config.TLS.Enabled, m.config.TLS.AutoGenerate, m.config.TLS.Domains)
+	}
 
-	go func() {
-		if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
-			fmt.Printf("Failed to emit httpserver config loaded event: %v\n", emitErr)
-		}
-	}()
-
+	// NOTE: Event emission is deferred to after RegisterObservers is called
+	// This will happen automatically when the application initialization completes
+	
 	return nil
 }
 
@@ -244,6 +246,9 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 
 		// Start server with or without TLS based on configuration
 		if m.config.TLS != nil && m.config.TLS.Enabled {
+			// DEBUG: Print TLS configuration
+			fmt.Printf("DEBUG: TLS is enabled, UseService=%v, AutoGenerate=%v\n", m.config.TLS.UseService, m.config.TLS.AutoGenerate)
+			
 			// Configure TLS
 			tlsConfig := &tls.Config{
 				MinVersion: tls.VersionTLS12,
@@ -255,15 +260,13 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 					m.logger.Info("Using certificate service for TLS")
 					tlsConfig.GetCertificate = m.certificateService.GetCertificate
 
-					// Emit TLS enabled event
+					// Emit TLS enabled event SYNCHRONOUSLY
 					tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
 						"method": "certificate_service",
 					}, nil)
-					go func() {
-						if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
-							fmt.Printf("Failed to emit TLS enabled event: %v\n", emitErr)
-						}
-					}()
+					if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
+						m.logger.Debug("Failed to emit TLS enabled event", "error", emitErr)
+					}
 
 				} else {
 					// Fall back to auto-generated certificates if UseService is true but no service is available
@@ -287,18 +290,20 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 				}
 			} else if m.config.TLS.AutoGenerate {
 				// Auto-generate self-signed certificates
+				fmt.Printf("DEBUG: Auto-generating self-signed certificates for domains: %v\n", m.config.TLS.Domains)
 				m.logger.Info("Auto-generating self-signed certificates", "domains", m.config.TLS.Domains)
 
-				// Emit TLS enabled event
+				// Emit TLS enabled event SYNCHRONOUSLY before starting server
 				tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
 					"method":  "auto_generate",
 					"domains": m.config.TLS.Domains,
 				}, nil)
-				go func() {
-					if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
-						fmt.Printf("Failed to emit TLS auto-generate event: %v\n", emitErr)
-					}
-				}()
+				if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
+					m.logger.Debug("Failed to emit TLS auto-generate event", "error", emitErr)
+					fmt.Printf("DEBUG: Failed to emit TLS enabled event: %v\n", emitErr)
+				} else {
+					fmt.Printf("DEBUG: Successfully emitted TLS enabled event\n")
+				}
 
 				cert, key, err := m.generateSelfSignedCertificate(m.config.TLS.Domains)
 				if err != nil {
@@ -316,17 +321,15 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 				// Use provided certificate files
 				m.logger.Info("Using TLS configuration", "cert", m.config.TLS.CertFile, "key", m.config.TLS.KeyFile)
 
-				// Emit TLS enabled event
+				// Emit TLS enabled event SYNCHRONOUSLY
 				tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
 					"method":    "certificate_files",
 					"cert_file": m.config.TLS.CertFile,
 					"key_file":  m.config.TLS.KeyFile,
 				}, nil)
-				go func() {
-					if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
-						fmt.Printf("Failed to emit TLS configured event: %v\n", emitErr)
-					}
-				}()
+				if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
+					m.logger.Debug("Failed to emit TLS configured event", "error", emitErr)
+				}
 
 				err = m.server.ListenAndServeTLS(m.config.TLS.CertFile, m.config.TLS.KeyFile)
 			}
@@ -388,7 +391,7 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 	m.started = true
 	m.logger.Info("HTTP server started successfully", "address", addr)
 
-	// Emit server started event
+	// Emit server started event synchronously
 	event := modular.NewCloudEvent(EventTypeServerStarted, "httpserver-service", map[string]interface{}{
 		"address":     addr,
 		"tls_enabled": m.config.TLS != nil && m.config.TLS.Enabled,
@@ -396,11 +399,9 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 		"port":        m.config.Port,
 	}, nil)
 
-	go func() {
-		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			fmt.Printf("Failed to emit server started event: %v\n", emitErr)
-		}
-	}()
+	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		m.logger.Debug("Failed to emit server started event", "error", emitErr)
+	}
 
 	// If TLS is enabled, emit TLS configured event now that server is fully started
 	if m.config.TLS != nil && m.config.TLS.Enabled {
@@ -419,11 +420,9 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 			"cert_method": tlsMethod,
 		}, nil)
 
-		go func() {
-			if emitErr := m.EmitEvent(ctx, tlsConfiguredEvent); emitErr != nil {
-				fmt.Printf("Failed to emit TLS configured event: %v\n", emitErr)
-			}
-		}()
+		if emitErr := m.EmitEvent(ctx, tlsConfiguredEvent); emitErr != nil {
+			m.logger.Debug("Failed to emit TLS configured event", "error", emitErr)
+		}
 	}
 
 	return nil
@@ -464,17 +463,15 @@ func (m *HTTPServerModule) Stop(ctx context.Context) error {
 	m.started = false
 	m.logger.Info("HTTP server stopped successfully")
 
-	// Emit server stopped event
+	// Emit server stopped event synchronously
 	event := modular.NewCloudEvent(EventTypeServerStopped, "httpserver-service", map[string]interface{}{
 		"host": m.config.Host,
 		"port": m.config.Port,
 	}, nil)
 
-	go func() {
-		if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-			fmt.Printf("Failed to emit server stopped event: %v\n", emitErr)
-		}
-	}()
+	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		m.logger.Debug("Failed to emit server stopped event", "error", emitErr)
+	}
 
 	return nil
 }
@@ -607,6 +604,22 @@ func (m *HTTPServerModule) createTempFile(pattern, content string) (string, erro
 // This allows the httpserver module to register as an observer for events it's interested in.
 func (m *HTTPServerModule) RegisterObservers(subject modular.Subject) error {
 	m.subject = subject
+	
+	// Now that we have a subject, emit the config loaded event
+	if m.config != nil {
+		event := modular.NewCloudEvent(EventTypeConfigLoaded, "httpserver-module", map[string]interface{}{
+			"host":         m.config.Host,
+			"port":         m.config.Port,
+			"http_address": fmt.Sprintf("%s:%d", m.config.Host, m.config.Port),
+			"read_timeout": m.config.ReadTimeout.String(),
+			"tls_enabled":  m.config.TLS != nil && m.config.TLS.Enabled,
+		}, nil)
+
+		if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+			m.logger.Debug("Failed to emit httpserver config loaded event", "error", emitErr)
+		}
+	}
+	
 	// The httpserver module currently does not need to observe other events,
 	// but this method stores the subject for event emission.
 	return nil
@@ -634,7 +647,7 @@ func (m *HTTPServerModule) EmitEvent(ctx context.Context, event cloudevents.Even
 // wrapHandlerWithRequestEvents wraps the HTTP handler to emit request events
 func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Emit request received event
+		// Emit request received event SYNCHRONOUSLY to ensure immediate emission
 		requestReceivedEvent := modular.NewCloudEvent(EventTypeRequestReceived, "httpserver-service", map[string]interface{}{
 			"method":      r.Method,
 			"url":         r.URL.String(),
@@ -642,13 +655,11 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 			"user_agent":  r.UserAgent(),
 		}, nil)
 
-		go func() {
-			if emitErr := m.EmitEvent(r.Context(), requestReceivedEvent); emitErr != nil {
-				if m.logger != nil {
-					m.logger.Debug("Failed to emit request received event", "error", emitErr)
-				}
+		if emitErr := m.EmitEvent(r.Context(), requestReceivedEvent); emitErr != nil {
+			if m.logger != nil {
+				m.logger.Debug("Failed to emit request received event", "error", emitErr)
 			}
-		}()
+		}
 
 		// Wrap response writer to capture status code
 		wrappedWriter := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
@@ -656,7 +667,7 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 		// Call the original handler
 		handler.ServeHTTP(wrappedWriter, r)
 
-		// Emit request handled event
+		// Emit request handled event SYNCHRONOUSLY to ensure immediate emission
 		requestHandledEvent := modular.NewCloudEvent(EventTypeRequestHandled, "httpserver-service", map[string]interface{}{
 			"method":      r.Method,
 			"url":         r.URL.String(),
@@ -664,13 +675,11 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 			"remote_addr": r.RemoteAddr,
 		}, nil)
 
-		go func() {
-			if emitErr := m.EmitEvent(r.Context(), requestHandledEvent); emitErr != nil {
-				if m.logger != nil {
-					m.logger.Debug("Failed to emit request handled event", "error", emitErr)
-				}
+		if emitErr := m.EmitEvent(r.Context(), requestHandledEvent); emitErr != nil {
+			if m.logger != nil {
+				m.logger.Debug("Failed to emit request handled event", "error", emitErr)
 			}
-		}()
+		}
 	})
 }
 

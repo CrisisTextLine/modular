@@ -643,7 +643,7 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 			"user_agent":  r.UserAgent(),
 		}, nil)
 
-		if emitErr := m.EmitEvent(r.Context(), requestReceivedEvent); emitErr != nil {
+		if emitErr := m.subject.NotifyObservers(r.Context(), requestReceivedEvent); emitErr != nil {
 			if m.logger != nil {
 				m.logger.Debug("Failed to emit request received event", "error", emitErr)
 			}
@@ -670,7 +670,7 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 			"remote_addr": r.RemoteAddr,
 		}, nil)
 
-		if emitErr := m.EmitEvent(r.Context(), requestHandledEvent); emitErr != nil {
+		if emitErr := m.subject.NotifyObservers(r.Context(), requestHandledEvent); emitErr != nil {
 			if m.logger != nil {
 				m.logger.Debug("Failed to emit request handled event", "error", emitErr)
 			}

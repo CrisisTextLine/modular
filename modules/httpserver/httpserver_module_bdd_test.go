@@ -970,7 +970,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 	// Create httpserver configuration for testing - use high port to avoid conflicts
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:            "127.0.0.1",
-		Port:            9100, // Use an even higher port to avoid conflicts with other tests
+		Port:            9200, // Use unique port for request event testing
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		IdleTimeout:     120 * time.Second,

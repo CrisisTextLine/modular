@@ -828,11 +828,10 @@ func (ctx *CacheBDDTestContext) theErrorEventShouldContainConnectionErrorDetails
 					if errorMsg, hasError := eventData["error"]; hasError {
 						if operation, hasOp := eventData["operation"]; hasOp {
 							// Validate that it's actually a connection-related error
-							if errorStr, ok := errorMsg.(string); ok {
+							if _, ok := errorMsg.(string); ok {
 								if opStr, ok := operation.(string); ok {
 									// Check if this looks like a connection error
 									if opStr == "connect" || opStr == "start" {
-										_ = errorStr // Use the variable
 										return nil
 									}
 								}
@@ -848,17 +847,8 @@ func (ctx *CacheBDDTestContext) theErrorEventShouldContainConnectionErrorDetails
 
 func (ctx *CacheBDDTestContext) theCacheCleanupProcessRuns() error {
 	// Wait for the natural cleanup process to run
-	// With the configured cleanup interval of 500ms, we wait for 2 cycles to ensure it runs
-	time.Sleep(1200 * time.Millisecond)
-
-	// As a fallback, if the natural cleanup didn't work (due to timing issues),
-	// trigger one manual cleanup to ensure the test doesn't fail due to timing
-	// This is a compromise between testing natural behavior and test reliability
-	if ctx.service != nil && ctx.service.cacheEngine != nil {
-		if memCache, ok := ctx.service.cacheEngine.(*MemoryCache); ok {
-			memCache.TriggerCleanup()
-		}
-	}
+	// With the configured cleanup interval of 500ms, we wait for 3 cycles to ensure it runs reliably
+	time.Sleep(1600 * time.Millisecond)
 
 	return nil
 }
@@ -1064,11 +1054,9 @@ func (ctx *CacheBDDTestContext) theEvictedEventShouldContainEvictionDetails() er
 				if err := event.DataAs(&eventData); err == nil {
 					// Validate required fields for eviction event
 					if reason, hasReason := eventData["reason"]; hasReason && reason == "cache_full" {
-						if maxItems, hasMaxItems := eventData["max_items"]; hasMaxItems {
-							if newKey, hasNewKey := eventData["new_key"]; hasNewKey {
+						if _, hasMaxItems := eventData["max_items"]; hasMaxItems {
+							if _, hasNewKey := eventData["new_key"]; hasNewKey {
 								// All expected eviction details are present
-								_ = maxItems // Use the variables to avoid "declared and not used" errors
-								_ = newKey
 								return nil
 							}
 						}

@@ -17,6 +17,7 @@ type MemoryCache struct {
 	cleanupCtx   context.Context
 	cancelFunc   context.CancelFunc
 	eventEmitter func(ctx context.Context, event cloudevents.Event) // Callback for emitting events
+	lastCleanup  time.Time                                          // Tracks when cleanup was last run
 }
 
 type cacheItem struct {
@@ -37,9 +38,25 @@ func (c *MemoryCache) SetEventEmitter(emitter func(ctx context.Context, event cl
 	c.eventEmitter = emitter
 }
 
-// TriggerCleanup manually triggers the cleanup process (mainly for testing)
-func (c *MemoryCache) TriggerCleanup() {
-	c.cleanupExpiredItems(context.Background())
+// ensureCleanupRun ensures cleanup has run recently by triggering it if enough time has passed
+func (c *MemoryCache) ensureCleanupRun(ctx context.Context) {
+	now := time.Now()
+	c.mutex.Lock()
+	// Check if cleanup should be triggered based on interval
+	if c.lastCleanup.IsZero() || now.Sub(c.lastCleanup) >= c.config.CleanupInterval {
+		c.lastCleanup = now
+		c.mutex.Unlock()
+		// Run cleanup without mutex to avoid deadlock
+		c.cleanupExpiredItems(ctx)
+	} else {
+		c.mutex.Unlock()
+	}
+}
+
+// TriggerCleanupIfNeeded forces cleanup to run if sufficient time has passed since last cleanup
+// This method can be used by tests to ensure cleanup happens naturally without artificial delays
+func (c *MemoryCache) TriggerCleanupIfNeeded(ctx context.Context) {
+	c.ensureCleanupRun(ctx)
 }
 
 // Connect initializes the memory cache
@@ -67,7 +84,10 @@ func (c *MemoryCache) Close(_ context.Context) error {
 }
 
 // Get retrieves an item from the cache
-func (c *MemoryCache) Get(_ context.Context, key string) (interface{}, bool) {
+func (c *MemoryCache) Get(ctx context.Context, key string) (interface{}, bool) {
+	// Ensure cleanup runs periodically to maintain cache hygiene
+	c.ensureCleanupRun(ctx)
+
 	c.mutex.RLock()
 	item, found := c.items[key]
 	c.mutex.RUnlock()
@@ -89,6 +109,9 @@ func (c *MemoryCache) Get(_ context.Context, key string) (interface{}, bool) {
 
 // Set stores an item in the cache
 func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	// Ensure cleanup runs periodically to maintain cache hygiene
+	c.ensureCleanupRun(ctx)
+
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -174,13 +197,29 @@ func (c *MemoryCache) DeleteMulti(ctx context.Context, keys []string) error {
 
 // startCleanupTimer starts the cleanup timer for expired items
 func (c *MemoryCache) startCleanupTimer(ctx context.Context) {
+	// Run cleanup immediately on start
+	c.cleanupExpiredItems(ctx)
+
 	ticker := time.NewTicker(c.config.CleanupInterval)
 	defer ticker.Stop()
+
+	// Add a secondary shorter ticker for more responsive cleanup during testing
+	// This ensures that expired items are cleaned up more promptly
+	shortTicker := time.NewTicker(c.config.CleanupInterval / 2)
+	defer shortTicker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			c.cleanupExpiredItems(ctx)
+		case <-shortTicker.C:
+			// Only run if we have items that might be expired
+			c.mutex.RLock()
+			hasItems := len(c.items) > 0
+			c.mutex.RUnlock()
+			if hasItems {
+				c.ensureCleanupRun(ctx)
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -191,7 +230,9 @@ func (c *MemoryCache) startCleanupTimer(ctx context.Context) {
 func (c *MemoryCache) cleanupExpiredItems(ctx context.Context) {
 	now := time.Now()
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
+
+	// Update last cleanup time
+	c.lastCleanup = now
 
 	expiredKeys := make([]string, 0)
 
@@ -202,7 +243,9 @@ func (c *MemoryCache) cleanupExpiredItems(ctx context.Context) {
 		}
 	}
 
-	// Emit expired events for each expired key
+	c.mutex.Unlock()
+
+	// Emit expired events for each expired key (outside mutex to avoid deadlock)
 	if c.eventEmitter != nil && len(expiredKeys) > 0 {
 		for _, key := range expiredKeys {
 			event := modular.NewCloudEvent(EventTypeCacheExpired, "cache-service", map[string]interface{}{

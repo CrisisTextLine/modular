@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/feeders"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cucumber/godog"
 )
@@ -30,122 +29,127 @@ type EventLoggerBDDTestContext struct {
 	eventObserver *testEventObserver
 }
 
-// createConsoleConfigYAML creates a YAML config file with console output
-func (ctx *EventLoggerBDDTestContext) createConsoleConfigYAML(bufferSize int) (string, error) {
-	configContent := fmt.Sprintf(`eventlogger:
-  enabled: true
-  logLevel: INFO
-  format: structured
-  bufferSize: %d
-  flushInterval: 5s
-  includeMetadata: true
-  includeStackTrace: false
-  outputTargets:
-    - type: console
-      level: INFO
-      format: structured
-      console:
-        useColor: false
-        timestamps: true
-`, bufferSize)
-
-	configPath := filepath.Join(ctx.tempDir, "console-config.yaml")
-	return configPath, os.WriteFile(configPath, []byte(configContent), 0644)
-}
-
-// createFileConfigYAML creates a YAML config file with file output
-func (ctx *EventLoggerBDDTestContext) createFileConfigYAML(logFile string) (string, error) {
-	configContent := fmt.Sprintf(`eventlogger:
-  enabled: true
-  logLevel: INFO
-  format: structured
-  bufferSize: 100
-  flushInterval: 5s
-  includeMetadata: true
-  includeStackTrace: false
-  outputTargets:
-    - type: file
-      level: INFO
-      format: json
-      file:
-        path: %s
-        maxSize: 10
-        maxBackups: 3
-        compress: false
-`, logFile)
-
-	configPath := filepath.Join(ctx.tempDir, "file-config.yaml")
-	return configPath, os.WriteFile(configPath, []byte(configContent), 0644)
-}
-
-// createMultiTargetConfigYAML creates a YAML config file with multiple output targets
-func (ctx *EventLoggerBDDTestContext) createMultiTargetConfigYAML(logFile string) (string, error) {
-	configContent := fmt.Sprintf(`eventlogger:
-  enabled: true
-  logLevel: INFO
-  format: structured
-  bufferSize: 100
-  flushInterval: 5s
-  includeMetadata: true
-  includeStackTrace: false
-  outputTargets:
-    - type: console
-      level: INFO
-      format: structured
-      console:
-        useColor: false
-        timestamps: true
-    - type: file
-      level: INFO
-      format: json
-      file:
-        path: %s
-        maxSize: 10
-        maxBackups: 3
-        compress: false
-`, logFile)
-
-	configPath := filepath.Join(ctx.tempDir, "multi-config.yaml")
-	return configPath, os.WriteFile(configPath, []byte(configContent), 0644)
-}
-
-// createFilteredConfigYAML creates a YAML config file with event type filters
-func (ctx *EventLoggerBDDTestContext) createFilteredConfigYAML(filters []string) (string, error) {
-	filterList := ""
-	for _, filter := range filters {
-		filterList += fmt.Sprintf("    - %s\n", filter)
+// createConsoleConfig creates an EventLoggerConfig with console output
+func (ctx *EventLoggerBDDTestContext) createConsoleConfig(bufferSize int) *EventLoggerConfig {
+	return &EventLoggerConfig{
+		Enabled:          true,
+		LogLevel:         "INFO",
+		Format:           "structured",
+		BufferSize:       bufferSize,
+		FlushInterval:    time.Duration(5 * time.Second),
+		IncludeMetadata:  true,
+		IncludeStackTrace: false,
+		OutputTargets: []OutputTargetConfig{
+			{
+				Type:   "console",
+				Level:  "INFO",
+				Format: "structured",
+				Console: &ConsoleTargetConfig{
+					UseColor:   false,
+					Timestamps: true,
+				},
+			},
+		},
 	}
-
-	configContent := fmt.Sprintf(`eventlogger:
-  enabled: true
-  logLevel: INFO
-  format: structured
-  bufferSize: 100
-  flushInterval: 5s
-  includeMetadata: true
-  includeStackTrace: false
-  eventTypeFilters:
-%s  outputTargets:
-    - type: console
-      level: INFO
-      format: structured
-      console:
-        useColor: false
-        timestamps: true
-`, filterList)
-
-	configPath := filepath.Join(ctx.tempDir, "filtered-config.yaml")
-	return configPath, os.WriteFile(configPath, []byte(configContent), 0644)
 }
 
-// createApplicationWithYamlConfig creates an ObservableApplication with YAML config
-func (ctx *EventLoggerBDDTestContext) createApplicationWithYamlConfig(configPath string) error {
+// createFileConfig creates an EventLoggerConfig with file output
+func (ctx *EventLoggerBDDTestContext) createFileConfig(logFile string) *EventLoggerConfig {
+	return &EventLoggerConfig{
+		Enabled:          true,
+		LogLevel:         "INFO",
+		Format:           "structured",
+		BufferSize:       100,
+		FlushInterval:    time.Duration(5 * time.Second),
+		IncludeMetadata:  true,
+		IncludeStackTrace: false,
+		OutputTargets: []OutputTargetConfig{
+			{
+				Type:   "file",
+				Level:  "INFO",
+				Format: "json",
+				File: &FileTargetConfig{
+					Path:       logFile,
+					MaxSize:    10,
+					MaxBackups: 3,
+					Compress:   false,
+				},
+			},
+		},
+	}
+}
+
+// createFilteredConfig creates an EventLoggerConfig with event type filters
+func (ctx *EventLoggerBDDTestContext) createFilteredConfig(filters []string) *EventLoggerConfig {
+	return &EventLoggerConfig{
+		Enabled:          true,
+		LogLevel:         "INFO",
+		Format:           "structured",
+		BufferSize:       100,
+		FlushInterval:    time.Duration(5 * time.Second),
+		IncludeMetadata:  true,
+		IncludeStackTrace: false,
+		EventTypeFilters: filters,
+		OutputTargets: []OutputTargetConfig{
+			{
+				Type:   "console",
+				Level:  "INFO",
+				Format: "structured",
+				Console: &ConsoleTargetConfig{
+					UseColor:   false,
+					Timestamps: true,
+				},
+			},
+		},
+	}
+}
+
+// createMultiTargetConfig creates an EventLoggerConfig with multiple output targets
+func (ctx *EventLoggerBDDTestContext) createMultiTargetConfig(logFile string) *EventLoggerConfig {
+	return &EventLoggerConfig{
+		Enabled:          true,
+		LogLevel:         "INFO",
+		Format:           "structured",
+		BufferSize:       100,
+		FlushInterval:    time.Duration(5 * time.Second),
+		IncludeMetadata:  true,
+		IncludeStackTrace: false,
+		OutputTargets: []OutputTargetConfig{
+			{
+				Type:   "console",
+				Level:  "INFO",
+				Format: "structured",
+				Console: &ConsoleTargetConfig{
+					UseColor:   false,
+					Timestamps: true,
+				},
+			},
+			{
+				Type:   "file",
+				Level:  "INFO",
+				Format: "json",
+				File: &FileTargetConfig{
+					Path:       logFile,
+					MaxSize:    10,
+					MaxBackups: 3,
+					Compress:   false,
+				},
+			},
+		},
+	}
+}
+
+
+// createApplicationWithConfig creates an ObservableApplication with provided config
+func (ctx *EventLoggerBDDTestContext) createApplicationWithConfig(config *EventLoggerConfig) error {
 	logger := &testLogger{}
 	
-	// Set global config feeders to use YAML
-	modular.ConfigFeeders = []modular.Feeder{
-		feeders.NewYamlFeeder(configPath),
-	}
+	// Save and clear ConfigFeeders to prevent environment interference during tests
+	originalFeeders := modular.ConfigFeeders
+	modular.ConfigFeeders = []modular.Feeder{}
+	defer func() {
+		modular.ConfigFeeders = originalFeeders
+	}()
 
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
@@ -162,13 +166,13 @@ func (ctx *EventLoggerBDDTestContext) createApplicationWithYamlConfig(configPath
 	// Create and register eventlogger module
 	ctx.module = NewModule().(*EventLoggerModule)
 
-	// Register module (this will call RegisterConfig which will register the default config)
-	ctx.app.RegisterModule(ctx.module)
+	// Register the eventlogger config section with the provided config FIRST
+	// This ensures the module's RegisterConfig doesn't override our test config
+	eventloggerConfigProvider := modular.NewStdConfigProvider(config)
+	ctx.app.RegisterConfigSection("eventlogger", eventloggerConfigProvider)
 
-	// Initialize the application (this will load config from YAML and trigger config loaded events)
-	if err := ctx.app.Init(); err != nil {
-		return fmt.Errorf("failed to initialize app: %v", err)
-	}
+	// Register module AFTER config
+	ctx.app.RegisterModule(ctx.module)
 
 	return nil
 }
@@ -213,9 +217,6 @@ func (ctx *EventLoggerBDDTestContext) resetContext() {
 		time.Sleep(10 * time.Millisecond)
 	}
 	
-	// Clear global config feeders to prevent interference between tests
-	modular.ConfigFeeders = []modular.Feeder{}
-	
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -239,14 +240,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAModularApplicationWithEventLoggerMod
 		return err
 	}
 
-	// Create YAML config file with basic console output
-	configPath, err := ctx.createConsoleConfigYAML(10)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create console config
+	config := ctx.createConsoleConfig(10)
 
-	// Create application with YAML config
-	return ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	return ctx.createApplicationWithConfig(config)
 }
 
 func (ctx *EventLoggerBDDTestContext) theEventLoggerModuleIsInitialized() error {
@@ -255,6 +253,12 @@ func (ctx *EventLoggerBDDTestContext) theEventLoggerModuleIsInitialized() error 
 		ctx.lastError = err
 		return err
 	}
+	
+	// Check if the module was properly initialized
+	if ctx.module == nil {
+		return fmt.Errorf("module is nil after init")
+	}
+	
 	return nil
 }
 
@@ -293,14 +297,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithConsoleOutputConfigu
 		return err
 	}
 
-	// Create YAML config file with console output
-	configPath, err := ctx.createConsoleConfigYAML(10)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create config with console output
+	config := ctx.createConsoleConfig(10)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -375,15 +376,12 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFileOutputConfigured
 		return err
 	}
 
-	// Create YAML config file with file output
+	// Create config with file output
 	logFile := filepath.Join(ctx.tempDir, "test.log")
-	configPath, err := ctx.createFileConfigYAML(logFile)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	config := ctx.createFileConfig(logFile)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -470,15 +468,12 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithEventTypeFiltersConf
 		return err
 	}
 
-	// Create YAML config file with event type filters
+	// Create config with event type filters
 	filters := []string{"user.created", "order.placed"}
-	configPath, err := ctx.createFilteredConfigYAML(filters)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	config := ctx.createFilteredConfig(filters)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -517,14 +512,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithINFOLogLevelConfigur
 		return err
 	}
 
-	// Create YAML config file with INFO log level (same as console config)
-	configPath, err := ctx.createConsoleConfigYAML(10)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create config with INFO log level (same as console config)
+	config := ctx.createConsoleConfig(10)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -580,14 +572,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithBufferSizeConfigured
 		return err
 	}
 
-	// Create YAML config file with small buffer size for testing
-	configPath, err := ctx.createConsoleConfigYAML(3) // Small buffer for testing
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create config with small buffer size for testing
+	config := ctx.createConsoleConfig(3) // Small buffer for testing
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -645,15 +634,12 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithMultipleOutputTarget
 		return err
 	}
 
-	// Create YAML config file with multiple output targets
+	// Create config with multiple output targets
 	logFile := filepath.Join(ctx.tempDir, "multi.log")
-	configPath, err := ctx.createMultiTargetConfigYAML(logFile)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	config := ctx.createMultiTargetConfig(logFile)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -714,14 +700,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithMetadataInclusionEna
 		return err
 	}
 
-	// Create YAML config file with metadata inclusion enabled (already enabled in console config)
-	configPath, err := ctx.createConsoleConfigYAML(10)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create config with metadata inclusion enabled (already enabled in console config)
+	config := ctx.createConsoleConfig(10)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -781,14 +764,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithPendingEvents() erro
 		return err
 	}
 
-	// Create YAML config file with console output
-	configPath, err := ctx.createConsoleConfigYAML(10)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create config with console output
+	config := ctx.createConsoleConfig(10)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -849,14 +829,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFaultyOutputTarget()
 		return err
 	}
 
-	// Create YAML config file with console output (good target for faulty target test)
-	configPath, err := ctx.createConsoleConfigYAML(10)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create config with console output (good target for faulty target test)
+	config := ctx.createConsoleConfig(10)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -942,14 +919,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithEventObservationEnab
 		return err
 	}
 
-	// Create YAML config file with console output for event observation
-	configPath, err := ctx.createConsoleConfigYAML(100)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create config with console output for event observation
+	config := ctx.createConsoleConfig(100)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -1186,14 +1160,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithSmallBufferAndEventO
 		return err
 	}
 
-	// Create YAML config file with small buffer for buffer overflow testing
-	configPath, err := ctx.createConsoleConfigYAML(1) // Very small buffer
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create config with small buffer for buffer overflow testing
+	config := ctx.createConsoleConfig(1) // Very small buffer
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -1293,14 +1264,11 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFaultyOutputTargetAn
 		return err
 	}
 
-	// Create YAML config file with console output
-	configPath, err := ctx.createConsoleConfigYAML(100)
-	if err != nil {
-		return fmt.Errorf("failed to create config YAML: %w", err)
-	}
+	// Create config with console output
+	config := ctx.createConsoleConfig(100)
 
-	// Create application with YAML config
-	err = ctx.createApplicationWithYamlConfig(configPath)
+	// Create application with the config
+	err = ctx.createApplicationWithConfig(config)
 	if err != nil {
 		return err
 	}
@@ -1494,12 +1462,7 @@ func TestEventLoggerModuleBDD(t *testing.T) {
 
 			// Configuration events
 			s.When(`^the event logger module is initialized$`, func() error {
-				// For event observation scenarios, initialization already happened in Given step
-				// For regular scenarios, call the regular initialization
-				if ctx.eventObserver != nil {
-					return nil // Already initialized in event observation setup
-				}
-				return ctx.theEventLoggerModuleIsInitialized() // Regular initialization
+				return ctx.theEventLoggerModuleIsInitialized() // Always call regular initialization
 			})
 			s.Then(`^a config loaded event should be emitted$`, ctx.aConfigLoadedEventShouldBeEmitted)
 			s.Then(`^output registered events should be emitted for each target$`, ctx.outputRegisteredEventsShouldBeEmittedForEachTarget)

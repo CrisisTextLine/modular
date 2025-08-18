@@ -165,6 +165,11 @@ func (m *EventLoggerModule) Name() string {
 
 // RegisterConfig registers the module's configuration structure.
 func (m *EventLoggerModule) RegisterConfig(app modular.Application) error {
+	// If a non-nil config provider is already registered (e.g., tests), don't override it
+	if existing, err := app.GetConfigSection(m.Name()); err == nil && existing != nil {
+		return nil
+	}
+
 	// Register the configuration with default values
 	defaultConfig := &EventLoggerConfig{
 		Enabled:           true,
@@ -215,6 +220,11 @@ func (m *EventLoggerModule) Init(app modular.Application) error {
 	// Initialize channels
 	m.eventChan = make(chan cloudevents.Event, m.config.BufferSize)
 	m.stopChan = make(chan struct{})
+
+	// Register this module instance as a service so it can be retrieved by tests and other modules
+	if err := app.RegisterService(ServiceName, m); err != nil {
+		return fmt.Errorf("failed to register eventlogger service: %w", err)
+	}
 
 	m.logger.Info("Event logger module initialized", "targets", len(m.outputs))
 

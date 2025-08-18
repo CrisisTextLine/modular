@@ -992,7 +992,11 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 	}
 
 	// Create and register httpserver module
-	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
+	module, ok := NewHTTPServerModule().(*HTTPServerModule)
+	if !ok {
+		return fmt.Errorf("failed to cast module to HTTPServerModule")
+	}
+	ctx.module = module
 
 	// Register the HTTP server config section first
 	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)
@@ -1086,7 +1090,11 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 	}
 
 	// Create and register httpserver module
-	ctx.module = NewHTTPServerModule().(*HTTPServerModule)
+	module, ok := NewHTTPServerModule().(*HTTPServerModule)
+	if !ok {
+		return fmt.Errorf("failed to cast module to HTTPServerModule")
+	}
+	ctx.module = module
 
 	// Register the HTTP server config section first
 	ctx.app.RegisterConfigSection("httpserver", serverConfigProvider)

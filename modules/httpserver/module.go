@@ -166,8 +166,8 @@ func (m *HTTPServerModule) Init(app modular.Application) error {
 	}
 	m.config = cfg.GetConfig().(*HTTPServerConfig)
 
-	// NOTE: Event emission is deferred to after RegisterObservers is called
-	// This will happen automatically when the application initialization completes
+	// NOTE: Event emission is deferred to RegisterObservers() method
+	// which is called automatically during application initialization
 
 	return nil
 }
@@ -676,7 +676,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 func (rw *responseWriter) Write(data []byte) (int, error) {
 	n, err := rw.ResponseWriter.Write(data)
 	if err != nil {
-		return n, fmt.Errorf("failed to write response: %w", err)
+		return n, fmt.Errorf("write response: %w", err)
 	}
 	return n, nil
 }

@@ -152,13 +152,9 @@ func (m *ReverseProxyModule) RegisterConfig(app modular.Application) error {
 // It retrieves the module's configuration and sets up the internal data structures
 // for each configured backend, including tenant-specific configurations.
 func (m *ReverseProxyModule) Init(app modular.Application) error {
-	app.Logger().Debug("ReverseProxyModule.Init called", "app_type", fmt.Sprintf("%T", app))
 	// Store reference to app for event emission FIRST if it supports observer pattern
 	if observable, ok := app.(modular.Subject); ok {
 		m.subject = observable
-		app.Logger().Debug("Subject set successfully", "subject_is_nil", m.subject == nil)
-	} else {
-		app.Logger().Debug("Application does not support Subject interface")
 	}
 
 	// Get the config section
@@ -612,8 +608,12 @@ func (m *ReverseProxyModule) Stop(ctx context.Context) error {
 	}
 
 	// Emit proxy stopped event
+	backendCount := 0
+	if m.config != nil {
+		backendCount = len(m.config.BackendServices)
+	}
 	m.emitEvent(ctx, EventTypeProxyStopped, map[string]interface{}{
-		"backend_count":  len(m.config.BackendServices),
+		"backend_count":  backendCount,
 		"server_running": false,
 	})
 
@@ -2842,6 +2842,11 @@ func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Ev
 // emitEvent is a helper method to create and emit CloudEvents for the reverseproxy module.
 // This centralizes the event creation logic and ensures consistent event formatting.
 func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+	// Skip event emission if subject is not available
+	if m.subject == nil {
+		return
+	}
+	
 	event := modular.NewCloudEvent(eventType, "reverseproxy-service", data, nil)
 
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {

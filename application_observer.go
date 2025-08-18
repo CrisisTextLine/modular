@@ -187,7 +187,7 @@ func (app *ObservableApplication) RegisterService(name string, service any) erro
 func (app *ObservableApplication) Init() error {
 	ctx := context.Background()
 
-	app.logger.Info("*** ObservableApplication.Init() called ***", "modules", len(app.moduleRegistry))
+	app.logger.Debug("ObservableApplication initializing", "modules", len(app.moduleRegistry))
 
 	// Emit application starting initialization
 	app.emitEvent(ctx, EventTypeConfigLoaded, nil, map[string]interface{}{

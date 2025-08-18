@@ -550,6 +550,12 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 // Stop performs any cleanup needed when stopping the module.
 // This method gracefully shuts down active connections and resources.
 func (m *ReverseProxyModule) Stop(ctx context.Context) error {
+	// Check config early to avoid potential nil pointer dereferences
+	var backendCount int
+	if m.config != nil && m.config.BackendServices != nil {
+		backendCount = len(m.config.BackendServices)
+	}
+
 	// Log that we're shutting down
 	if m.app != nil && m.app.Logger() != nil {
 		m.app.Logger().Info("Shutting down reverseproxy module")
@@ -608,10 +614,6 @@ func (m *ReverseProxyModule) Stop(ctx context.Context) error {
 	}
 
 	// Emit proxy stopped event
-	backendCount := 0
-	if m.config != nil {
-		backendCount = len(m.config.BackendServices)
-	}
 	m.emitEvent(ctx, EventTypeProxyStopped, map[string]interface{}{
 		"backend_count":  backendCount,
 		"server_running": false,
@@ -2844,6 +2846,9 @@ func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Ev
 func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	// Skip event emission if subject is not available
 	if m.subject == nil {
+		if m.app != nil && m.app.Logger() != nil {
+			m.app.Logger().Debug("Skipping event emission - no subject available", "event_type", eventType)
+		}
 		return
 	}
 

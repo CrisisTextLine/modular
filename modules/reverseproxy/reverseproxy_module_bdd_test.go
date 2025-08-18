@@ -428,6 +428,34 @@ func (ctx *ReverseProxyBDDTestContext) theCircuitBreakerShouldOpen() error {
 	if !ctx.service.config.CircuitBreakerConfig.Enabled {
 		return fmt.Errorf("circuit breaker not enabled")
 	}
+
+	// Verify that circuit breaker state has been affected by the failed requests
+	// Check if we have any circuit breakers registered
+	if len(ctx.service.circuitBreakers) == 0 {
+		return fmt.Errorf("no circuit breakers registered despite failures")
+	}
+
+	// Check if any circuit breaker is open or half-open (indicating it responded to failures)
+	foundActiveCircuitBreaker := false
+	for _, cb := range ctx.service.circuitBreakers {
+		if cb != nil {
+			state := cb.GetState()
+			if state == StateOpen || state == StateHalfOpen {
+				foundActiveCircuitBreaker = true
+				break
+			}
+			// Even if not open, check if failure count increased
+			if cb.GetFailureCount() > 0 {
+				foundActiveCircuitBreaker = true
+				break
+			}
+		}
+	}
+
+	if !foundActiveCircuitBreaker {
+		return fmt.Errorf("circuit breaker did not respond to backend failures as expected")
+	}
+
 	return nil
 }
 

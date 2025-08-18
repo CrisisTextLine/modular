@@ -2,7 +2,6 @@ package modular
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -208,7 +207,7 @@ func (app *ObservableApplication) Init() error {
 	}
 	app.logger.Debug("ObservableApplication finished registering observers")
 
-	app.logger.Debug("ObservableApplication calling InitWithApp", "app_type", fmt.Sprintf("%T", app))
+	app.logger.Debug("ObservableApplication calling InitWithApp", "app_type", app)
 	err := app.InitWithApp(app)
 	if err != nil {
 		failureData := map[string]interface{}{

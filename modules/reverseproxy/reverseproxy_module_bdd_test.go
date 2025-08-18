@@ -394,40 +394,18 @@ func (ctx *ReverseProxyBDDTestContext) aBackendFailsRepeatedly() error {
 	}
 	ctx.config.BackendServices[backendName] = failingServer.URL
 
-	// Simulate multiple failed requests to trigger circuit breaker
+	// Make multiple requests through the reverse proxy to trigger circuit breaker logic
 	for i := 0; i < 5; i++ {
-		// Make requests that will fail
-		resp, err := http.Get(failingServer.URL)
-		if err != nil || (resp != nil && resp.StatusCode >= 500) {
-			// Emit request failed events for each failure
-			if observable, ok := ctx.app.(modular.Subject); ok {
-				data := map[string]interface{}{
-					"backend":     backendName,
-					"url":         failingServer.URL,
-					"attempt":     i + 1,
-					"status_code": 500,
-					"error":       "backend service unavailable",
-				}
-				event := modular.NewCloudEvent("com.modular.reverseproxy.request.failed", "reverseproxy", data, nil)
-				observable.NotifyObservers(context.Background(), event)
-			}
-		}
+		// Make requests through the reverse proxy module, not directly to backend
+		// This will trigger the actual circuit breaker logic and emit real events
+		resp, err := ctx.makeRequestThroughModule("GET", "/api/test", nil)
 		if resp != nil {
 			resp.Body.Close()
 		}
-	}
-
-	// After repeated failures, emit circuit breaker open event
-	if observable, ok := ctx.app.(modular.Subject); ok {
-		data := map[string]interface{}{
-			"backend":         backendName,
-			"circuit_breaker": "open",
-			"reason":          "repeated_failures",
-			"failure_count":   5,
-			"threshold":       3,
+		// Continue making requests to trigger circuit breaker regardless of errors
+		if err != nil {
+			continue
 		}
-		event := modular.NewCloudEvent("com.modular.reverseproxy.circuit.open", "reverseproxy", data, nil)
-		observable.NotifyObservers(context.Background(), event)
 	}
 
 	return nil
@@ -1113,23 +1091,13 @@ func (ctx *ReverseProxyBDDTestContext) aBackendBecomesHealthy() error {
 	}
 	defer resp.Body.Close()
 
-	// Verify health check response
-	if resp.StatusCode == http.StatusOK {
-		// Emit a backend healthy event after successful health check
-		if observable, ok := ctx.app.(modular.Subject); ok {
-			data := map[string]interface{}{
-				"backend":          backendName,
-				"url":              healthyServer.URL,
-				"status":           "healthy",
-				"health_check_url": healthCheckURL,
-				"response_code":    resp.StatusCode,
-				"timestamp":        time.Now().Unix(),
-			}
-			event := modular.NewCloudEvent("com.modular.reverseproxy.backend.healthy", "reverseproxy", data, nil)
-			observable.NotifyObservers(context.Background(), event)
-		}
-	} else {
-		return fmt.Errorf("health check returned unexpected status: %d", resp.StatusCode)
+	// Test the backend by making a request through the reverse proxy
+	// This should trigger the reverse proxy's internal health monitoring and event emission
+	proxyResp, proxyErr := ctx.makeRequestThroughModule("GET", "/api/test", nil)
+	if proxyErr == nil && proxyResp != nil {
+		proxyResp.Body.Close()
+		// The actual health monitoring should be triggered by the reverse proxy module
+		// No manual event emission needed - the module should emit events based on real operations
 	}
 
 	return nil
@@ -1391,9 +1359,7 @@ func (ctx *ReverseProxyBDDTestContext) aBackendIsRemovedFromTheConfiguration() e
 	// Perform one final health check before removal to demonstrate operational state
 	finalCheckURL := serverToRemove.URL + "/health"
 	finalResp, err := http.Get(finalCheckURL)
-	var finalStatusCode int
 	if err == nil {
-		finalStatusCode = finalResp.StatusCode
 		finalResp.Body.Close()
 	}
 
@@ -1402,20 +1368,14 @@ func (ctx *ReverseProxyBDDTestContext) aBackendIsRemovedFromTheConfiguration() e
 		delete(ctx.config.BackendServices, actualBackendName)
 	}
 
-	// Emit a backend removed event with detailed information
-	if observable, ok := ctx.app.(modular.Subject); ok {
-		data := map[string]interface{}{
-			"backend":            actualBackendName,
-			"url":                serverToRemove.URL,
-			"action":             "removed",
-			"final_status_code":  finalStatusCode,
-			"removal_timestamp":  time.Now().Unix(),
-			"remaining_backends": len(ctx.testServers) - 1,
-			"configuration":      ctx.config.BackendServices,
-		}
-		event := modular.NewCloudEvent("com.modular.reverseproxy.backend.removed", "reverseproxy", data, nil)
-		observable.NotifyObservers(context.Background(), event)
+	// Test that the backend is no longer accessible through the reverse proxy
+	// This should trigger the reverse proxy's internal monitoring and emit removal events
+	resp, err := ctx.makeRequestThroughModule("GET", "/api/removed", nil)
+	if resp != nil {
+		resp.Body.Close()
+		// The reverse proxy module should detect the backend removal and emit appropriate events
 	}
+	_ = err // Expected to fail since backend is removed
 
 	// Remove from test servers list and close the server
 	ctx.testServers = ctx.testServers[:len(ctx.testServers)-1]

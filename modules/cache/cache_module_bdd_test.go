@@ -528,11 +528,12 @@ func (ctx *CacheBDDTestContext) iHaveACacheServiceWithEventObservationEnabled() 
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 
-	// Create basic cache configuration for testing
+	// Create basic cache configuration for testing with shorter cleanup interval
+	// for scenarios that might need to test expiration behavior
 	ctx.cacheConfig = &CacheConfig{
 		Engine:          "memory",
 		DefaultTTL:      300 * time.Second,
-		CleanupInterval: 60 * time.Second,
+		CleanupInterval: 500 * time.Millisecond, // Much shorter for testing
 		MaxItems:        1000,
 	}
 
@@ -735,13 +736,13 @@ func (ctx *CacheBDDTestContext) aCacheDisconnectedEventShouldBeEmitted() error {
 }
 
 func (ctx *CacheBDDTestContext) theCacheEngineEncountersAConnectionError() error {
-	// This would be handled by setting up a failing cache configuration
-	// For now, we'll simulate this by using an invalid Redis configuration
+	// Set up a Redis configuration that will actually fail to connect
+	// This uses an invalid URL that will trigger a real connection error
 	ctx.cacheConfig = &CacheConfig{
 		Engine:          "redis",
 		DefaultTTL:      300 * time.Second,
 		CleanupInterval: 60 * time.Second,
-		RedisURL:        "redis://invalid-host:6379", // Invalid host to trigger error
+		RedisURL:        "redis://localhost:99999", // Invalid port to trigger real error
 		RedisDB:         0,
 	}
 	return nil
@@ -820,22 +821,45 @@ func (ctx *CacheBDDTestContext) theErrorEventShouldContainConnectionErrorDetails
 			// Check if the event data contains error information
 			data := event.Data()
 			if data != nil {
-				// This would check for error details in the event data
-				return nil
+				// Parse the JSON data
+				var eventData map[string]interface{}
+				if err := event.DataAs(&eventData); err == nil {
+					// Look for error-related fields
+					if errorMsg, hasError := eventData["error"]; hasError {
+						if operation, hasOp := eventData["operation"]; hasOp {
+							// Validate that it's actually a connection-related error
+							if errorStr, ok := errorMsg.(string); ok {
+								if opStr, ok := operation.(string); ok {
+									// Check if this looks like a connection error
+									if opStr == "connect" || opStr == "start" {
+										_ = errorStr // Use the variable
+										return nil
+									}
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}
-	return fmt.Errorf("error event does not contain connection error details")
+	return fmt.Errorf("error event does not contain proper connection error details (error, operation)")
 }
 
 func (ctx *CacheBDDTestContext) theCacheCleanupProcessRuns() error {
-	// For memory cache, we need to trigger the cleanup process
+	// Wait for the natural cleanup process to run
+	// With the configured cleanup interval of 500ms, we wait for 2 cycles to ensure it runs
+	time.Sleep(1200 * time.Millisecond)
+
+	// As a fallback, if the natural cleanup didn't work (due to timing issues),
+	// trigger one manual cleanup to ensure the test doesn't fail due to timing
+	// This is a compromise between testing natural behavior and test reliability
 	if ctx.service != nil && ctx.service.cacheEngine != nil {
-		// Check if it's a memory cache and has the TriggerCleanup method
 		if memCache, ok := ctx.service.cacheEngine.(*MemoryCache); ok {
 			memCache.TriggerCleanup()
 		}
 	}
+
 	return nil
 }
 
@@ -864,12 +888,22 @@ func (ctx *CacheBDDTestContext) theExpiredEventShouldContainTheExpiredKey(key st
 			// Check if the event data contains the expired key
 			data := event.Data()
 			if data != nil {
-				// In a full implementation, we'd check the key in the event data
-				return nil
+				// Parse the JSON data
+				var eventData map[string]interface{}
+				if err := event.DataAs(&eventData); err == nil {
+					if cacheKey, exists := eventData["cache_key"]; exists && cacheKey == key {
+						// Also validate other expected fields
+						if _, hasExpiredAt := eventData["expired_at"]; hasExpiredAt {
+							if reason, hasReason := eventData["reason"]; hasReason && reason == "ttl_expired" {
+								return nil
+							}
+						}
+					}
+				}
 			}
 		}
 	}
-	return fmt.Errorf("expired event does not contain expired key: %s", key)
+	return fmt.Errorf("expired event does not contain expected expired key '%s' with proper data structure", key)
 }
 
 func (ctx *CacheBDDTestContext) iHaveACacheServiceWithSmallMemoryLimitConfigured() error {
@@ -1025,12 +1059,25 @@ func (ctx *CacheBDDTestContext) theEvictedEventShouldContainEvictionDetails() er
 			// Check if the event data contains eviction details
 			data := event.Data()
 			if data != nil {
-				// In a full implementation, we'd check the eviction details
-				return nil
+				// Parse the JSON data
+				var eventData map[string]interface{}
+				if err := event.DataAs(&eventData); err == nil {
+					// Validate required fields for eviction event
+					if reason, hasReason := eventData["reason"]; hasReason && reason == "cache_full" {
+						if maxItems, hasMaxItems := eventData["max_items"]; hasMaxItems {
+							if newKey, hasNewKey := eventData["new_key"]; hasNewKey {
+								// All expected eviction details are present
+								_ = maxItems // Use the variables to avoid "declared and not used" errors
+								_ = newKey
+								return nil
+							}
+						}
+					}
+				}
 			}
 		}
 	}
-	return fmt.Errorf("evicted event does not contain eviction details")
+	return fmt.Errorf("evicted event does not contain proper eviction details (reason, max_items, new_key)")
 }
 
 // Test runner function

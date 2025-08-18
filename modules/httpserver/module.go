@@ -676,7 +676,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 func (rw *responseWriter) Write(data []byte) (int, error) {
 	n, err := rw.ResponseWriter.Write(data)
 	if err != nil {
-		return n, fmt.Errorf("write response: %w", err)
+		return n, fmt.Errorf("failed to write HTTP response: %w", err)
 	}
 	return n, nil
 }

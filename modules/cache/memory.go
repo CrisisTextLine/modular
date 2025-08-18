@@ -92,7 +92,7 @@ func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, tt
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// If cache is full, reject new items (or evict old ones if we implement LRU)
+	// If cache is full, reject new items (eviction policy: reject)
 	if c.config.MaxItems > 0 && len(c.items) >= c.config.MaxItems {
 		_, exists := c.items[key]
 		if !exists {
@@ -104,9 +104,7 @@ func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, tt
 					"new_key":   key,
 				}, nil)
 
-				go func(ctx context.Context, e cloudevents.Event) {
-					c.eventEmitter(ctx, e)
-				}(ctx, event)
+				c.eventEmitter(ctx, event)
 			}
 			return ErrCacheFull
 		}
@@ -206,16 +204,14 @@ func (c *MemoryCache) cleanupExpiredItems(ctx context.Context) {
 
 	// Emit expired events for each expired key
 	if c.eventEmitter != nil && len(expiredKeys) > 0 {
-		go func(ctx context.Context, keys []string) {
-			for _, key := range keys {
-				event := modular.NewCloudEvent(EventTypeCacheExpired, "cache-service", map[string]interface{}{
-					"cache_key":  key,
-					"expired_at": now.Format(time.RFC3339),
-					"reason":     "ttl_expired",
-				}, nil)
+		for _, key := range expiredKeys {
+			event := modular.NewCloudEvent(EventTypeCacheExpired, "cache-service", map[string]interface{}{
+				"cache_key":  key,
+				"expired_at": now.Format(time.RFC3339),
+				"reason":     "ttl_expired",
+			}, nil)
 
-				c.eventEmitter(ctx, event)
-			}
-		}(ctx, expiredKeys)
+			c.eventEmitter(ctx, event)
+		}
 	}
 }

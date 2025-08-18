@@ -650,16 +650,23 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 		}
 
 		// Wrap response writer to capture status code
-		wrappedWriter := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		// Default to 0 (unset) to distinguish between explicit and implicit status codes
+		wrappedWriter := &responseWriter{ResponseWriter: w, statusCode: 0}
 
 		// Call the original handler
 		handler.ServeHTTP(wrappedWriter, r)
 
 		// Emit request handled event SYNCHRONOUSLY to ensure immediate emission
+		// Use the actual status code if set, otherwise default to 200 (HTTP OK)
+		statusCode := wrappedWriter.statusCode
+		if statusCode == 0 {
+			statusCode = http.StatusOK // Default for successful responses when not explicitly set
+		}
+
 		requestHandledEvent := modular.NewCloudEvent(EventTypeRequestHandled, "httpserver-service", map[string]interface{}{
 			"method":      r.Method,
 			"url":         r.URL.String(),
-			"status_code": wrappedWriter.statusCode,
+			"status_code": statusCode,
 			"remote_addr": r.RemoteAddr,
 		}, nil)
 
@@ -674,15 +681,26 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode    int
+	headerWritten bool // Track if WriteHeader has been called
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	// Prevent multiple calls to WriteHeader as per HTTP specification
+	if rw.headerWritten {
+		return
+	}
 	rw.statusCode = code
+	rw.headerWritten = true
 	rw.ResponseWriter.WriteHeader(code)
 }
 
 func (rw *responseWriter) Write(data []byte) (int, error) {
+	// If WriteHeader hasn't been called yet, it will be called implicitly with 200
+	if !rw.headerWritten {
+		rw.WriteHeader(http.StatusOK)
+	}
+
 	n, err := rw.ResponseWriter.Write(data)
 	if err != nil {
 		return n, fmt.Errorf("failed to write HTTP response: %w", err)

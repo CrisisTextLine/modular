@@ -689,6 +689,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithEventObservationEna
 	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
 	
 	// Initialize the application (this should trigger config loaded events)
+	fmt.Printf("DEBUG: About to call Init() on app type: %T\n", ctx.app)
 	if err := ctx.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize app: %v", err)
 	}

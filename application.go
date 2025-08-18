@@ -381,7 +381,11 @@ func (app *StdApplication) GetService(name string, target any) error {
 
 // Init initializes the application with the provided modules
 func (app *StdApplication) Init() error {
-	fmt.Printf("DEBUG: StdApplication.Init() called, app type: %T\n", app)
+	return app.InitWithApp(app)
+}
+
+// InitWithApp initializes the application with the provided modules, using appToPass as the application instance passed to modules
+func (app *StdApplication) InitWithApp(appToPass Application) error {
 	errs := make([]error, 0)
 	for name, module := range app.moduleRegistry {
 		configurableModule, ok := module.(Configurable)
@@ -389,7 +393,7 @@ func (app *StdApplication) Init() error {
 			app.logger.Debug("Module does not implement Configurable, skipping", "module", name)
 			continue
 		}
-		err := configurableModule.RegisterConfig(app)
+		err := configurableModule.RegisterConfig(appToPass)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("module %s failed to register config: %w", name, err))
 			continue
@@ -418,7 +422,7 @@ func (app *StdApplication) Init() error {
 			}
 		}
 
-		if err = app.moduleRegistry[moduleName].Init(app); err != nil {
+		if err = app.moduleRegistry[moduleName].Init(appToPass); err != nil {
 			errs = append(errs, fmt.Errorf("module '%s' failed to initialize: %w", moduleName, err))
 			continue
 		}

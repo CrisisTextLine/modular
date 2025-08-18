@@ -186,7 +186,8 @@ func (app *ObservableApplication) RegisterService(name string, service any) erro
 // Init initializes the application and emits lifecycle events
 func (app *ObservableApplication) Init() error {
 	ctx := context.Background()
-	fmt.Printf("DEBUG: ObservableApplication.Init() called\n")
+	
+	app.logger.Info("*** ObservableApplication.Init() called ***", "modules", len(app.moduleRegistry))
 
 	// Emit application starting initialization
 	app.emitEvent(ctx, EventTypeConfigLoaded, nil, map[string]interface{}{
@@ -195,84 +196,27 @@ func (app *ObservableApplication) Init() error {
 
 	// Register observers for any ObservableModule instances BEFORE calling module Init()
 	for _, module := range app.moduleRegistry {
+		fmt.Printf("DEBUG: Checking module %s for ObservableModule interface\n", module.Name())
 		if observableModule, ok := module.(ObservableModule); ok {
+			fmt.Printf("DEBUG: ObservableApplication registering observers for module %s\n", module.Name())
 			if err := observableModule.RegisterObservers(app); err != nil {
 				app.logger.Error("Failed to register observers for module", "module", module.Name(), "error", err)
 			}
+		} else {
+			fmt.Printf("DEBUG: Module %s does not implement ObservableModule\n", module.Name())
 		}
 	}
+	fmt.Printf("DEBUG: ObservableApplication finished registering observers\n")
 
-	// Initialize modules using our own logic to pass the correct ObservableApplication instance
-	errs := make([]error, 0)
-	
-	// First part: Register module configs
-	for name, module := range app.moduleRegistry {
-		configurableModule, ok := module.(Configurable)
-		if !ok {
-			app.logger.Debug("Module does not implement Configurable, skipping", "module", name)
-			continue
-		}
-		err := configurableModule.RegisterConfig(app) // Pass ObservableApplication, not StdApplication
-		if err != nil {
-			errs = append(errs, fmt.Errorf("module %s failed to register config: %w", name, err))
-			continue
-		}
-		app.logger.Debug("Registering module", "name", name)
-	}
-
-	// Load app config using the embedded StdApplication's AppConfigLoader
-	if err := AppConfigLoader(app.StdApplication); err != nil {
-		errs = append(errs, fmt.Errorf("failed to load app config: %w", err))
-	}
-
-	// Build dependency graph using the embedded StdApplication
-	moduleOrder, err := app.StdApplication.resolveDependencies()
+	fmt.Printf("DEBUG: ObservableApplication calling InitWithApp with app type: %T\n", app)
+	err := app.StdApplication.InitWithApp(app)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("failed to resolve module dependencies: %w", err))
-	}
-
-	// Initialize modules in order, passing ObservableApplication
-	for _, moduleName := range moduleOrder {
-		if _, ok := app.moduleRegistry[moduleName].(ServiceAware); ok {
-			// Inject required services using embedded StdApplication
-			app.moduleRegistry[moduleName], err = app.StdApplication.injectServices(app.moduleRegistry[moduleName])
-			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to inject services for module '%s': %w", moduleName, err))
-				continue
-			}
-		}
-
-		// THIS IS THE KEY FIX: Pass ObservableApplication to module Init, not StdApplication
-		if err = app.moduleRegistry[moduleName].Init(app); err != nil {
-			errs = append(errs, fmt.Errorf("module '%s' failed to initialize: %w", moduleName, err))
-			continue
-		}
-
-		if _, ok := app.moduleRegistry[moduleName].(ServiceAware); ok {
-			// Register services provided by modules
-			for _, svc := range app.moduleRegistry[moduleName].(ServiceAware).ProvidesServices() {
-				if err = app.RegisterService(svc.Name, svc.Instance); err != nil {
-					errs = append(errs, fmt.Errorf("module '%s' failed to register service '%s': %w", svc.Name, moduleName, err))
-					continue
-				}
-			}
-		}
-
-		app.logger.Info(fmt.Sprintf("Initialized module %s of type %T", moduleName, app.moduleRegistry[moduleName]))
-	}
-
-	// Initialize tenant configuration using embedded StdApplication
-	if err = app.StdApplication.initTenantConfigurations(); err != nil {
-		errs = append(errs, fmt.Errorf("failed to initialize tenant configurations: %w", err))
-	}
-
-	if len(errs) > 0 {
 		failureData := map[string]interface{}{
 			"phase": "init",
-			"error": fmt.Sprintf("multiple errors: %v", errs),
+			"error": err.Error(),
 		}
 		app.emitEvent(ctx, EventTypeApplicationFailed, failureData, nil)
-		return fmt.Errorf("initialization failed with %d errors: %v", len(errs), errs)
+		return err
 	}
 
 	// Emit initialization complete

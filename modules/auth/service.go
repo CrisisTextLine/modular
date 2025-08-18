@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -158,6 +161,14 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 
 	if err != nil {
 		if strings.Contains(err.Error(), "token is expired") {
+			// Emit token expired event
+			tokenPrefix := tokenString
+			if len(tokenString) > 20 {
+				tokenPrefix = tokenString[:20] + "..."
+			}
+			s.emitEvent(context.Background(), EventTypeTokenExpired, map[string]interface{}{
+				"tokenString": tokenPrefix, // Only log prefix for security
+			}, nil)
 			return nil, ErrTokenExpired
 		}
 		return nil, ErrTokenInvalid
@@ -253,6 +264,15 @@ func (s *Service) RefreshToken(refreshTokenString string) (*TokenPair, error) {
 
 	if err != nil {
 		if strings.Contains(err.Error(), "token is expired") {
+			// Emit token expired event for refresh token
+			tokenPrefix := refreshTokenString
+			if len(refreshTokenString) > 10 {
+				tokenPrefix = refreshTokenString[:10] + "..."
+			}
+			s.emitEvent(context.Background(), EventTypeTokenExpired, map[string]interface{}{
+				"token":     tokenPrefix, // Only show first 10 chars for security
+				"tokenType": "refresh",
+			}, nil)
 			return nil, ErrTokenExpired
 		}
 		return nil, ErrTokenInvalid
@@ -298,7 +318,18 @@ func (s *Service) RefreshToken(refreshTokenString string) (*TokenPair, error) {
 		"permissions": user.Permissions,
 	}
 
-	return s.GenerateToken(userID, customClaims)
+	newTokenPair, err := s.GenerateToken(userID, customClaims)
+  if err != nil {
+		return nil, err
+	}
+
+	// Emit token refreshed event
+	s.emitEvent(context.Background(), EventTypeTokenRefreshed, map[string]interface{}{
+		"userID":    userID,
+		"expiresAt": newTokenPair.ExpiresAt,
+	}, nil)
+
+	return newTokenPair, nil
 }
 
 // HashPassword hashes a password using bcrypt
@@ -546,12 +577,55 @@ func (s *Service) fetchOAuth2UserInfo(provider, accessToken string) (map[string]
 		return nil, fmt.Errorf("%w: %s", ErrUserInfoURLNotConfigured, provider)
 	}
 
-	// This is a simplified implementation - in practice, you'd make an HTTP request
-	// to the provider's user info endpoint using the access token
-	userInfo := map[string]interface{}{
-		"provider": provider,
-		"token":    accessToken,
+	// Create HTTP request to fetch user info from OAuth2 provider
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", providerConfig.UserInfoURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating user info request: %w", err)
 	}
+
+	// Set authorization header with the access token
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+
+	// Use a reusable HTTP client with appropriate timeout
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        10,
+			IdleConnTimeout:     90 * time.Second,
+			DisableCompression:  false,
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching user info from provider %s: %w", provider, err)
+	}
+	defer resp.Body.Close()
+
+	// Check for successful response
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("user info request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read and parse the response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading user info response: %w", err)
+	}
+
+	var userInfo map[string]interface{}
+	if err := json.Unmarshal(body, &userInfo); err != nil {
+		return nil, fmt.Errorf("parsing user info JSON: %w", err)
+	}
+
+	// Add provider information to the user info
+	userInfo["provider"] = provider
 
 	return userInfo, nil
 }

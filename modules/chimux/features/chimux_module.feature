@@ -97,3 +97,63 @@ Feature: ChiMux Module
     When the chimux module discovers middleware providers
     Then middleware added events should be emitted
     And the events should contain middleware information
+
+  Scenario: Event observation during configuration validation
+    Given I have a chimux module with event observation enabled
+    And I have a chimux configuration with validation requirements
+    When the chimux module validates the configuration
+    Then a config validated event should be emitted
+    And the event should contain validation results
+
+  Scenario: Event observation during router lifecycle
+    Given I have a chimux module with event observation enabled
+    And the chimux module is initialized
+    When the router is started
+    Then a router started event should be emitted
+    When the router is stopped
+    Then a router stopped event should be emitted
+
+  Scenario: Event observation during route removal
+    Given I have a chimux module with event observation enabled
+    And the chimux module is initialized
+    And the router service should be available
+    And I have registered routes
+    When I remove a route from the router
+    Then a route removed event should be emitted
+    And the event should contain the removed route information
+
+  Scenario: Event observation during middleware removal
+    Given I have a chimux module with event observation enabled
+    And the chimux module is initialized
+    And the router service should be available
+    And I have middleware applied to the router
+    When I remove middleware from the router
+    Then a middleware removed event should be emitted
+    And the event should contain the removed middleware information
+
+  Scenario: Event observation during module stop
+    Given I have a chimux module with event observation enabled
+    And the chimux module is initialized
+    And the chimux module is started
+    When the chimux module is stopped
+    Then a module stopped event should be emitted
+    And the event should contain module stop information
+
+  Scenario: Event observation during request processing
+    Given I have a chimux module with event observation enabled
+    And the chimux module is initialized
+    And the router service should be available
+    And I have routes registered for request handling
+    When I make an HTTP request to the router
+    Then a request received event should be emitted
+    And a request processed event should be emitted
+    And the events should contain request processing information
+
+  Scenario: Event observation during request failure
+    Given I have a chimux module with event observation enabled
+    And the chimux module is initialized
+    And the router service should be available
+    And I have routes that can fail
+    When I make a request that causes a failure
+    Then a request failed event should be emitted
+    And the event should contain failure information

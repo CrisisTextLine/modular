@@ -2,6 +2,8 @@ package modular
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -28,6 +30,7 @@ type ObservableApplication struct {
 // This wraps the standard application with observer capabilities while maintaining
 // all existing functionality.
 func NewObservableApplication(cp ConfigProvider, logger Logger) *ObservableApplication {
+	fmt.Printf("DEBUG: NewObservableApplication() called\n")
 	stdApp := NewStdApplication(cp, logger).(*StdApplication)
 	return &ObservableApplication{
 		StdApplication: stdApp,
@@ -184,31 +187,32 @@ func (app *ObservableApplication) RegisterService(name string, service any) erro
 
 // Init initializes the application and emits lifecycle events
 func (app *ObservableApplication) Init() error {
+	// Write to stderr to ensure it's visible regardless of output redirection
+	fmt.Fprintf(os.Stderr, "OBSERVABLE_APP_INIT: ObservableApplication.Init() called\n")
 	ctx := context.Background()
-
-	app.logger.Debug("ObservableApplication initializing", "modules", len(app.moduleRegistry))
 
 	// Emit application starting initialization
 	app.emitEvent(ctx, EventTypeConfigLoaded, nil, map[string]interface{}{
 		"phase": "init_start",
 	})
 
-	// Register observers for any ObservableModule instances BEFORE calling module Init()
+	fmt.Fprintf(os.Stderr, "OBSERVABLE_APP_INIT: About to pre-register observers for ObservableModules\n")
+	// Ensure observable modules can emit events during their Init by
+	// registering the subject with them before StdApplication.Init runs.
 	for _, module := range app.moduleRegistry {
-		app.logger.Debug("Checking module for ObservableModule interface", "module", module.Name())
+		fmt.Fprintf(os.Stderr, "OBSERVABLE_APP_INIT: Checking module %s for ObservableModule interface\n", module.Name())
 		if observableModule, ok := module.(ObservableModule); ok {
-			app.logger.Debug("ObservableApplication registering observers for module", "module", module.Name())
+			fmt.Fprintf(os.Stderr, "OBSERVABLE_APP_INIT: Pre-registering observers for ObservableModule %s\n", module.Name())
 			if err := observableModule.RegisterObservers(app); err != nil {
-				app.logger.Error("Failed to register observers for module", "module", module.Name(), "error", err)
+				app.logger.Error("Failed to pre-register observers for module", "module", module.Name(), "error", err)
 			}
 		} else {
-			app.logger.Debug("Module does not implement ObservableModule", "module", module.Name())
+			fmt.Fprintf(os.Stderr, "OBSERVABLE_APP_INIT: Module %s does not implement ObservableModule\n", module.Name())
 		}
 	}
-	app.logger.Debug("ObservableApplication finished registering observers")
 
-	app.logger.Debug("ObservableApplication initializing modules with observable application instance")
-	err := app.InitWithApp(app)
+	fmt.Printf("DEBUG: About to call app.StdApplication.Init()\n")
+	err := app.StdApplication.Init()
 	if err != nil {
 		failureData := map[string]interface{}{
 			"phase": "init",
@@ -216,6 +220,16 @@ func (app *ObservableApplication) Init() error {
 		}
 		app.emitEvent(ctx, EventTypeApplicationFailed, failureData, nil)
 		return err
+	}
+
+	fmt.Printf("DEBUG: StdApplication.Init() completed, now post-registering observers\n")
+	// Register observers for any ObservableModule instances
+	for _, module := range app.moduleRegistry {
+		if observableModule, ok := module.(ObservableModule); ok {
+			if err := observableModule.RegisterObservers(app); err != nil {
+				app.logger.Error("Failed to register observers for module", "module", module.Name(), "error", err)
+			}
+		}
 	}
 
 	// Emit initialization complete

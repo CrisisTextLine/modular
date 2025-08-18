@@ -86,3 +86,10 @@ Feature: HTTP Server Module
     Then a TLS enabled event should be emitted
     And a TLS configured event should be emitted
     And the events should contain TLS configuration details
+
+  Scenario: Emit events during request handling  
+    Given I have an httpserver with event observation enabled
+    When the httpserver processes a request
+    Then a request received event should be emitted
+    And a request handled event should be emitted
+    And the events should contain request details

@@ -89,3 +89,27 @@ Feature: Cache Module
     Then a cache connected event should be emitted
     When I flush all cache items
     Then a cache flush event should be emitted
+    When the cache module stops
+    Then a cache disconnected event should be emitted
+
+  Scenario: Emit error events during cache operations
+    Given I have a cache service with event observation enabled
+    And the cache engine encounters a connection error
+    When I attempt to start the cache module
+    Then a cache error event should be emitted
+    And the error event should contain connection error details
+
+  Scenario: Emit expired events when items expire
+    Given I have a cache service with event observation enabled
+    When I set a cache item with key "expire-key" and value "expire-value" with TTL 1 seconds
+    And I wait for 2 seconds
+    And the cache cleanup process runs
+    Then a cache expired event should be emitted
+    And the expired event should contain the expired key "expire-key"
+
+  Scenario: Emit evicted events when cache is full
+    Given I have a cache service with small memory limit configured
+    And I have event observation enabled
+    When I fill the cache beyond its maximum capacity
+    Then a cache evicted event should be emitted
+    And the evicted event should contain eviction details

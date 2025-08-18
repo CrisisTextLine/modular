@@ -273,13 +273,18 @@ type StdApplication struct {
 //	    log.Fatal(err)
 //	}
 func NewStdApplication(cp ConfigProvider, logger Logger) Application {
-	return &StdApplication{
+	app := &StdApplication{
 		cfgProvider:    cp,
 		cfgSections:    make(map[string]ConfigProvider),
 		svcRegistry:    make(ServiceRegistry),
 		moduleRegistry: make(ModuleRegistry),
 		logger:         logger,
 	}
+
+	// Register the logger as a service so modules can depend on it
+	app.svcRegistry["logger"] = logger
+
+	return app
 }
 
 // ConfigProvider retrieves the application config provider
@@ -828,6 +833,8 @@ func (app *StdApplication) Logger() Logger {
 // SetLogger sets the application's logger
 func (app *StdApplication) SetLogger(logger Logger) {
 	app.logger = logger
+	// Also update the service registry so modules get the new logger via DI
+	app.svcRegistry["logger"] = logger
 }
 
 // SetVerboseConfig enables or disables verbose configuration debugging

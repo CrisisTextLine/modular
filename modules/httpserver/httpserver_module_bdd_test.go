@@ -59,6 +59,10 @@ func (t *testEventObserver) GetEvents() []cloudevents.Event {
 	return events
 }
 
+func (t *testEventObserver) ClearEvents() {
+	t.events = make([]cloudevents.Event, 0)
+}
+
 func (ctx *HTTPServerBDDTestContext) resetContext() {
 	// Stop any running server before resetting
 	if ctx.service != nil {
@@ -69,7 +73,7 @@ func (ctx *HTTPServerBDDTestContext) resetContext() {
 	if ctx.app != nil {
 		ctx.app.Stop() // Stop the application
 		// Give some time for cleanup
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	ctx.app = nil
@@ -966,7 +970,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 	// Create httpserver configuration for testing - use high port to avoid conflicts
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:            "127.0.0.1",
-		Port:            9091, // Use a higher port to avoid conflicts with previous tests
+		Port:            9100, // Use an even higher port to avoid conflicts with other tests
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		IdleTimeout:     120 * time.Second,
@@ -1057,7 +1061,7 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 	// Create httpserver configuration with TLS for testing
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:            "127.0.0.1",
-		Port:            8092, // Use a fixed port for TLS event testing
+		Port:            9096, // Use a higher port for TLS event testing
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		IdleTimeout:     120 * time.Second,
@@ -1270,6 +1274,11 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerProcessesARequest() error {
 	// Give the server a moment to fully start
 	time.Sleep(200 * time.Millisecond)
 
+	// Now clear any existing events to ensure we only capture request events
+	if ctx.eventObserver != nil {
+		ctx.eventObserver.ClearEvents()
+	}
+
 	// Make a simple request using the configured port
 	client := &http.Client{Timeout: 5 * time.Second}
 	url := fmt.Sprintf("http://127.0.0.1:%d/", ctx.service.config.Port)
@@ -1281,7 +1290,11 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerProcessesARequest() error {
 	defer resp.Body.Close()
 
 	// Read the response to ensure the request completes
-	_, _ = io.ReadAll(resp.Body)
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return fmt.Errorf("failed to read response body: %v", readErr)
+	}
+	_ = body // Read the body but don't log it
 
 	// Since events are now synchronous, they should be emitted immediately
 	// But give a small buffer for any remaining async processing

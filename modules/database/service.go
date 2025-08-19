@@ -410,7 +410,11 @@ func (s *databaseServiceImpl) RunMigration(ctx context.Context, migration Migrat
 	if s.migrationService == nil {
 		return ErrMigrationServiceNotInitialized
 	}
-	return fmt.Errorf("failed to run migration: %w", s.migrationService.RunMigration(ctx, migration))
+	err := s.migrationService.RunMigration(ctx, migration)
+	if err != nil {
+		return fmt.Errorf("failed to run migration: %w", err)
+	}
+	return nil
 }
 
 func (s *databaseServiceImpl) GetAppliedMigrations(ctx context.Context) ([]string, error) {

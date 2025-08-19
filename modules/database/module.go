@@ -736,11 +736,9 @@ func (m *Module) initializeConnections() error {
 					"error":           err.Error(),
 				}, nil)
 
-				go func() {
-					if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
-						fmt.Printf("Failed to emit database connection failed event: %v\n", emitErr)
-					}
-				}()
+				if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
+					fmt.Printf("Failed to emit database connection failed event: %v\n", emitErr)
+				}
 
 				return fmt.Errorf("failed to connect to database '%s': %w", name, err)
 			}

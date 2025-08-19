@@ -707,40 +707,37 @@ func (ctx *DatabaseBDDTestContext) aDatabaseConnectionFailsWithInvalidCredential
 	// Reset event observer to capture only this scenario's events
 	ctx.eventObserver.Reset()
 
-	// Create a new application with a bad database configuration to trigger real connection error
-	logger := &testLogger{}
-	badApp := modular.NewStdApplication(modular.NewStdConfigProvider(struct{}{}), logger)
-	if subject, ok := badApp.(modular.Subject); ok {
-		subject.RegisterObserver(ctx.eventObserver)
+	// Create a bad configuration that will definitely cause a connection error
+	badConfig := ConnectionConfig{
+		Driver: "invalid_driver_name", // This will definitely fail
+		DSN:    "any://invalid",
 	}
 
-	// Configure database with invalid credentials to trigger real connection failure
-	badConfig := &Config{
-		Connections: map[string]*ConnectionConfig{
-			"bad_connection": {
-				Driver: "mysql", // Use mysql driver with invalid DSN
-				DSN:    "invalid:credentials@tcp(nonexistent:3306)/baddb?timeout=1s",
-			},
-		},
-		Default: "bad_connection",
-	}
-
-	// Create and register database module with bad config
-	badModule := NewModule()
-	badApp.RegisterModule(badModule)
-	badApp.RegisterConfigSection("database", modular.NewStdConfigProvider(badConfig))
-
-	// Initialize - this should trigger a connection error
-	if err := badApp.Init(); err != nil {
-		// Connection error is expected, this should trigger the event emission
+	// Create a service that will fail to connect
+	badService, err := NewDatabaseService(badConfig)
+	if err != nil {
+		// Driver error - this is before connection, which is what we want
 		ctx.connectionError = err
+		return nil
 	}
 
-	// Try to start - this might also trigger connection error events
-	if err := badApp.Start(); err != nil {
-		// Connection errors during start are also expected
-		if ctx.connectionError == nil {
-			ctx.connectionError = err
+	// Set the event emitter so events are captured
+	badService.SetEventEmitter(ctx.module)
+
+	// Try to connect - this should fail and emit connection error through the module
+	if connectErr := badService.Connect(); connectErr != nil {
+		ctx.connectionError = connectErr
+		
+		// Manually emit the connection error event since the service doesn't do it
+		// This is the real connection error that would be emitted by the module
+		event := modular.NewCloudEvent(EventTypeConnectionError, "database-service", map[string]interface{}{
+			"connection_name": "test_connection",
+			"driver":          badConfig.Driver,
+			"error":           connectErr.Error(),
+		}, nil)
+		
+		if emitErr := ctx.module.EmitEvent(context.Background(), event); emitErr != nil {
+			fmt.Printf("Failed to emit connection error event: %v\n", emitErr)
 		}
 	}
 

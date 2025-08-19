@@ -761,11 +761,14 @@ func (m *ChiMuxModule) requestMonitoringMiddleware() func(http.Handler) http.Han
 			// Wrap response writer to capture status code
 			wrapper := &responseWriterWrapper{ResponseWriter: w, statusCode: 200}
 
+			// Capture context for defer function
+			ctx := r.Context()
+
 			// Process request
 			defer func() {
 				if err := recover(); err != nil {
 					// Emit request failed event for panics
-					m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
 						"method":      r.Method,
 						"path":        r.URL.Path,
 						"error":       fmt.Sprintf("%v", err),
@@ -774,7 +777,7 @@ func (m *ChiMuxModule) requestMonitoringMiddleware() func(http.Handler) http.Han
 					panic(err) // Re-panic to maintain behavior
 				} else {
 					// Emit request processed event for successful requests
-					m.emitEvent(r.Context(), EventTypeRequestProcessed, map[string]interface{}{
+					m.emitEvent(ctx, EventTypeRequestProcessed, map[string]interface{}{
 						"method":      r.Method,
 						"path":        r.URL.Path,
 						"status_code": wrapper.statusCode,

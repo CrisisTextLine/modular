@@ -116,11 +116,14 @@ func (ctx *ChiMuxBDDTestContext) iHaveAModularApplicationWithChimuxModuleConfigu
 
 	// Create mock tenant application since chimux requires tenant app
 	mockTenantApp := &mockTenantApplication{
-		Application: modular.NewStdApplication(mainConfigProvider, logger),
+		Application: modular.NewObservableApplication(mainConfigProvider, logger),
 		tenantService: &mockTenantService{
 			configs: make(map[modular.TenantID]map[string]modular.ConfigProvider),
 		},
 	}
+
+	// Create test event observer
+	ctx.eventObserver = newTestEventObserver()
 
 	// Register the chimux config section first
 	mockTenantApp.RegisterConfigSection("chimux", chimuxConfigProvider)
@@ -128,6 +131,16 @@ func (ctx *ChiMuxBDDTestContext) iHaveAModularApplicationWithChimuxModuleConfigu
 	// Create and register chimux module
 	ctx.module = NewChiMuxModule().(*ChiMuxModule)
 	mockTenantApp.RegisterModule(ctx.module)
+
+	// Register observers BEFORE initialization
+	if err := ctx.module.RegisterObservers(mockTenantApp); err != nil {
+		return fmt.Errorf("failed to register module observers: %w", err)
+	}
+
+	// Register our test observer to capture events
+	if err := mockTenantApp.RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
 
 	// Initialize
 	if err := mockTenantApp.Init(); err != nil {

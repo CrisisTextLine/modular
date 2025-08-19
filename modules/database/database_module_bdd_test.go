@@ -104,15 +104,28 @@ func (ctx *DatabaseBDDTestContext) iHaveAModularApplicationWithDatabaseModuleCon
 	// Create provider with the database config - bypass instance-aware setup
 	dbConfigProvider := modular.NewStdConfigProvider(dbConfig)
 
-	// Create app with empty main config
+	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 
 	// Create and configure database module
 	ctx.module = NewModule()
 
+	// Create test event observer
+	ctx.eventObserver = newTestEventObserver()
+
 	// Register module first (this will create the instance-aware config provider)
 	ctx.app.RegisterModule(ctx.module)
+
+	// Register observers BEFORE config override to avoid timing issues
+	if err := ctx.module.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
+		return fmt.Errorf("failed to register observers: %w", err)
+	}
+
+	// Register our test observer to capture events
+	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register test observer: %w", err)
+	}
 
 	// Now override the config section with our direct configuration
 	ctx.app.RegisterConfigSection("database", dbConfigProvider)

@@ -687,7 +687,7 @@ type LogEntry struct {
 
 // GetRegisteredEventTypes implements the ObservableModule interface.
 // Returns all event types that this eventlogger module can emit.
-func (m *Module) GetRegisteredEventTypes() []string {
+func (m *EventLoggerModule) GetRegisteredEventTypes() []string {
 	return []string{
 		EventTypeLoggerStarted,
 		EventTypeLoggerStopped,

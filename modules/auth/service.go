@@ -319,7 +319,7 @@ func (s *Service) RefreshToken(refreshTokenString string) (*TokenPair, error) {
 	}
 
 	newTokenPair, err := s.GenerateToken(userID, customClaims)
-  if err != nil {
+	if err != nil {
 		return nil, err
 	}
 
@@ -610,7 +610,7 @@ func (s *Service) fetchOAuth2UserInfo(provider, accessToken string) (map[string]
 	// Check for successful response
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("user info request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("user info request failed with status %d: %w", resp.StatusCode, &UserInfoError{StatusCode: resp.StatusCode, Body: string(body)})
 	}
 
 	// Read and parse the response

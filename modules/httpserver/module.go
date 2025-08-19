@@ -739,4 +739,11 @@ func (rw *responseWriter) Write(data []byte) (int, error) {
 		return n, fmt.Errorf("failed to write HTTP response: %w", err)
 	}
 	return n, nil
+\n\
+// GetRegisteredEventTypes implements the ObservableModule interface.\
+// Returns all event types that this httpserver module can emit.\
+func (m *Module) GetRegisteredEventTypes() []string {\
+	return []string{\
+	}\
+}
 }

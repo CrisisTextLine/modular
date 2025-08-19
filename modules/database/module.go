@@ -780,3 +780,22 @@ func (m *Module) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 	}()
 	return nil
 }
+
+// GetRegisteredEventTypes implements the ObservableModule interface.
+// Returns all event types that this database module can emit.
+func (m *Module) GetRegisteredEventTypes() []string {
+	return []string{
+		EventTypeConnected,
+		EventTypeDisconnected,
+		EventTypeConnectionError,
+		EventTypeQueryExecuted,
+		EventTypeQueryError,
+		EventTypeTransactionStarted,
+		EventTypeTransactionCommitted,
+		EventTypeTransactionRolledBack,
+		EventTypeMigrationStarted,
+		EventTypeMigrationCompleted,
+		EventTypeMigrationFailed,
+		EventTypeConfigLoaded,
+	}
+}

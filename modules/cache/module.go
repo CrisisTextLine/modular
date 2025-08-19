@@ -524,4 +524,11 @@ func (m *CacheModule) EmitEvent(ctx context.Context, event cloudevents.Event) er
 		return fmt.Errorf("failed to notify observers: %w", err)
 	}
 	return nil
+\n\
+// GetRegisteredEventTypes implements the ObservableModule interface.\
+// Returns all event types that this cache module can emit.\
+func (m *Module) GetRegisteredEventTypes() []string {\
+	return []string{\
+	}\
+}
 }

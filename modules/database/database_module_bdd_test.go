@@ -25,6 +25,7 @@ type DatabaseBDDTestContext struct {
 	healthStatus    bool
 	originalFeeders []modular.Feeder
 	eventObserver   *TestEventObserver
+	connectionError error
 }
 
 // TestEventObserver captures events for BDD testing
@@ -693,33 +694,45 @@ func (ctx *DatabaseBDDTestContext) aDatabaseConnectionFailsWithInvalidCredential
 	// Reset event observer to capture only this scenario's events
 	ctx.eventObserver.Reset()
 
-	// Instead of creating a new app, simulate a connection error in the existing service
-	// by directly triggering the connection error event emission.
-	// This is more realistic as it simulates what would happen in a real application
-	// when a database connection fails after being established.
-
-	// Get the database module which should already be initialized
-	if ctx.module == nil {
-		return fmt.Errorf("database module not initialized")
+	// Create a new application with a bad database configuration to trigger real connection error
+	logger := &testLogger{}
+	badApp := modular.NewStdApplication(modular.NewStdConfigProvider(struct{}{}), logger)
+	if subject, ok := badApp.(modular.Subject); ok {
+		subject.RegisterObserver(ctx.eventObserver)
 	}
 
-	// Create a connection error event that would be emitted by the database service
-	// in case of connection failure (simulating a real connection error scenario)
-	event := modular.NewCloudEvent(EventTypeConnectionError, "database-service", map[string]interface{}{
-		"connection_name": "default",
-		"driver":          "sqlite",
-		"error":           "simulated connection failure with invalid credentials",
-	}, nil)
+	// Configure database with invalid credentials to trigger real connection failure
+	badConfig := &Config{
+		Connections: map[string]*ConnectionConfig{
+			"bad_connection": {
+				Driver: "mysql", // Use mysql driver with invalid DSN
+				DSN:    "invalid:credentials@tcp(nonexistent:3306)/baddb?timeout=1s",
+			},
+		},
+		Default: "bad_connection",
+	}
 
-	// Emit the connection error event through the module
-	err := ctx.module.EmitEvent(context.Background(), event)
+	// Create and register database module with bad config
+	badModule := NewModule()
+	badApp.RegisterModule(badModule)
+	badApp.RegisterConfigSection("database", modular.NewStdConfigProvider(badConfig))
 
-	if err != nil {
-		return fmt.Errorf("failed to emit connection error event: %w", err)
+	// Initialize - this should trigger a connection error
+	if err := badApp.Init(); err != nil {
+		// Connection error is expected, this should trigger the event emission
+		ctx.connectionError = err
+	}
+
+	// Try to start - this might also trigger connection error events
+	if err := badApp.Start(); err != nil {
+		// Connection errors during start are also expected
+		if ctx.connectionError == nil {
+			ctx.connectionError = err
+		}
 	}
 
 	// Give time for event processing
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	return nil
 }
@@ -1173,4 +1186,38 @@ func TestDatabaseModule(t *testing.T) {
 	if suite.Run() != 0 {
 		t.Fatal("non-zero status returned, failed to run feature tests")
 	}
+}
+
+// Event validation step - ensures all registered events are emitted during testing
+func (ctx *DatabaseBDDTestContext) allRegisteredEventsShouldBeEmittedDuringTesting() error {
+	// Get all registered event types from the module
+	if ctx.module != nil {
+		registeredEvents := ctx.module.GetRegisteredEventTypes()
+		
+		// Create event validation observer
+		validator := modular.NewEventValidationObserver("event-validator", registeredEvents)
+		_ = validator // Use validator to avoid unused variable error
+		
+		// Check which events were emitted during testing
+		emittedEvents := make(map[string]bool)
+		for _, event := range ctx.eventObserver.GetEvents() {
+			emittedEvents[event.Type()] = true
+		}
+		
+		// Check for missing events
+		var missingEvents []string
+		for _, eventType := range registeredEvents {
+			if !emittedEvents[eventType] {
+				missingEvents = append(missingEvents, eventType)
+			}
+		}
+		
+		if len(missingEvents) > 0 {
+			return fmt.Errorf("the following registered events were not emitted during testing: %v", missingEvents)
+		}
+		
+		return nil
+	}
+	
+	return fmt.Errorf("module is nil")
 }

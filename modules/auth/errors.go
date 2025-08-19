@@ -22,3 +22,13 @@ var (
 	ErrUserInfoURLNotConfigured  = errors.New("user info URL not configured for provider")
 	ErrNoSubjectForEventEmission = errors.New("no subject available for event emission")
 )
+
+// UserInfoError represents an error from user info API calls
+type UserInfoError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *UserInfoError) Error() string {
+	return "user info request failed"
+}

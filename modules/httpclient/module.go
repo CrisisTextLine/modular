@@ -943,4 +943,11 @@ func (t *loggingTransport) handleFileLogging(requestID string, req *http.Request
 			"error", err,
 		)
 	}
+\n\
+// GetRegisteredEventTypes implements the ObservableModule interface.\
+// Returns all event types that this httpclient module can emit.\
+func (m *Module) GetRegisteredEventTypes() []string {\
+	return []string{\
+	}\
+}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,16 +32,20 @@ type CacheBDDTestContext struct {
 type testEventObserver struct {
 	events []cloudevents.Event
 	id     string
+	mu     *sync.Mutex
 }
 
 func newTestEventObserver() *testEventObserver {
 	return &testEventObserver{
 		id: "test-observer-cache",
+		mu: &sync.Mutex{},
 	}
 }
 
 func (o *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	o.mu.Lock()
 	o.events = append(o.events, event)
+	o.mu.Unlock()
 	return nil
 }
 
@@ -49,11 +54,18 @@ func (o *testEventObserver) ObserverID() string {
 }
 
 func (o *testEventObserver) GetEvents() []cloudevents.Event {
-	return o.events
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	// Return a copy to avoid race with concurrent appends
+	out := make([]cloudevents.Event, len(o.events))
+	copy(out, o.events)
+	return out
 }
 
 func (o *testEventObserver) ClearEvents() {
+	o.mu.Lock()
 	o.events = nil
+	o.mu.Unlock()
 }
 
 func (ctx *CacheBDDTestContext) resetContext() {
@@ -89,7 +101,7 @@ func (ctx *CacheBDDTestContext) iHaveAModularApplicationWithCacheModuleConfigure
 
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 
 	// Create and register cache module
 	ctx.module = NewModule().(*CacheModule)
@@ -483,7 +495,7 @@ func (ctx *CacheBDDTestContext) theCacheModuleAttemptsToStart() error {
 
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	app := modular.NewStdApplication(mainConfigProvider, logger)
+	app := modular.NewObservableApplication(mainConfigProvider, logger)
 
 	// Create and register cache module
 	module := NewModule().(*CacheModule)
@@ -847,8 +859,27 @@ func (ctx *CacheBDDTestContext) theErrorEventShouldContainConnectionErrorDetails
 
 func (ctx *CacheBDDTestContext) theCacheCleanupProcessRuns() error {
 	// Wait for the natural cleanup process to run
-	// With the configured cleanup interval of 500ms, we wait for 3 cycles to ensure it runs reliably
+	// With the configured cleanup interval of 500ms, we wait for 3+ cycles to ensure it runs reliably
 	time.Sleep(1600 * time.Millisecond)
+
+	// Additionally, proactively trigger cleanup on the in-memory engine to reduce test flakiness
+	// and accelerate emission of expiration events in CI environments.
+	if ctx.service != nil {
+		if mem, ok := ctx.service.cacheEngine.(*MemoryCache); ok {
+			// Poll a few times, triggering cleanup and checking if the expired event appeared
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) {
+				mem.CleanupNow(context.Background())
+				// Small delay to allow async event emission to propagate
+				time.Sleep(50 * time.Millisecond)
+				for _, ev := range ctx.eventObserver.GetEvents() {
+					if ev.Type() == EventTypeCacheExpired {
+						return nil
+					}
+				}
+			}
+		}
+	}
 
 	return nil
 }

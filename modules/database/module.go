@@ -166,6 +166,16 @@ func (l *lazyDefaultService) Exec(query string, args ...interface{}) (sql.Result
 	return result, nil
 }
 
+// ExecuteContext is a backward-compatible alias for ExecContext
+func (l *lazyDefaultService) ExecuteContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return l.ExecContext(ctx, query, args...)
+}
+
+// Execute is a backward-compatible alias for Exec
+func (l *lazyDefaultService) Execute(query string, args ...interface{}) (sql.Result, error) {
+	return l.Exec(query, args...)
+}
+
 func (l *lazyDefaultService) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
 	service := l.module.GetDefaultService()
 	if service == nil {
@@ -313,7 +323,7 @@ func (l *lazyDefaultService) Begin() (*sql.Tx, error) {
 	}, nil)
 
 	go func() {
-		if emitErr := l.module.EmitEvent(context.Background(), event); emitErr != nil {
+		if emitErr := l.module.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
 			fmt.Printf("Failed to emit transaction started event: %v\n", emitErr)
 		}
 	}()
@@ -330,7 +340,7 @@ func (l *lazyDefaultService) CommitTransaction(ctx context.Context, tx *sql.Tx) 
 	return service.CommitTransaction(ctx, tx)
 }
 
-// RollbackTransaction rolls back a transaction and emits appropriate events  
+// RollbackTransaction rolls back a transaction and emits appropriate events
 func (l *lazyDefaultService) RollbackTransaction(ctx context.Context, tx *sql.Tx) error {
 	service := l.module.GetDefaultService()
 	if service == nil {
@@ -492,7 +502,7 @@ func (m *Module) Init(app modular.Application) error {
 	}, nil)
 
 	go func() {
-		if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
 			fmt.Printf("Failed to emit config loaded event: %v\n", emitErr)
 		}
 	}()
@@ -711,7 +721,7 @@ func (m *Module) initializeConnections() error {
 				}, nil)
 
 				go func() {
-					if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+					if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
 						fmt.Printf("Failed to emit database connection failed event: %v\n", emitErr)
 					}
 				}()
@@ -726,7 +736,7 @@ func (m *Module) initializeConnections() error {
 			}, nil)
 
 			go func() {
-				if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+				if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
 					fmt.Printf("Failed to emit database connected event: %v\n", emitErr)
 				}
 			}()

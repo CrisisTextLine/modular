@@ -35,47 +35,11 @@ type ReverseProxyBDDTestContext struct {
 	// HTTP testing support
 	httpRecorder     *httptest.ResponseRecorder
 	lastResponseBody []byte
-}
-
-// Helper method to make actual requests through the module's handlers
-func (ctx *ReverseProxyBDDTestContext) makeRequestThroughModule(method, path string, body io.Reader) (*http.Response, error) {
-	if ctx.service == nil {
-		return nil, fmt.Errorf("service not available")
-	}
-
-	// Get the router service to find the appropriate handler
-	var router *testRouter
-	err := ctx.app.GetService("router", &router)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get router: %w", err)
-	}
-
-	// Create request
-	req := httptest.NewRequest(method, path, body)
-	recorder := httptest.NewRecorder()
-
-	// Find matching handler in router or use catch-all
-	var handler http.HandlerFunc
-	if routeHandler, exists := router.routes[path]; exists {
-		handler = routeHandler
-	} else {
-		// Try to find a pattern match or use catch-all
-		for route, routeHandler := range router.routes {
-			if route == "/*" || strings.HasPrefix(path, strings.TrimSuffix(route, "*")) {
-				handler = routeHandler
-				break
-			}
-		}
-
-		// If no match found, create a catch-all handler from the module
-		if handler == nil {
-			handler = ctx.service.createTenantAwareCatchAllHandler()
-		}
-	}
-
-	// Additional fields for new BDD steps
+	// Metrics endpoint path used in metrics-related tests
 	metricsEndpointPath string
 }
+
+// (Removed malformed duplicate makeRequestThroughModule definition)
 
 // testEventObserver captures CloudEvents during testing
 type testEventObserver struct {

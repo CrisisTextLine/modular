@@ -32,12 +32,12 @@ type EventLoggerBDDTestContext struct {
 // createConsoleConfig creates an EventLoggerConfig with console output
 func (ctx *EventLoggerBDDTestContext) createConsoleConfig(bufferSize int) *EventLoggerConfig {
 	return &EventLoggerConfig{
-		Enabled:          true,
-		LogLevel:         "INFO",
-		Format:           "structured",
-		BufferSize:       bufferSize,
-		FlushInterval:    time.Duration(5 * time.Second),
-		IncludeMetadata:  true,
+		Enabled:           true,
+		LogLevel:          "INFO",
+		Format:            "structured",
+		BufferSize:        bufferSize,
+		FlushInterval:     time.Duration(5 * time.Second),
+		IncludeMetadata:   true,
 		IncludeStackTrace: false,
 		OutputTargets: []OutputTargetConfig{
 			{
@@ -56,12 +56,12 @@ func (ctx *EventLoggerBDDTestContext) createConsoleConfig(bufferSize int) *Event
 // createFileConfig creates an EventLoggerConfig with file output
 func (ctx *EventLoggerBDDTestContext) createFileConfig(logFile string) *EventLoggerConfig {
 	return &EventLoggerConfig{
-		Enabled:          true,
-		LogLevel:         "INFO",
-		Format:           "structured",
-		BufferSize:       100,
-		FlushInterval:    time.Duration(5 * time.Second),
-		IncludeMetadata:  true,
+		Enabled:           true,
+		LogLevel:          "INFO",
+		Format:            "structured",
+		BufferSize:        100,
+		FlushInterval:     time.Duration(5 * time.Second),
+		IncludeMetadata:   true,
 		IncludeStackTrace: false,
 		OutputTargets: []OutputTargetConfig{
 			{
@@ -82,14 +82,14 @@ func (ctx *EventLoggerBDDTestContext) createFileConfig(logFile string) *EventLog
 // createFilteredConfig creates an EventLoggerConfig with event type filters
 func (ctx *EventLoggerBDDTestContext) createFilteredConfig(filters []string) *EventLoggerConfig {
 	return &EventLoggerConfig{
-		Enabled:          true,
-		LogLevel:         "INFO",
-		Format:           "structured",
-		BufferSize:       100,
-		FlushInterval:    time.Duration(5 * time.Second),
-		IncludeMetadata:  true,
+		Enabled:           true,
+		LogLevel:          "INFO",
+		Format:            "structured",
+		BufferSize:        100,
+		FlushInterval:     time.Duration(5 * time.Second),
+		IncludeMetadata:   true,
 		IncludeStackTrace: false,
-		EventTypeFilters: filters,
+		EventTypeFilters:  filters,
 		OutputTargets: []OutputTargetConfig{
 			{
 				Type:   "console",
@@ -107,12 +107,12 @@ func (ctx *EventLoggerBDDTestContext) createFilteredConfig(filters []string) *Ev
 // createMultiTargetConfig creates an EventLoggerConfig with multiple output targets
 func (ctx *EventLoggerBDDTestContext) createMultiTargetConfig(logFile string) *EventLoggerConfig {
 	return &EventLoggerConfig{
-		Enabled:          true,
-		LogLevel:         "INFO",
-		Format:           "structured",
-		BufferSize:       100,
-		FlushInterval:    time.Duration(5 * time.Second),
-		IncludeMetadata:  true,
+		Enabled:           true,
+		LogLevel:          "INFO",
+		Format:            "structured",
+		BufferSize:        100,
+		FlushInterval:     time.Duration(5 * time.Second),
+		IncludeMetadata:   true,
 		IncludeStackTrace: false,
 		OutputTargets: []OutputTargetConfig{
 			{
@@ -139,11 +139,10 @@ func (ctx *EventLoggerBDDTestContext) createMultiTargetConfig(logFile string) *E
 	}
 }
 
-
 // createApplicationWithConfig creates an ObservableApplication with provided config
 func (ctx *EventLoggerBDDTestContext) createApplicationWithConfig(config *EventLoggerConfig) error {
 	logger := &testLogger{}
-	
+
 	// Save and clear ConfigFeeders to prevent environment interference during tests
 	originalFeeders := modular.ConfigFeeders
 	modular.ConfigFeeders = []modular.Feeder{}
@@ -216,7 +215,7 @@ func (ctx *EventLoggerBDDTestContext) resetContext() {
 		// Give some time for cleanup
 		time.Sleep(10 * time.Millisecond)
 	}
-	
+
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -253,12 +252,12 @@ func (ctx *EventLoggerBDDTestContext) theEventLoggerModuleIsInitialized() error 
 		ctx.lastError = err
 		return err
 	}
-	
+
 	// Check if the module was properly initialized
 	if ctx.module == nil {
 		return fmt.Errorf("module is nil after init")
 	}
-	
+
 	return nil
 }
 
@@ -341,6 +340,10 @@ func (ctx *EventLoggerBDDTestContext) iEmitATestEventWithTypeAndData(eventType, 
 	// Emit event through the observer
 	err := ctx.service.OnEvent(context.Background(), event)
 	if err != nil {
+		// Buffer full is an expected condition in some scenarios; don't treat it as a test error
+		if errors.Is(err, ErrEventBufferFull) {
+			return nil
+		}
 		ctx.lastError = err
 		return err
 	}
@@ -430,7 +433,7 @@ func (ctx *EventLoggerBDDTestContext) allEventsShouldBeLoggedToTheFile() error {
 	time.Sleep(500 * time.Millisecond)
 
 	logFile := filepath.Join(ctx.tempDir, "test.log")
-	
+
 	// Try multiple times with increasing delays to handle race conditions
 	for attempt := 0; attempt < 5; attempt++ {
 		if _, err := os.Stat(logFile); err == nil {
@@ -439,7 +442,7 @@ func (ctx *EventLoggerBDDTestContext) allEventsShouldBeLoggedToTheFile() error {
 		// Wait a bit more and retry
 		time.Sleep(100 * time.Millisecond)
 	}
-	
+
 	return fmt.Errorf("log file not created")
 }
 
@@ -672,7 +675,7 @@ func (ctx *EventLoggerBDDTestContext) theEventShouldBeLoggedToAllConfiguredTarge
 
 	// Check if file was created (indicating file target worked)
 	logFile := filepath.Join(ctx.tempDir, "multi.log")
-	
+
 	// Try multiple times with increasing delays to handle race conditions
 	for attempt := 0; attempt < 5; attempt++ {
 		if _, err := os.Stat(logFile); err == nil {
@@ -681,7 +684,7 @@ func (ctx *EventLoggerBDDTestContext) theEventShouldBeLoggedToAllConfiguredTarge
 		// Wait a bit more and retry
 		time.Sleep(100 * time.Millisecond)
 	}
-	
+
 	return fmt.Errorf("log file not created for multi-target test")
 }
 

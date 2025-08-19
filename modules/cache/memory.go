@@ -59,6 +59,12 @@ func (c *MemoryCache) TriggerCleanupIfNeeded(ctx context.Context) {
 	c.ensureCleanupRun(ctx)
 }
 
+// CleanupNow forces an immediate cleanup cycle of expired items and emits corresponding events.
+// Intended primarily for tests to deterministically process expirations without waiting for timers.
+func (c *MemoryCache) CleanupNow(ctx context.Context) {
+	c.cleanupExpiredItems(ctx)
+}
+
 // Connect initializes the memory cache
 func (c *MemoryCache) Connect(ctx context.Context) error {
 	// Validate configuration before use

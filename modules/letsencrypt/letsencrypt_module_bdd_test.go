@@ -2,7 +2,6 @@ package letsencrypt
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,334 +66,65 @@ func (ctx *LetsEncryptBDDTestContext) resetContext() {
 
 // --- Event-observation specific steps ---
 func (ctx *LetsEncryptBDDTestContext) iHaveALetsEncryptModuleWithEventObservationEnabled() error {
+	// Don't call the regular setup that resets context - do our own setup
 	ctx.resetContext()
 
-	// Create temp directory and base config
+	// Create temp directory for certificate storage
 	var err error
-	ctx.tempDir, err = os.MkdirTemp("", "letsencrypt-bdd-events")
+	ctx.tempDir, err = os.MkdirTemp("", "letsencrypt-bdd-test")
 	if err != nil {
 		return err
 	}
 
+	// Create basic LetsEncrypt configuration for testing
 	ctx.config = &LetsEncryptConfig{
-		Email:         "test@example.com",
-		Domains:       []string{"example.com"},
-		UseStaging:    true,
-		UseProduction: false,
-		StoragePath:   ctx.tempDir,
-		AutoRenew:     false, // keep renewal timer off for test determinism
-		UseDNS:        false,
-		HTTPProvider:  &HTTPProviderConfig{UseBuiltIn: true, Port: 8080},
+		Email:       "test@example.com",
+		Domains:     []string{"example.com"},
+		UseStaging:  true,
+		StoragePath: ctx.tempDir,
+		RenewBefore: 30,
+		AutoRenew:   true,
+		UseDNS:      false,
+		HTTPProvider: &HTTPProviderConfig{
+			UseBuiltIn: true,
+			Port:       8080,
+		},
 	}
 
-	// Observable app to capture events
+	// Create ObservableApplication for event support
 	logger := &testLogger{}
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 
-	// Register a test observer to capture CloudEvents
-	ctx.eventObserver = newTestEventObserver()
-	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
-		return fmt.Errorf("failed to register test observer: %w", err)
-	}
-
-	// Create module (not started yet)
+	// Create LetsEncrypt module instance directly
 	ctx.module, err = New(ctx.config)
 	if err != nil {
 		ctx.lastError = err
 		return err
 	}
 
-	// Wire the subject so emitEvent can publish
-	_ = ctx.module.RegisterObservers(ctx.app.(modular.Subject))
+	// Create and register the event observer
+	ctx.eventObserver = newTestEventObserver()
+	subject, ok := ctx.app.(modular.Subject)
+	if !ok {
+		return fmt.Errorf("application does not implement Subject interface")
+	}
+
+	if err := subject.RegisterObserver(ctx.eventObserver); err != nil {
+		return fmt.Errorf("failed to register event observer: %w", err)
+	}
+
+	// Ensure the module has its subject reference for event emission
+	if err := ctx.module.RegisterObservers(subject); err != nil {
+		return fmt.Errorf("failed to register module observers: %w", err)
+	}
+
+	// Debug: Verify the subject was actually set
+	if ctx.module.subject == nil {
+		return fmt.Errorf("module subject is still nil after RegisterObservers call")
+	}
+
 	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) theLetsEncryptModuleStarts() error {
-	if ctx.module == nil {
-		return fmt.Errorf("module not initialized")
-	}
-	// Simulate lifecycle start events without performing real ACME operations
-	ctx.module.emitEvent(context.Background(), EventTypeServiceStarted, map[string]interface{}{
-		"domains_count": len(ctx.config.Domains),
-		"dns_provider":  ctx.config.DNSProvider,
-		"auto_renew":    ctx.config.AutoRenew,
-		"production":    ctx.config.UseProduction,
-	})
-	ctx.module.emitEvent(context.Background(), EventTypeModuleStarted, map[string]interface{}{
-		"certificates_count": 0,
-		"auto_renew_enabled": ctx.config.AutoRenew,
-	})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) aServiceStartedEventShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeServiceStarted {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeServiceStarted)
-}
-
-func (ctx *LetsEncryptBDDTestContext) theEventShouldContainServiceConfigurationDetails() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeServiceStarted {
-			// Basic payload presence check
-			var data map[string]interface{}
-			if err := e.DataAs(&data); err != nil {
-				return err
-			}
-			if _, ok := data["domains_count"]; !ok {
-				return fmt.Errorf("domains_count missing from event data")
-			}
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeServiceStarted)
-}
-
-func (ctx *LetsEncryptBDDTestContext) theLetsEncryptModuleStops() error {
-	if ctx.module == nil {
-		return fmt.Errorf("module not initialized")
-	}
-	// Simulate lifecycle stop events
-	ctx.module.emitEvent(context.Background(), EventTypeServiceStopped, map[string]interface{}{
-		"certificates_count": len(ctx.module.certificates),
-	})
-	ctx.module.emitEvent(context.Background(), EventTypeModuleStopped, map[string]interface{}{
-		"certificates_count": len(ctx.module.certificates),
-	})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) aServiceStoppedEventShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeServiceStopped {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeServiceStopped)
-}
-
-func (ctx *LetsEncryptBDDTestContext) aModuleStoppedEventShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeModuleStopped {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeModuleStopped)
-}
-
-func (ctx *LetsEncryptBDDTestContext) aCertificateIsRequestedForDomains() error {
-	if ctx.module == nil {
-		return fmt.Errorf("module not initialized")
-	}
-	// Directly emit a requested event to avoid real ACME calls
-	ctx.module.emitEvent(context.Background(), EventTypeCertificateRequested, map[string]interface{}{
-		"domains": ctx.config.Domains,
-		"count":   len(ctx.config.Domains),
-	})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) aCertificateRequestedEventShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeCertificateRequested {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeCertificateRequested)
-}
-
-func (ctx *LetsEncryptBDDTestContext) theEventShouldContainDomainInformation() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeCertificateRequested {
-			var data map[string]interface{}
-			if err := e.DataAs(&data); err != nil {
-				return err
-			}
-			if _, ok := data["domains"]; !ok {
-				return fmt.Errorf("domains missing from event data")
-			}
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeCertificateRequested)
-}
-
-func (ctx *LetsEncryptBDDTestContext) theCertificateIsSuccessfullyIssued() error {
-	if ctx.module == nil {
-		return fmt.Errorf("module not initialized")
-	}
-	ctx.module.emitEvent(context.Background(), EventTypeCertificateIssued, map[string]interface{}{
-		"domain": ctx.config.Domains[0],
-	})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) aCertificateIssuedEventShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeCertificateIssued {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeCertificateIssued)
-}
-
-func (ctx *LetsEncryptBDDTestContext) theEventShouldContainDomainDetails() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeCertificateIssued {
-			var data map[string]interface{}
-			if err := e.DataAs(&data); err != nil {
-				return err
-			}
-			if _, ok := data["domain"]; !ok {
-				return fmt.Errorf("domain missing from event data")
-			}
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeCertificateIssued)
-}
-
-func (ctx *LetsEncryptBDDTestContext) iHaveExistingCertificatesThatNeedRenewal() error {
-	// Simulate that we have a certificate to renew by setting a fake one
-	if ctx.module == nil {
-		if err := ctx.iHaveALetsEncryptModuleWithEventObservationEnabled(); err != nil {
-			return err
-		}
-	}
-	ctx.module.certMutex.Lock()
-	ctx.module.certificates["example.com"] = &tls.Certificate{}
-	ctx.module.certMutex.Unlock()
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) certificatesAreRenewed() error {
-	ctx.module.emitEvent(context.Background(), EventTypeCertificateRenewed, map[string]interface{}{
-		"domain": "example.com",
-	})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) certificateRenewedEventsShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeCertificateRenewed {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeCertificateRenewed)
-}
-
-func (ctx *LetsEncryptBDDTestContext) theEventsShouldContainRenewalDetails() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, e := range events {
-		if e.Type() == EventTypeCertificateRenewed {
-			var data map[string]interface{}
-			if err := e.DataAs(&data); err != nil {
-				return err
-			}
-			if _, ok := data["domain"]; !ok {
-				return fmt.Errorf("domain missing from renewal event data")
-			}
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeCertificateRenewed)
-}
-
-func (ctx *LetsEncryptBDDTestContext) aCMEChallengesAreProcessed() error {
-	ctx.module.emitEvent(context.Background(), EventTypeAcmeChallenge, map[string]interface{}{"status": "processed"})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) aCMEChallengeEventsShouldBeEmitted() error {
-	for _, e := range ctx.eventObserver.GetEvents() {
-		if e.Type() == EventTypeAcmeChallenge {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeAcmeChallenge)
-}
-
-func (ctx *LetsEncryptBDDTestContext) aCMEAuthorizationIsCompleted() error {
-	ctx.module.emitEvent(context.Background(), EventTypeAcmeAuthorization, map[string]interface{}{"status": "completed"})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) aCMEAuthorizationEventsShouldBeEmitted() error {
-	for _, e := range ctx.eventObserver.GetEvents() {
-		if e.Type() == EventTypeAcmeAuthorization {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeAcmeAuthorization)
-}
-
-func (ctx *LetsEncryptBDDTestContext) aCMEOrdersAreProcessed() error {
-	ctx.module.emitEvent(context.Background(), EventTypeAcmeOrder, map[string]interface{}{"status": "processed"})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) aCMEOrderEventsShouldBeEmitted() error {
-	for _, e := range ctx.eventObserver.GetEvents() {
-		if e.Type() == EventTypeAcmeOrder {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeAcmeOrder)
-}
-
-func (ctx *LetsEncryptBDDTestContext) certificatesAreStoredToDisk() error {
-	ctx.module.emitEvent(context.Background(), EventTypeStorageWrite, map[string]interface{}{"path": filepath.Join(ctx.tempDir, "cert.pem")})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) storageWriteEventsShouldBeEmitted() error {
-	for _, e := range ctx.eventObserver.GetEvents() {
-		if e.Type() == EventTypeStorageWrite {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeStorageWrite)
-}
-
-func (ctx *LetsEncryptBDDTestContext) certificatesAreReadFromStorage() error {
-	ctx.module.emitEvent(context.Background(), EventTypeStorageRead, map[string]interface{}{"path": filepath.Join(ctx.tempDir, "cert.pem")})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) storageReadEventsShouldBeEmitted() error {
-	for _, e := range ctx.eventObserver.GetEvents() {
-		if e.Type() == EventTypeStorageRead {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeStorageRead)
-}
-
-func (ctx *LetsEncryptBDDTestContext) storageErrorsOccur() error {
-	ctx.module.emitEvent(context.Background(), EventTypeStorageError, map[string]interface{}{"error": "disk full"})
-	return nil
-}
-
-func (ctx *LetsEncryptBDDTestContext) storageErrorEventsShouldBeEmitted() error {
-	for _, e := range ctx.eventObserver.GetEvents() {
-		if e.Type() == EventTypeStorageError {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not observed", EventTypeStorageError)
 }
 
 func (ctx *LetsEncryptBDDTestContext) iHaveAModularApplicationWithLetsEncryptModuleConfigured() error {
@@ -837,70 +567,6 @@ func (ctx *LetsEncryptBDDTestContext) resourcesShouldBeCleanedUpProperly() error
 
 func (ctx *LetsEncryptBDDTestContext) theModuleIsInitialized() error {
 	return ctx.theLetsEncryptModuleIsInitialized()
-}
-
-// Event-related step definitions
-
-func (ctx *LetsEncryptBDDTestContext) iHaveALetsEncryptModuleWithEventObservationEnabled() error {
-	// Don't call the regular setup that resets context - do our own setup
-	ctx.resetContext()
-
-	// Create temp directory for certificate storage
-	var err error
-	ctx.tempDir, err = os.MkdirTemp("", "letsencrypt-bdd-test")
-	if err != nil {
-		return err
-	}
-
-	// Create basic LetsEncrypt configuration for testing
-	ctx.config = &LetsEncryptConfig{
-		Email:       "test@example.com",
-		Domains:     []string{"example.com"},
-		UseStaging:  true,
-		StoragePath: ctx.tempDir,
-		RenewBefore: 30,
-		AutoRenew:   true,
-		UseDNS:      false,
-		HTTPProvider: &HTTPProviderConfig{
-			UseBuiltIn: true,
-			Port:       8080,
-		},
-	}
-
-	// Create ObservableApplication for event support
-	logger := &testLogger{}
-	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
-
-	// Create LetsEncrypt module instance directly
-	ctx.module, err = New(ctx.config)
-	if err != nil {
-		ctx.lastError = err
-		return err
-	}
-
-	// Create and register the event observer
-	ctx.eventObserver = newTestEventObserver()
-	subject, ok := ctx.app.(modular.Subject)
-	if !ok {
-		return fmt.Errorf("application does not implement Subject interface")
-	}
-
-	if err := subject.RegisterObserver(ctx.eventObserver); err != nil {
-		return fmt.Errorf("failed to register event observer: %w", err)
-	}
-
-	// Ensure the module has its subject reference for event emission
-	if err := ctx.module.RegisterObservers(subject); err != nil {
-		return fmt.Errorf("failed to register module observers: %w", err)
-	}
-
-	// Debug: Verify the subject was actually set
-	if ctx.module.subject == nil {
-		return fmt.Errorf("module subject is still nil after RegisterObservers call")
-	}
-
-	return nil
 }
 
 func (ctx *LetsEncryptBDDTestContext) theLetsEncryptModuleStarts() error {
@@ -1804,7 +1470,7 @@ func TestLetsEncryptModuleBDD(t *testing.T) {
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
 			ctx := &LetsEncryptBDDTestContext{}
 
-      // Event observation scenarios
+			// Event observation scenarios
 			s.Given(`^I have a LetsEncrypt module with event observation enabled$`, ctx.iHaveALetsEncryptModuleWithEventObservationEnabled)
 			s.When(`^the LetsEncrypt module starts$`, ctx.theLetsEncryptModuleStarts)
 			s.Then(`^a service started event should be emitted$`, ctx.aServiceStartedEventShouldBeEmitted)

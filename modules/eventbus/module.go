@@ -661,11 +661,21 @@ func (m *EventBusModule) EmitEvent(ctx context.Context, event cloudevents.Event)
 		}
 	}()
 	return nil
-\n\
-// GetRegisteredEventTypes implements the ObservableModule interface.\
-// Returns all event types that this eventbus module can emit.\
-func (m *Module) GetRegisteredEventTypes() []string {\
-	return []string{\
-	}\
 }
+
+// GetRegisteredEventTypes implements the ObservableModule interface.
+// Returns all event types that this eventbus module can emit.
+func (m *EventBusModule) GetRegisteredEventTypes() []string {
+	return []string{
+		EventTypeMessagePublished,
+		EventTypeMessageReceived,
+		EventTypeMessageFailed,
+		EventTypeTopicCreated,
+		EventTypeTopicDeleted,
+		EventTypeSubscriptionCreated,
+		EventTypeSubscriptionRemoved,
+		EventTypeBusStarted,
+		EventTypeBusStopped,
+		EventTypeConfigLoaded,
+	}
 }

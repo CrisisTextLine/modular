@@ -530,11 +530,31 @@ func (m *SchedulerModule) emitEvent(ctx context.Context, eventType string, data 
 			fmt.Printf("Failed to emit scheduler event %s: %v\n", eventType, emitErr)
 		}
 	}
-\n\
-// GetRegisteredEventTypes implements the ObservableModule interface.\
-// Returns all event types that this scheduler module can emit.\
-func (m *Module) GetRegisteredEventTypes() []string {\
-	return []string{\
-	}\
 }
+
+// GetRegisteredEventTypes implements the ObservableModule interface.
+// Returns all event types that this scheduler module can emit.
+func (m *SchedulerModule) GetRegisteredEventTypes() []string {
+	return []string{
+		EventTypeConfigLoaded,
+		EventTypeConfigValidated,
+		EventTypeJobScheduled,
+		EventTypeJobStarted,
+		EventTypeJobCompleted,
+		EventTypeJobFailed,
+		EventTypeJobCancelled,
+		EventTypeJobRemoved,
+		EventTypeSchedulerStarted,
+		EventTypeSchedulerStopped,
+		EventTypeSchedulerPaused,
+		EventTypeSchedulerResumed,
+		EventTypeWorkerStarted,
+		EventTypeWorkerStopped,
+		EventTypeWorkerBusy,
+		EventTypeWorkerIdle,
+		EventTypeModuleStarted,
+		EventTypeModuleStopped,
+		EventTypeError,
+		EventTypeWarning,
+	}
 }

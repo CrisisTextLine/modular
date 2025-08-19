@@ -749,11 +749,27 @@ func (m *ChiMuxModule) emitEvent(ctx context.Context, eventType string, data map
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
 		fmt.Printf("Failed to emit chimux event %s: %v\n", eventType, emitErr)
 	}
-\n\
-// GetRegisteredEventTypes implements the ObservableModule interface.\
-// Returns all event types that this chimux module can emit.\
-func (m *Module) GetRegisteredEventTypes() []string {\
-	return []string{\
-	}\
 }
+
+// GetRegisteredEventTypes implements the ObservableModule interface.
+// Returns all event types that this chimux module can emit.
+func (m *ChiMuxModule) GetRegisteredEventTypes() []string {
+	return []string{
+		EventTypeConfigLoaded,
+		EventTypeConfigValidated,
+		EventTypeRouterCreated,
+		EventTypeRouterStarted,
+		EventTypeRouterStopped,
+		EventTypeRouteRegistered,
+		EventTypeRouteRemoved,
+		EventTypeMiddlewareAdded,
+		EventTypeMiddlewareRemoved,
+		EventTypeCorsConfigured,
+		EventTypeCorsEnabled,
+		EventTypeModuleStarted,
+		EventTypeModuleStopped,
+		EventTypeRequestReceived,
+		EventTypeRequestProcessed,
+		EventTypeRequestFailed,
+	}
 }

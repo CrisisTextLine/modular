@@ -1613,16 +1613,15 @@ func TestSchedulerModuleBDD(t *testing.T) {
 // Event validation step - ensures all registered events are emitted during testing
 func (ctx *SchedulerBDDTestContext) allRegisteredEventsShouldBeEmittedDuringTesting() error {
 	// Get all registered event types from the module
-	if observableModule, ok := ctx.module.(modular.ObservableModule); ok {
-		registeredEvents := observableModule.GetRegisteredEventTypes()
-		
-		// Create event validation observer
-		validator := modular.NewEventValidationObserver("event-validator", registeredEvents)
-		_ = validator // Use validator to avoid unused variable error
-		
-		// Check which events were emitted during testing
-		emittedEvents := make(map[string]bool)
-		for _, event := range ctx.eventObserver.GetEvents() {
+	registeredEvents := ctx.module.GetRegisteredEventTypes()
+	
+	// Create event validation observer
+	validator := modular.NewEventValidationObserver("event-validator", registeredEvents)
+	_ = validator // Use validator to avoid unused variable error
+	
+	// Check which events were emitted during testing
+	emittedEvents := make(map[string]bool)
+	for _, event := range ctx.eventObserver.GetEvents() {
 			emittedEvents[event.Type()] = true
 		}
 		
@@ -1640,6 +1639,3 @@ func (ctx *SchedulerBDDTestContext) allRegisteredEventsShouldBeEmittedDuringTest
 		
 		return nil
 	}
-	
-	return fmt.Errorf("module does not implement ObservableModule interface")
-}

@@ -239,11 +239,18 @@ func (m *Module) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 		return fmt.Errorf("failed to notify observers: %w", err)
 	}
 	return nil
-\n\
-// GetRegisteredEventTypes implements the ObservableModule interface.\
-// Returns all event types that this jsonschema module can emit.\
-func (m *Module) GetRegisteredEventTypes() []string {\
-	return []string{\
-	}\
 }
+
+// GetRegisteredEventTypes implements the ObservableModule interface.
+// Returns all event types that this jsonschema module can emit.
+func (m *Module) GetRegisteredEventTypes() []string {
+	return []string{
+		EventTypeSchemaCompiled,
+		EventTypeSchemaError,
+		EventTypeValidationSuccess,
+		EventTypeValidationFailed,
+		EventTypeValidateBytes,
+		EventTypeValidateReader,
+		EventTypeValidateInterface,
+	}
 }

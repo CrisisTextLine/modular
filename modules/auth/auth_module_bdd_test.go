@@ -1373,3 +1373,149 @@ func (ctx *AuthBDDTestContext) allRegisteredEventsShouldBeEmittedDuringTesting()
 		
 		return nil
 }
+
+// initBDDSteps initializes all the BDD steps for the auth module
+func (ctx *AuthBDDTestContext) initBDDSteps(s *godog.ScenarioContext) {
+	// Background
+	s.Given(`^I have a modular application with auth module configured$`, ctx.iHaveAModularApplicationWithAuthModuleConfigured)
+
+	// JWT Token generation and validation
+	s.Given(`^I have user credentials and JWT configuration$`, ctx.iHaveUserCredentialsAndJWTConfiguration)
+	s.When(`^I generate a JWT token for the user$`, ctx.iGenerateAJWTTokenForTheUser)
+	s.Then(`^the token should be created successfully$`, ctx.theTokenShouldBeCreatedSuccessfully)
+	s.Then(`^the token should contain the user information$`, ctx.theTokenShouldContainTheUserInformation)
+
+	s.Given(`^I have a valid JWT token$`, ctx.iHaveAValidJWTToken)
+	s.When(`^I validate the token$`, ctx.iValidateTheToken)
+	s.Then(`^the token should be accepted$`, ctx.theTokenShouldBeAccepted)
+	s.Then(`^the user claims should be extracted$`, ctx.theUserClaimsShouldBeExtracted)
+
+	s.Given(`^I have an invalid JWT token$`, ctx.iHaveAnInvalidJWTToken)
+	s.Then(`^the token should be rejected$`, ctx.theTokenShouldBeRejected)
+	s.Then(`^an appropriate error should be returned$`, ctx.anAppropriateErrorShouldBeReturned)
+
+	s.Given(`^I have an expired JWT token$`, ctx.iHaveAnExpiredJWTToken)
+	s.Then(`^the error should indicate token expiration$`, ctx.theErrorShouldIndicateTokenExpiration)
+
+	s.When(`^I refresh the token$`, ctx.iRefreshTheToken)
+	s.Then(`^a new token should be generated$`, ctx.aNewTokenShouldBeGenerated)
+	s.Then(`^the new token should have updated expiration$`, ctx.theNewTokenShouldHaveUpdatedExpiration)
+
+	// Password hashing and verification
+	s.Given(`^I have a plain text password$`, ctx.iHaveAPlainTextPassword)
+	s.When(`^I hash the password using bcrypt$`, ctx.iHashThePasswordUsingBcrypt)
+	s.Then(`^the password should be hashed successfully$`, ctx.thePasswordShouldBeHashedSuccessfully)
+	s.Then(`^the hash should be different from the original password$`, ctx.theHashShouldBeDifferentFromTheOriginalPassword)
+
+	s.Given(`^I have a password and its hash$`, ctx.iHaveAPasswordAndItsHash)
+	s.When(`^I verify the password against the hash$`, ctx.iVerifyThePasswordAgainstTheHash)
+	s.Then(`^the verification should succeed$`, ctx.theVerificationShouldSucceed)
+
+	s.Given(`^I have a password and a different hash$`, ctx.iHaveAPasswordAndADifferentHash)
+	s.Then(`^the verification should fail$`, ctx.theVerificationShouldFail)
+
+	// Password strength validation
+	s.Given(`^I have a strong password$`, ctx.iHaveAStrongPassword)
+	s.When(`^I validate the password strength$`, ctx.iValidateThePasswordStrength)
+	s.Then(`^the password should be accepted$`, ctx.thePasswordShouldBeAccepted)
+	s.Then(`^no strength errors should be reported$`, ctx.noStrengthErrorsShouldBeReported)
+
+	s.Given(`^I have a weak password$`, ctx.iHaveAWeakPassword)
+	s.Then(`^the password should be rejected$`, ctx.thePasswordShouldBeRejected)
+	s.Then(`^appropriate strength errors should be reported$`, ctx.appropriateStrengthErrorsShouldBeReported)
+
+	// Session management
+	s.Given(`^I have a user identifier$`, ctx.iHaveAUserIdentifier)
+	s.When(`^I create a new session for the user$`, ctx.iCreateANewSessionForTheUser)
+	s.Then(`^the session should be created successfully$`, ctx.theSessionShouldBeCreatedSuccessfully)
+	s.Then(`^the session should have a unique ID$`, ctx.theSessionShouldHaveAUniqueID)
+
+	s.Given(`^I have an existing user session$`, ctx.iHaveAnExistingUserSession)
+	s.When(`^I retrieve the session by ID$`, ctx.iRetrieveTheSessionByID)
+	s.Then(`^the session should be found$`, ctx.theSessionShouldBeFound)
+	s.Then(`^the session data should match$`, ctx.theSessionDataShouldMatch)
+
+	s.When(`^I delete the session$`, ctx.iDeleteTheSession)
+	s.Then(`^the session should be removed$`, ctx.theSessionShouldBeRemoved)
+	s.Then(`^subsequent retrieval should fail$`, ctx.subsequentRetrievalShouldFail)
+
+	// OAuth2
+	s.Given(`^I have OAuth2 configuration$`, ctx.iHaveOAuth2Configuration)
+	s.When(`^I initiate OAuth2 authorization$`, ctx.iInitiateOAuth2Authorization)
+	s.Then(`^the authorization URL should be generated$`, ctx.theAuthorizationURLShouldBeGenerated)
+	s.Then(`^the URL should contain proper parameters$`, ctx.theURLShouldContainProperParameters)
+
+	// User store
+	s.Given(`^I have a user store configured$`, ctx.iHaveAUserStoreConfigured)
+	s.When(`^I create a new user$`, ctx.iCreateANewUser)
+	s.Then(`^the user should be stored successfully$`, ctx.theUserShouldBeStoredSuccessfully)
+	s.Then(`^I should be able to retrieve the user by ID$`, ctx.iShouldBeAbleToRetrieveTheUserByID)
+
+	s.Given(`^I have a user with credentials in the store$`, ctx.iHaveAUserWithCredentialsInTheStore)
+	s.When(`^I authenticate with correct credentials$`, ctx.iAuthenticateWithCorrectCredentials)
+	s.Then(`^the authentication should succeed$`, ctx.theAuthenticationShouldSucceed)
+	s.Then(`^the user should be returned$`, ctx.theUserShouldBeReturned)
+
+	s.When(`^I authenticate with incorrect credentials$`, ctx.iAuthenticateWithIncorrectCredentials)
+	s.Then(`^the authentication should fail$`, ctx.theAuthenticationShouldFail)
+	s.Then(`^an error should be returned$`, ctx.anErrorShouldBeReturned)
+
+	// Event observation scenarios
+	s.Given(`^I have an auth module with event observation enabled$`, ctx.iHaveAnAuthModuleWithEventObservationEnabled)
+	s.Then(`^a token generated event should be emitted$`, ctx.aTokenGeneratedEventShouldBeEmitted)
+	s.Then(`^the event should contain user and token information$`, ctx.theEventShouldContainUserAndTokenInformation)
+	s.Then(`^a token validated event should be emitted$`, ctx.aTokenValidatedEventShouldBeEmitted)
+	s.Then(`^the event should contain validation information$`, ctx.theEventShouldContainValidationInformation)
+
+	s.When(`^I create a session for a user$`, ctx.iCreateASessionForAUser)
+	s.Then(`^a session created event should be emitted$`, ctx.aSessionCreatedEventShouldBeEmitted)
+	s.When(`^I access the session$`, ctx.iAccessTheSession)
+	s.Then(`^a session accessed event should be emitted$`, ctx.aSessionAccessedEventShouldBeEmitted)
+	s.Then(`^a session destroyed event should be emitted$`, ctx.aSessionDestroyedEventShouldBeEmitted)
+
+	s.Given(`^I have OAuth2 providers configured$`, ctx.iHaveOAuth2ProvidersConfigured)
+	s.When(`^I get an OAuth2 authorization URL$`, ctx.iGetAnOAuth2AuthorizationURL)
+	s.Then(`^an OAuth2 auth URL event should be emitted$`, ctx.anOAuth2AuthURLEventShouldBeEmitted)
+	s.When(`^I exchange an OAuth2 code for tokens$`, ctx.iExchangeAnOAuth2CodeForTokens)
+	s.Then(`^an OAuth2 exchange event should be emitted$`, ctx.anOAuth2ExchangeEventShouldBeEmitted)
+
+	s.Then(`^a token refreshed event should be emitted$`, ctx.aTokenRefreshedEventShouldBeEmitted)
+	s.Given(`^I have an expired session$`, ctx.iHaveAnExpiredSession)
+	s.When(`^I attempt to access the expired session$`, ctx.iAttemptToAccessTheExpiredSession)
+	s.Then(`^the session access should fail$`, ctx.theSessionAccessShouldFail)
+	s.Then(`^a session expired event should be emitted$`, ctx.aSessionExpiredEventShouldBeEmitted)
+
+	s.Given(`^I have an expired token for refresh$`, ctx.iHaveAnExpiredTokenForRefresh)
+	s.When(`^I attempt to refresh the expired token$`, ctx.iAttemptToRefreshTheExpiredToken)
+	s.Then(`^the token refresh should fail$`, ctx.theTokenRefreshShouldFail)
+	s.Then(`^a token expired event should be emitted$`, ctx.aTokenExpiredEventShouldBeEmitted)
+
+	s.When(`^I access an expired session$`, ctx.iAccessAnExpiredSession)
+	s.When(`^I validate an expired token$`, ctx.iValidateAnExpiredToken)
+	s.Then(`^the token should be rejected$`, ctx.theTokenShouldBeRejected)
+
+	s.Given(`^I have a valid refresh token$`, ctx.iHaveAValidRefreshToken)
+	s.Then(`^a new access token should be provided$`, ctx.aNewAccessTokenShouldBeProvided)
+
+	// Event validation
+	s.Then(`^all registered events should be emitted during testing$`, ctx.allRegisteredEventsShouldBeEmittedDuringTesting)
+}
+
+// TestAuthModuleBDD runs the BDD tests for the auth module
+func TestAuthModuleBDD(t *testing.T) {
+	suite := godog.TestSuite{
+		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
+			testCtx := &AuthBDDTestContext{}
+			testCtx.initBDDSteps(ctx)
+		},
+		Options: &godog.Options{
+			Format:   "pretty",
+			Paths:    []string{"features"},
+			TestingT: t,
+		},
+	}
+
+	if suite.Run() != 0 {
+		t.Fatal("non-zero status returned, failed to run feature tests")
+	}
+}

@@ -88,11 +88,11 @@ func TestModule_RouterFunctionality(t *testing.T) {
 	// Setup the module
 	err := module.RegisterConfig(mockApp)
 	require.NoError(t, err)
-	
+
 	// Register observers before Init
 	err = module.RegisterObservers(mockApp)
 	require.NoError(t, err)
-	
+
 	err = module.Init(mockApp)
 	require.NoError(t, err)
 
@@ -122,11 +122,11 @@ func TestModule_NestedRoutes(t *testing.T) {
 	// Setup the module
 	err := module.RegisterConfig(mockApp)
 	require.NoError(t, err)
-	
+
 	// Register observers before Init
 	err = module.RegisterObservers(mockApp)
 	require.NoError(t, err)
-	
+
 	err = module.Init(mockApp)
 	require.NoError(t, err)
 
@@ -301,11 +301,11 @@ func TestModule_TenantLifecycle(t *testing.T) {
 	// Setup the module
 	err := module.RegisterConfig(mockApp)
 	require.NoError(t, err)
-	
+
 	// Register observers before Init
 	err = module.RegisterObservers(mockApp)
 	require.NoError(t, err)
-	
+
 	err = module.Init(mockApp)
 	require.NoError(t, err)
 
@@ -364,11 +364,11 @@ func TestModule_Start_Stop(t *testing.T) {
 	// Setup the module
 	err := module.RegisterConfig(mockApp)
 	require.NoError(t, err)
-	
+
 	// Register observers before Init
 	err = module.RegisterObservers(mockApp)
 	require.NoError(t, err)
-	
+
 	err = module.Init(mockApp)
 	require.NoError(t, err)
 

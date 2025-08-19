@@ -283,7 +283,7 @@ func (m *LetsEncryptModule) Start(ctx context.Context) error {
 
 	// Start the renewal timer if auto-renew is enabled
 	if m.config.AutoRenew {
-		m.startRenewalTimer()
+		m.startRenewalTimer(ctx)
 	}
 
 	// Emit module started event
@@ -499,7 +499,7 @@ func (m *LetsEncryptModule) refreshCertificates(ctx context.Context) error {
 }
 
 // startRenewalTimer starts a background timer to check and renew certificates
-func (m *LetsEncryptModule) startRenewalTimer() {
+func (m *LetsEncryptModule) startRenewalTimer(ctx context.Context) {
 	// Check certificates daily
 	m.renewalTicker = time.NewTicker(24 * time.Hour)
 
@@ -508,7 +508,7 @@ func (m *LetsEncryptModule) startRenewalTimer() {
 			select {
 			case <-m.renewalTicker.C:
 				// Check if certificates need renewal
-				m.checkAndRenewCertificates()
+				m.checkAndRenewCertificates(ctx)
 			case <-m.shutdownChan:
 				return
 			}
@@ -517,7 +517,7 @@ func (m *LetsEncryptModule) startRenewalTimer() {
 }
 
 // checkAndRenewCertificates checks if certificates need renewal and renews them
-func (m *LetsEncryptModule) checkAndRenewCertificates() {
+func (m *LetsEncryptModule) checkAndRenewCertificates(ctx context.Context) {
 	// Loop through all certificates and check their expiry dates
 	for domain, cert := range m.certificates {
 		if cert == nil || len(cert.Certificate) == 0 {
@@ -540,7 +540,7 @@ func (m *LetsEncryptModule) checkAndRenewCertificates() {
 			fmt.Printf("Certificate for %s will expire in %d days, renewing\n", domain, int(daysUntilExpiry))
 
 			// Request renewal for this specific domain
-			if err := m.renewCertificateForDomain(domain); err != nil {
+			if err := m.renewCertificateForDomain(ctx, domain); err != nil {
 				fmt.Printf("Failed to renew certificate for %s: %v\n", domain, err)
 			} else {
 				fmt.Printf("Successfully renewed certificate for %s\n", domain)
@@ -550,7 +550,7 @@ func (m *LetsEncryptModule) checkAndRenewCertificates() {
 }
 
 // renewCertificateForDomain renews the certificate for a specific domain
-func (m *LetsEncryptModule) renewCertificateForDomain(domain string) error {
+func (m *LetsEncryptModule) renewCertificateForDomain(ctx context.Context, domain string) error {
 	// Request certificate for the domain
 	request := certificate.ObtainRequest{
 		Domains: []string{domain},
@@ -559,7 +559,7 @@ func (m *LetsEncryptModule) renewCertificateForDomain(domain string) error {
 
 	certificates, err := m.client.Certificate.Obtain(request)
 	if err != nil {
-		m.emitEvent(context.Background(), EventTypeError, map[string]interface{}{
+		m.emitEvent(ctx, EventTypeError, map[string]interface{}{
 			"error":  err.Error(),
 			"domain": domain,
 			"stage":  "certificate_renewal",
@@ -570,7 +570,7 @@ func (m *LetsEncryptModule) renewCertificateForDomain(domain string) error {
 	// Parse and store the new certificate
 	cert, err := tls.X509KeyPair(certificates.Certificate, certificates.PrivateKey)
 	if err != nil {
-		m.emitEvent(context.Background(), EventTypeError, map[string]interface{}{
+		m.emitEvent(ctx, EventTypeError, map[string]interface{}{
 			"error":  err.Error(),
 			"domain": domain,
 			"stage":  "certificate_parse_renewal",
@@ -583,7 +583,7 @@ func (m *LetsEncryptModule) renewCertificateForDomain(domain string) error {
 	m.certMutex.Unlock()
 
 	// Emit certificate renewed event
-	m.emitEvent(context.Background(), EventTypeCertificateRenewed, map[string]interface{}{
+	m.emitEvent(ctx, EventTypeCertificateRenewed, map[string]interface{}{
 		"domain": domain,
 	})
 

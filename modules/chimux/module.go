@@ -232,6 +232,12 @@ func (m *ChiMuxModule) Init(app modular.Application) error {
 		"base_path":         m.config.BasePath,
 	})
 
+	// Emit configuration validated event
+	m.emitEvent(ctx, EventTypeConfigValidated, map[string]interface{}{
+		"validation_status": "success",
+		"config_sections":   []string{"cors", "router", "middleware"},
+	})
+
 	m.logger.Info("Chimux module initialized")
 	return nil
 }
@@ -281,6 +287,9 @@ func (m *ChiMuxModule) initRouter() error {
 
 	// Apply CORS middleware using the configuration
 	m.router.Use(m.corsMiddleware())
+
+	// Apply request monitoring middleware for event emission
+	m.router.Use(m.requestMonitoringMiddleware())
 
 	// Emit CORS configured event
 	m.emitEvent(context.Background(), EventTypeCorsConfigured, map[string]interface{}{
@@ -735,6 +744,68 @@ func (m *ChiMuxModule) corsMiddleware() func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// requestMonitoringMiddleware creates a middleware that emits request events
+func (m *ChiMuxModule) requestMonitoringMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Emit request received event
+			m.emitEvent(r.Context(), EventTypeRequestReceived, map[string]interface{}{
+				"method":      r.Method,
+				"path":        r.URL.Path,
+				"remote_addr": r.RemoteAddr,
+				"user_agent":  r.UserAgent(),
+			})
+
+			// Wrap response writer to capture status code
+			wrapper := &responseWriterWrapper{ResponseWriter: w, statusCode: 200}
+
+			// Process request
+			defer func() {
+				if err := recover(); err != nil {
+					// Emit request failed event for panics
+					m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+						"method":      r.Method,
+						"path":        r.URL.Path,
+						"error":       fmt.Sprintf("%v", err),
+						"status_code": 500,
+					})
+					panic(err) // Re-panic to maintain behavior
+				} else {
+					// Emit request processed event for successful requests
+					m.emitEvent(r.Context(), EventTypeRequestProcessed, map[string]interface{}{
+						"method":      r.Method,
+						"path":        r.URL.Path,
+						"status_code": wrapper.statusCode,
+					})
+				}
+			}()
+
+			next.ServeHTTP(wrapper, r)
+
+			// Check for error status codes
+			if wrapper.statusCode >= 400 {
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"method":      r.Method,
+					"path":        r.URL.Path,
+					"status_code": wrapper.statusCode,
+					"error":       "HTTP error status",
+				})
+			}
+		})
+	}
+}
+
+// responseWriterWrapper wraps http.ResponseWriter to capture status code
+type responseWriterWrapper struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *responseWriterWrapper) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
 }
 
 // RegisterObservers implements the ObservableModule interface.

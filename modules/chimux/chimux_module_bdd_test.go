@@ -840,7 +840,7 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleValidatesTheConfiguration() erro
 	err := config.Validate()
 	validationResult := "success"
 	configValid := true
-	
+
 	if err != nil {
 		validationResult = "failed"
 		configValid = false
@@ -850,7 +850,7 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleValidatesTheConfiguration() erro
 	ctx.module.emitEvent(context.Background(), EventTypeConfigValidated, map[string]interface{}{
 		"validation_result": validationResult,
 		"config_valid":      configValid,
-		"error":            err,
+		"error":             err,
 	})
 
 	return nil
@@ -889,7 +889,7 @@ func (ctx *ChiMuxBDDTestContext) theRouterIsStarted() error {
 	if ctx.module == nil {
 		return fmt.Errorf("chimux module not available")
 	}
-	
+
 	return ctx.module.Start(context.Background())
 }
 
@@ -915,7 +915,7 @@ func (ctx *ChiMuxBDDTestContext) theRouterIsStopped() error {
 	if ctx.module == nil {
 		return fmt.Errorf("chimux module not available")
 	}
-	
+
 	return ctx.module.Stop(context.Background())
 }
 
@@ -991,7 +991,7 @@ func (ctx *ChiMuxBDDTestContext) iHaveMiddlewareAppliedToTheRouter() error {
 }
 
 func (ctx *ChiMuxBDDTestContext) iRemoveMiddlewareFromTheRouter() error {
-	// Chi router doesn't support runtime middleware removal  
+	// Chi router doesn't support runtime middleware removal
 	// Skip this test as the functionality is not implemented
 	return godog.ErrPending
 }
@@ -1030,11 +1030,14 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsStarted() error {
 }
 
 func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsStopped() error {
-	// ChiMux module stop functionality is handled by framework lifecycle  
+	// ChiMux module stop functionality is handled by framework lifecycle
 	// Test real module stop by calling the Stop method
 	if ctx.module != nil {
 		// ChiMuxModule implements Stoppable interface
-		return ctx.module.Stop(context.Background())
+		err := ctx.module.Stop(context.Background())
+		// Add small delay to allow for event processing
+		time.Sleep(10 * time.Millisecond)
+		return err
 	}
 	return fmt.Errorf("module not available for stop testing")
 }
@@ -1087,14 +1090,17 @@ func (ctx *ChiMuxBDDTestContext) iMakeAnHTTPRequestToTheRouter() error {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("test response"))
 		})
-		
+
 		// Create a test request
 		req := httptest.NewRequest("GET", "/test-request", nil)
 		recorder := httptest.NewRecorder()
-		
+
 		// Process the request through the router - this should emit real events
 		ctx.module.router.ServeHTTP(recorder, req)
-		
+
+		// Add small delay to allow for event processing
+		time.Sleep(10 * time.Millisecond)
+
 		// Store response for validation
 		ctx.lastResponse = recorder
 	}
@@ -1166,14 +1172,17 @@ func (ctx *ChiMuxBDDTestContext) iMakeARequestThatCausesAFailure() error {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("Internal Server Error"))
 		})
-		
+
 		// Create a test request
 		req := httptest.NewRequest("GET", "/failing-route", nil)
 		recorder := httptest.NewRecorder()
-		
+
 		// Process the request through the router - this should emit real failure events
 		ctx.module.router.ServeHTTP(recorder, req)
-		
+
+		// Add small delay to allow for event processing
+		time.Sleep(10 * time.Millisecond)
+
 		// Store response for validation
 		ctx.lastResponse = recorder
 	}
@@ -1423,17 +1432,17 @@ func (l *testLogger) Error(msg string, keysAndValues ...interface{}) {}
 func (ctx *ChiMuxBDDTestContext) allRegisteredEventsShouldBeEmittedDuringTesting() error {
 	// Get all registered event types from the module
 	registeredEvents := ctx.module.GetRegisteredEventTypes()
-	
+
 	// Create event validation observer
 	validator := modular.NewEventValidationObserver("event-validator", registeredEvents)
 	_ = validator // Use validator to avoid unused variable error
-	
+
 	// Check which events were emitted during testing
 	emittedEvents := make(map[string]bool)
 	for _, event := range ctx.eventObserver.GetEvents() {
 		emittedEvents[event.Type()] = true
 	}
-	
+
 	// Check for missing events
 	var missingEvents []string
 	for _, eventType := range registeredEvents {
@@ -1441,10 +1450,10 @@ func (ctx *ChiMuxBDDTestContext) allRegisteredEventsShouldBeEmittedDuringTesting
 			missingEvents = append(missingEvents, eventType)
 		}
 	}
-	
+
 	if len(missingEvents) > 0 {
 		return fmt.Errorf("the following registered events were not emitted during testing: %v", missingEvents)
 	}
-	
+
 	return nil
 }

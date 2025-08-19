@@ -134,7 +134,7 @@ func (ctx *EventBusBDDTestContext) iHaveAModularApplicationWithEventbusModuleCon
 
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 
 	// Create and register eventbus module
 	ctx.module = NewModule().(*EventBusModule)
@@ -1099,7 +1099,7 @@ func (ctx *EventBusBDDTestContext) iHaveAMultiEngineEventbusConfiguration() erro
 	// Create and configure application
 	logger := &testLogger{}
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 	ctx.app.RegisterConfigSection("eventbus", modular.NewStdConfigProvider(config))
 
 	ctx.module = NewModule().(*EventBusModule)
@@ -1242,7 +1242,7 @@ func (ctx *EventBusBDDTestContext) iConfigureEventbusToUseCustomEngine() error {
 
 	logger := &testLogger{}
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	app := modular.NewStdApplication(mainConfigProvider, logger)
+	app := modular.NewObservableApplication(mainConfigProvider, logger)
 	app.RegisterConfigSection("eventbus", modular.NewStdConfigProvider(config))
 
 	module := NewModule().(*EventBusModule)
@@ -2010,7 +2010,7 @@ func (ctx *EventBusBDDTestContext) setupApplicationWithConfig() error {
 
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 
 	// Create and register eventbus module
 	ctx.module = NewModule().(*EventBusModule)

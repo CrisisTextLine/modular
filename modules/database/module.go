@@ -323,7 +323,7 @@ func (l *lazyDefaultService) Begin() (*sql.Tx, error) {
 	}, nil)
 
 	go func() {
-		if emitErr := l.module.EmitEvent(context.Background(), event); emitErr != nil {
+		if emitErr := l.module.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
 			fmt.Printf("Failed to emit transaction started event: %v\n", emitErr)
 		}
 	}()
@@ -502,7 +502,7 @@ func (m *Module) Init(app modular.Application) error {
 	}, nil)
 
 	go func() {
-		if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
 			fmt.Printf("Failed to emit config loaded event: %v\n", emitErr)
 		}
 	}()
@@ -721,7 +721,7 @@ func (m *Module) initializeConnections() error {
 				}, nil)
 
 				go func() {
-					if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+					if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
 						fmt.Printf("Failed to emit database connection failed event: %v\n", emitErr)
 					}
 				}()
@@ -736,7 +736,7 @@ func (m *Module) initializeConnections() error {
 			}, nil)
 
 			go func() {
-				if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+				if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
 					fmt.Printf("Failed to emit database connected event: %v\n", emitErr)
 				}
 			}()

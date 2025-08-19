@@ -101,7 +101,7 @@ func (ctx *CacheBDDTestContext) iHaveAModularApplicationWithCacheModuleConfigure
 
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
 
 	// Create and register cache module
 	ctx.module = NewModule().(*CacheModule)
@@ -495,7 +495,7 @@ func (ctx *CacheBDDTestContext) theCacheModuleAttemptsToStart() error {
 
 	// Create app with empty main config
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	app := modular.NewStdApplication(mainConfigProvider, logger)
+	app := modular.NewObservableApplication(mainConfigProvider, logger)
 
 	// Create and register cache module
 	module := NewModule().(*CacheModule)

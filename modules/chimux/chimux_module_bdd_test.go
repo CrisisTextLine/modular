@@ -811,15 +811,34 @@ func (ctx *ChiMuxBDDTestContext) iHaveAChimuxConfigurationWithValidationRequirem
 }
 
 func (ctx *ChiMuxBDDTestContext) theChimuxModuleValidatesTheConfiguration() error {
-	// In a real scenario, this would trigger config validation
-	// For BDD purposes, we'll simulate the validation event emission
-	if ctx.eventObserver != nil {
-		event := modular.NewCloudEvent(EventTypeConfigValidated, "chimux-service", map[string]interface{}{
-			"validation_result": "success",
-			"config_valid":      true,
-		}, nil)
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// Trigger real configuration validation by accessing the module's config validation
+	if ctx.module == nil {
+		return fmt.Errorf("chimux module not available")
 	}
+
+	// Get the current configuration
+	config := ctx.module.config
+	if config == nil {
+		return fmt.Errorf("chimux configuration not loaded")
+	}
+
+	// Perform actual validation and emit event based on result
+	err := config.Validate()
+	validationResult := "success"
+	configValid := true
+	
+	if err != nil {
+		validationResult = "failed"
+		configValid = false
+	}
+
+	// Emit the validation event (this is real, not simulated)
+	ctx.module.emitEvent(context.Background(), EventTypeConfigValidated, map[string]interface{}{
+		"validation_result": validationResult,
+		"config_valid":      configValid,
+		"error":            err,
+	})
+
 	return nil
 }
 
@@ -852,15 +871,12 @@ func (ctx *ChiMuxBDDTestContext) theEventShouldContainValidationResults() error 
 }
 
 func (ctx *ChiMuxBDDTestContext) theRouterIsStarted() error {
-	// Emit router started event for testing
-	if ctx.eventObserver != nil {
-		event := modular.NewCloudEvent(EventTypeRouterStarted, "chimux-service", map[string]interface{}{
-			"router_status": "started",
-			"start_time":    time.Now(),
-		}, nil)
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// Call the actual Start() method which will emit the RouterStarted event
+	if ctx.module == nil {
+		return fmt.Errorf("chimux module not available")
 	}
-	return nil
+	
+	return ctx.module.Start(context.Background())
 }
 
 func (ctx *ChiMuxBDDTestContext) aRouterStartedEventShouldBeEmitted() error {
@@ -881,15 +897,12 @@ func (ctx *ChiMuxBDDTestContext) aRouterStartedEventShouldBeEmitted() error {
 }
 
 func (ctx *ChiMuxBDDTestContext) theRouterIsStopped() error {
-	// Emit router stopped event for testing
-	if ctx.eventObserver != nil {
-		event := modular.NewCloudEvent(EventTypeRouterStopped, "chimux-service", map[string]interface{}{
-			"router_status": "stopped",
-			"stop_time":     time.Now(),
-		}, nil)
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// Call the actual Stop() method which will emit the RouterStopped event
+	if ctx.module == nil {
+		return fmt.Errorf("chimux module not available")
 	}
-	return nil
+	
+	return ctx.module.Stop(context.Background())
 }
 
 func (ctx *ChiMuxBDDTestContext) aRouterStoppedEventShouldBeEmitted() error {

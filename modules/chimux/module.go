@@ -354,6 +354,14 @@ func (m *ChiMuxModule) Start(ctx context.Context) error {
 	// Load tenant configurations now that it's safe to do so
 	m.loadTenantConfigs()
 
+	// Emit router started event (router is ready to handle requests)
+	m.emitEvent(ctx, EventTypeRouterStarted, map[string]interface{}{
+		"router_status": "started",
+		"start_time":    time.Now(),
+		"tenant_count":  len(m.tenantConfigs),
+		"base_path":     m.config.BasePath,
+	})
+
 	// Emit module started event
 	m.emitEvent(ctx, EventTypeModuleStarted, map[string]interface{}{
 		"tenant_count":     len(m.tenantConfigs),
@@ -371,6 +379,13 @@ func (m *ChiMuxModule) Start(ctx context.Context) error {
 // HTTP server module.
 func (m *ChiMuxModule) Stop(ctx context.Context) error {
 	m.logger.Info("Stopping chimux module")
+
+	// Emit router stopped event (router is shutting down)
+	m.emitEvent(ctx, EventTypeRouterStopped, map[string]interface{}{
+		"router_status": "stopped",
+		"stop_time":     time.Now(),
+		"tenant_count":  len(m.tenantConfigs),
+	})
 
 	// Emit module stopped event
 	m.emitEvent(ctx, EventTypeModuleStopped, map[string]interface{}{

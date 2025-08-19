@@ -33,4 +33,3 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 )
 
-replace github.com/CrisisTextLine/modular => .

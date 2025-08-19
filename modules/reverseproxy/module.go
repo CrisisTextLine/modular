@@ -670,7 +670,7 @@ func (m *ReverseProxyModule) loadTenantConfigs() {
 	}
 
 	// Ensure we have a tenant application reference (tests may call this before Init)
-	var ta modular.TenantApplication = m.tenantApp
+	ta := m.tenantApp
 	if ta == nil {
 		if cast, ok := any(m.app).(modular.TenantApplication); ok {
 			ta = cast

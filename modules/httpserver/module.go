@@ -634,7 +634,7 @@ func (m *HTTPServerModule) EmitEvent(ctx context.Context, event cloudevents.Even
 	// For request events, emit synchronously to ensure immediate delivery in tests
 	if event.Type() == EventTypeRequestReceived || event.Type() == EventTypeRequestHandled {
 		// Use a stable background context to avoid propagation issues with request-scoped cancellation
-		ctx = modular.WithSynchronousNotification(context.Background())
+		ctx = modular.WithSynchronousNotification(ctx)
 		if err := subject.NotifyObservers(ctx, event); err != nil {
 			return fmt.Errorf("failed to notify observers for event %s: %w", event.Type(), err)
 		}
@@ -665,7 +665,7 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 			"user_agent":  r.UserAgent(),
 		}, nil)
 		// Request events should be delivered synchronously; set hint via a background context to avoid cancellation
-		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), requestReceivedEvent); emitErr != nil {
+		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(r.Context()), requestReceivedEvent); emitErr != nil {
 			// Temporary diagnostic to understand why events may not be observed in tests
 			//nolint:forbidigo
 			fmt.Println("[httpserver] DEBUG: failed to emit request.received:", emitErr)
@@ -698,7 +698,7 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 			"remote_addr": r.RemoteAddr,
 		}, nil)
 		// Request events should be delivered synchronously; set hint via a background context to avoid cancellation
-		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), requestHandledEvent); emitErr != nil {
+		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(r.Context()), requestHandledEvent); emitErr != nil {
 			//nolint:forbidigo
 			fmt.Println("[httpserver] DEBUG: failed to emit request.handled:", emitErr)
 			if m.logger != nil {

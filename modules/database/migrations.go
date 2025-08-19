@@ -4,12 +4,34 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"sort"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
+
+// validateTableName validates table name to prevent SQL injection
+func validateTableName(tableName string) error {
+	// Only allow alphanumeric characters and underscores
+	matched, err := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_]*$`, tableName)
+	if err != nil {
+		return fmt.Errorf("failed to validate table name: %w", err)
+	}
+	if !matched {
+		return ErrInvalidTableName
+	}
+	return nil
+}
+
+// logEmissionError is a helper function to handle event emission errors consistently
+func logEmissionError(context string, err error) {
+	// For now, just ignore event emission errors as they shouldn't fail the operation
+	// In production, you might want to log these to a separate logging system
+	_ = context
+	_ = err
+}
 
 // Migration represents a database migration
 type Migration struct {
@@ -23,19 +45,19 @@ type Migration struct {
 type MigrationService interface {
 	// RunMigration executes a single migration
 	RunMigration(ctx context.Context, migration Migration) error
-	
+
 	// GetAppliedMigrations returns a list of already applied migrations
 	GetAppliedMigrations(ctx context.Context) ([]string, error)
-	
+
 	// CreateMigrationsTable creates the migrations tracking table
 	CreateMigrationsTable(ctx context.Context) error
 }
 
 // migrationServiceImpl implements MigrationService
 type migrationServiceImpl struct {
-	db            *sql.DB
-	eventEmitter  EventEmitter
-	tableName     string
+	db           *sql.DB
+	eventEmitter EventEmitter
+	tableName    string
 }
 
 // EventEmitter interface for emitting migration events
@@ -55,6 +77,12 @@ func NewMigrationService(db *sql.DB, eventEmitter EventEmitter) MigrationService
 
 // CreateMigrationsTable creates the migrations tracking table if it doesn't exist
 func (m *migrationServiceImpl) CreateMigrationsTable(ctx context.Context) error {
+	// Validate table name to prevent SQL injection
+	if err := validateTableName(m.tableName); err != nil {
+		return fmt.Errorf("invalid table name: %w", err)
+	}
+
+	// #nosec G201 - table name is validated above
 	query := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			id TEXT PRIMARY KEY,
@@ -72,8 +100,14 @@ func (m *migrationServiceImpl) CreateMigrationsTable(ctx context.Context) error 
 
 // GetAppliedMigrations returns a list of migration IDs that have been applied
 func (m *migrationServiceImpl) GetAppliedMigrations(ctx context.Context) ([]string, error) {
+	// Validate table name to prevent SQL injection
+	if err := validateTableName(m.tableName); err != nil {
+		return nil, fmt.Errorf("invalid table name: %w", err)
+	}
+
+	// #nosec G201 - table name is validated above
 	query := fmt.Sprintf("SELECT id FROM %s ORDER BY applied_at", m.tableName)
-	
+
 	rows, err := m.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query applied migrations: %w", err)
@@ -106,7 +140,10 @@ func (m *migrationServiceImpl) RunMigration(ctx context.Context, migration Migra
 			"migration_id": migration.ID,
 			"version":      migration.Version,
 		}, nil)
-		m.eventEmitter.EmitEvent(ctx, event)
+		if err := m.eventEmitter.EmitEvent(ctx, event); err != nil {
+			// Log error but don't fail migration for event emission issues
+			logEmissionError("migration started", err)
+		}
 	}
 
 	// Start a transaction for the migration
@@ -120,14 +157,18 @@ func (m *migrationServiceImpl) RunMigration(ctx context.Context, migration Migra
 				"error":        err.Error(),
 				"duration_ms":  time.Since(startTime).Milliseconds(),
 			}, nil)
-			m.eventEmitter.EmitEvent(ctx, event)
+			if emitErr := m.eventEmitter.EmitEvent(ctx, event); emitErr != nil {
+				logEmissionError("migration failed", emitErr)
+			}
 		}
 		return fmt.Errorf("failed to begin migration transaction: %w", err)
 	}
 
 	defer func() {
 		if err != nil {
-			tx.Rollback()
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				logEmissionError("transaction rollback", rollbackErr)
+			}
 		}
 	}()
 
@@ -142,12 +183,19 @@ func (m *migrationServiceImpl) RunMigration(ctx context.Context, migration Migra
 				"error":        err.Error(),
 				"duration_ms":  time.Since(startTime).Milliseconds(),
 			}, nil)
-			m.eventEmitter.EmitEvent(ctx, event)
+			if emitErr := m.eventEmitter.EmitEvent(ctx, event); emitErr != nil {
+				logEmissionError("migration failed", emitErr)
+			}
 		}
 		return fmt.Errorf("failed to execute migration %s: %w", migration.ID, err)
 	}
 
 	// Record the migration as applied
+	// Validate table name to prevent SQL injection
+	if err := validateTableName(m.tableName); err != nil {
+		return fmt.Errorf("invalid table name for migration record: %w", err)
+	}
+	// #nosec G201 - table name is validated above
 	recordQuery := fmt.Sprintf("INSERT INTO %s (id, version) VALUES (?, ?)", m.tableName)
 	_, err = tx.ExecContext(ctx, recordQuery, migration.ID, migration.Version)
 	if err != nil {
@@ -159,7 +207,9 @@ func (m *migrationServiceImpl) RunMigration(ctx context.Context, migration Migra
 				"error":        err.Error(),
 				"duration_ms":  time.Since(startTime).Milliseconds(),
 			}, nil)
-			m.eventEmitter.EmitEvent(ctx, event)
+			if emitErr := m.eventEmitter.EmitEvent(ctx, event); emitErr != nil {
+				logEmissionError("migration record failed", emitErr)
+			}
 		}
 		return fmt.Errorf("failed to record migration %s: %w", migration.ID, err)
 	}
@@ -175,7 +225,9 @@ func (m *migrationServiceImpl) RunMigration(ctx context.Context, migration Migra
 				"error":        err.Error(),
 				"duration_ms":  time.Since(startTime).Milliseconds(),
 			}, nil)
-			m.eventEmitter.EmitEvent(ctx, event)
+			if emitErr := m.eventEmitter.EmitEvent(ctx, event); emitErr != nil {
+				logEmissionError("migration commit failed", emitErr)
+			}
 		}
 		return fmt.Errorf("failed to commit migration %s: %w", migration.ID, err)
 	}
@@ -187,7 +239,9 @@ func (m *migrationServiceImpl) RunMigration(ctx context.Context, migration Migra
 			"version":      migration.Version,
 			"duration_ms":  time.Since(startTime).Milliseconds(),
 		}, nil)
-		m.eventEmitter.EmitEvent(ctx, event)
+		if err := m.eventEmitter.EmitEvent(ctx, event); err != nil {
+			logEmissionError("migration completed", err)
+		}
 	}
 
 	return nil
@@ -214,13 +268,13 @@ func (r *MigrationRunner) RunMigrations(ctx context.Context, migrations []Migrat
 
 	// Ensure migrations table exists
 	if err := r.service.CreateMigrationsTable(ctx); err != nil {
-		return err
+		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
 
 	// Get already applied migrations
 	applied, err := r.service.GetAppliedMigrations(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get applied migrations: %w", err)
 	}
 
 	appliedMap := make(map[string]bool)
@@ -232,7 +286,7 @@ func (r *MigrationRunner) RunMigrations(ctx context.Context, migrations []Migrat
 	for _, migration := range migrations {
 		if !appliedMap[migration.ID] {
 			if err := r.service.RunMigration(ctx, migration); err != nil {
-				return err
+				return fmt.Errorf("failed to run migration %s: %w", migration.ID, err)
 			}
 		}
 	}

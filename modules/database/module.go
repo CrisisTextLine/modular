@@ -337,7 +337,10 @@ func (l *lazyDefaultService) CommitTransaction(ctx context.Context, tx *sql.Tx) 
 	if service == nil {
 		return ErrNoDefaultService
 	}
-	return service.CommitTransaction(ctx, tx)
+	if err := service.CommitTransaction(ctx, tx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	return nil
 }
 
 // RollbackTransaction rolls back a transaction and emits appropriate events
@@ -346,7 +349,10 @@ func (l *lazyDefaultService) RollbackTransaction(ctx context.Context, tx *sql.Tx
 	if service == nil {
 		return ErrNoDefaultService
 	}
-	return service.RollbackTransaction(ctx, tx)
+	if err := service.RollbackTransaction(ctx, tx); err != nil {
+		return fmt.Errorf("failed to rollback transaction: %w", err)
+	}
+	return nil
 }
 
 // Migration methods for lazyDefaultService
@@ -356,7 +362,10 @@ func (l *lazyDefaultService) RunMigration(ctx context.Context, migration Migrati
 	if service == nil {
 		return ErrNoDefaultService
 	}
-	return service.RunMigration(ctx, migration)
+	if err := service.RunMigration(ctx, migration); err != nil {
+		return fmt.Errorf("failed to run migration: %w", err)
+	}
+	return nil
 }
 
 func (l *lazyDefaultService) GetAppliedMigrations(ctx context.Context) ([]string, error) {
@@ -364,7 +373,11 @@ func (l *lazyDefaultService) GetAppliedMigrations(ctx context.Context) ([]string
 	if service == nil {
 		return nil, ErrNoDefaultService
 	}
-	return service.GetAppliedMigrations(ctx)
+	migrations, err := service.GetAppliedMigrations(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get applied migrations: %w", err)
+	}
+	return migrations, nil
 }
 
 func (l *lazyDefaultService) CreateMigrationsTable(ctx context.Context) error {
@@ -372,7 +385,10 @@ func (l *lazyDefaultService) CreateMigrationsTable(ctx context.Context) error {
 	if service == nil {
 		return ErrNoDefaultService
 	}
-	return service.CreateMigrationsTable(ctx)
+	if err := service.CreateMigrationsTable(ctx); err != nil {
+		return fmt.Errorf("failed to create migrations table: %w", err)
+	}
+	return nil
 }
 
 func (l *lazyDefaultService) SetEventEmitter(emitter EventEmitter) {

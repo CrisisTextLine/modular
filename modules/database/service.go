@@ -318,7 +318,7 @@ func (s *databaseServiceImpl) Begin() (*sql.Tx, error) {
 // CommitTransaction commits a transaction and emits appropriate events
 func (s *databaseServiceImpl) CommitTransaction(ctx context.Context, tx *sql.Tx) error {
 	if tx == nil {
-		return fmt.Errorf("transaction cannot be nil")
+		return ErrTransactionNil
 	}
 
 	startTime := time.Now()
@@ -350,7 +350,7 @@ func (s *databaseServiceImpl) CommitTransaction(ctx context.Context, tx *sql.Tx)
 // RollbackTransaction rolls back a transaction and emits appropriate events
 func (s *databaseServiceImpl) RollbackTransaction(ctx context.Context, tx *sql.Tx) error {
 	if tx == nil {
-		return fmt.Errorf("transaction cannot be nil")
+		return ErrTransactionNil
 	}
 
 	startTime := time.Now()
@@ -408,21 +408,28 @@ func (s *databaseServiceImpl) SetEventEmitter(emitter EventEmitter) {
 
 func (s *databaseServiceImpl) RunMigration(ctx context.Context, migration Migration) error {
 	if s.migrationService == nil {
-		return fmt.Errorf("migration service not initialized")
+		return ErrMigrationServiceNotInitialized
 	}
-	return s.migrationService.RunMigration(ctx, migration)
+	return fmt.Errorf("failed to run migration: %w", s.migrationService.RunMigration(ctx, migration))
 }
 
 func (s *databaseServiceImpl) GetAppliedMigrations(ctx context.Context) ([]string, error) {
 	if s.migrationService == nil {
-		return nil, fmt.Errorf("migration service not initialized")
+		return nil, ErrMigrationServiceNotInitialized
 	}
-	return s.migrationService.GetAppliedMigrations(ctx)
+	migrations, err := s.migrationService.GetAppliedMigrations(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get applied migrations: %w", err)
+	}
+	return migrations, nil
 }
 
 func (s *databaseServiceImpl) CreateMigrationsTable(ctx context.Context) error {
 	if s.migrationService == nil {
-		return fmt.Errorf("migration service not initialized")
+		return ErrMigrationServiceNotInitialized
 	}
-	return s.migrationService.CreateMigrationsTable(ctx)
+	if err := s.migrationService.CreateMigrationsTable(ctx); err != nil {
+		return fmt.Errorf("failed to create migrations table: %w", err)
+	}
+	return nil
 }

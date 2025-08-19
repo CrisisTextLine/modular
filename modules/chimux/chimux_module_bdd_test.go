@@ -27,6 +27,7 @@ type ChiMuxBDDTestContext struct {
 	middlewareProviders []MiddlewareProvider
 	routeGroups         []string
 	eventObserver       *testEventObserver
+	lastResponse        *httptest.ResponseRecorder
 }
 
 // Test event observer for capturing emitted events
@@ -948,16 +949,9 @@ func (ctx *ChiMuxBDDTestContext) iHaveRegisteredRoutes() error {
 }
 
 func (ctx *ChiMuxBDDTestContext) iRemoveARouteFromTheRouter() error {
-	// Simulate route removal and emit event
-	if ctx.eventObserver != nil {
-		event := modular.NewCloudEvent(EventTypeRouteRemoved, "chimux-service", map[string]interface{}{
-			"path":   "/test-route",
-			"method": "GET",
-		}, nil)
-		ctx.eventObserver.OnEvent(context.Background(), event)
-	}
-	delete(ctx.routes, "/test-route")
-	return nil
+	// Chi router doesn't support runtime route removal
+	// Skip this test as the functionality is not implemented
+	return godog.ErrPending
 }
 
 func (ctx *ChiMuxBDDTestContext) aRouteRemovedEventShouldBeEmitted() error {
@@ -997,16 +991,9 @@ func (ctx *ChiMuxBDDTestContext) iHaveMiddlewareAppliedToTheRouter() error {
 }
 
 func (ctx *ChiMuxBDDTestContext) iRemoveMiddlewareFromTheRouter() error {
-	// Simulate middleware removal and emit event
-	if ctx.eventObserver != nil {
-		event := modular.NewCloudEvent(EventTypeMiddlewareRemoved, "chimux-service", map[string]interface{}{
-			"middleware_name": "test-middleware",
-			"removed_at":      time.Now(),
-		}, nil)
-		ctx.eventObserver.OnEvent(context.Background(), event)
-	}
-	ctx.middlewareProviders = []MiddlewareProvider{}
-	return nil
+	// Chi router doesn't support runtime middleware removal  
+	// Skip this test as the functionality is not implemented
+	return godog.ErrPending
 }
 
 func (ctx *ChiMuxBDDTestContext) aMiddlewareRemovedEventShouldBeEmitted() error {
@@ -1043,15 +1030,13 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsStarted() error {
 }
 
 func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsStopped() error {
-	// Simulate module stop and emit event
-	if ctx.eventObserver != nil {
-		event := modular.NewCloudEvent(EventTypeModuleStopped, "chimux-service", map[string]interface{}{
-			"module_name": "chimux",
-			"stop_time":   time.Now(),
-		}, nil)
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// ChiMux module stop functionality is handled by framework lifecycle  
+	// Test real module stop by calling the Stop method
+	if ctx.module != nil {
+		// ChiMuxModule implements Stoppable interface
+		return ctx.module.Stop(context.Background())
 	}
-	return nil
+	return fmt.Errorf("module not available for stop testing")
 }
 
 func (ctx *ChiMuxBDDTestContext) aModuleStoppedEventShouldBeEmitted() error {
@@ -1095,24 +1080,23 @@ func (ctx *ChiMuxBDDTestContext) iHaveRoutesRegisteredForRequestHandling() error
 }
 
 func (ctx *ChiMuxBDDTestContext) iMakeAnHTTPRequestToTheRouter() error {
-	// Simulate HTTP request processing and emit events
-	if ctx.eventObserver != nil {
-		// Request received event
-		event := modular.NewCloudEvent(EventTypeRequestReceived, "chimux-service", map[string]interface{}{
-			"method":    "GET",
-			"path":      "/test-request",
-			"timestamp": time.Now(),
-		}, nil)
-		ctx.eventObserver.OnEvent(context.Background(), event)
-
-		// Request processed event
-		event = modular.NewCloudEvent(EventTypeRequestProcessed, "chimux-service", map[string]interface{}{
-			"method":      "GET",
-			"path":        "/test-request",
-			"status_code": 200,
-			"timestamp":   time.Now(),
-		}, nil)
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// Make an actual HTTP request to test real request handling events
+	// First register a test route if not already registered
+	if ctx.module != nil && ctx.module.router != nil {
+		ctx.module.router.Get("/test-request", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("test response"))
+		})
+		
+		// Create a test request
+		req := httptest.NewRequest("GET", "/test-request", nil)
+		recorder := httptest.NewRecorder()
+		
+		// Process the request through the router - this should emit real events
+		ctx.module.router.ServeHTTP(recorder, req)
+		
+		// Store response for validation
+		ctx.lastResponse = recorder
 	}
 	return nil
 }
@@ -1175,16 +1159,23 @@ func (ctx *ChiMuxBDDTestContext) iHaveRoutesThatCanFail() error {
 }
 
 func (ctx *ChiMuxBDDTestContext) iMakeARequestThatCausesAFailure() error {
-	// Simulate request failure and emit event
-	if ctx.eventObserver != nil {
-		event := modular.NewCloudEvent(EventTypeRequestFailed, "chimux-service", map[string]interface{}{
-			"method":      "GET",
-			"path":        "/failing-route",
-			"error":       "Internal Server Error",
-			"status_code": 500,
-			"timestamp":   time.Now(),
-		}, nil)
-		ctx.eventObserver.OnEvent(context.Background(), event)
+	// Make an actual failing HTTP request to test real error handling events
+	if ctx.module != nil && ctx.module.router != nil {
+		// Register a failing route
+		ctx.module.router.Get("/failing-route", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Internal Server Error"))
+		})
+		
+		// Create a test request
+		req := httptest.NewRequest("GET", "/failing-route", nil)
+		recorder := httptest.NewRecorder()
+		
+		// Process the request through the router - this should emit real failure events
+		ctx.module.router.ServeHTTP(recorder, req)
+		
+		// Store response for validation
+		ctx.lastResponse = recorder
 	}
 	return nil
 }

@@ -196,7 +196,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		go s.worker(i)
 
 		// Emit worker started event
-		s.emitEvent(context.Background(), EventTypeWorkerStarted, map[string]interface{}{
+		s.emitEvent(context.WithValue(ctx, "worker_id", i), EventTypeWorkerStarted, map[string]interface{}{
 			"worker_id":     i,
 			"total_workers": s.workerCount,
 		})
@@ -216,7 +216,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.isStarted = true
 
 	// Emit scheduler started event
-	s.emitEvent(context.Background(), EventTypeSchedulerStarted, map[string]interface{}{
+	s.emitEvent(context.WithValue(ctx, "scheduler", "started"), EventTypeSchedulerStarted, map[string]interface{}{
 		"worker_count":   s.workerCount,
 		"queue_size":     s.queueSize,
 		"check_interval": s.checkInterval.String(),
@@ -273,7 +273,7 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 	s.isStarted = false
 
 	// Emit scheduler stopped event
-	s.emitEvent(context.Background(), EventTypeSchedulerStopped, map[string]interface{}{
+	s.emitEvent(context.WithValue(ctx, "scheduler", "stopped"), EventTypeSchedulerStopped, map[string]interface{}{
 		"worker_count": s.workerCount,
 	})
 

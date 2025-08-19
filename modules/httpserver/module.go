@@ -182,7 +182,7 @@ func (m *HTTPServerModule) Init(app modular.Application) error {
 			"read_timeout": m.config.ReadTimeout.String(),
 			"tls_enabled":  m.config.TLS != nil && m.config.TLS.Enabled,
 		}, nil)
-		if err := m.EmitEvent(context.Background(), cfgEvent); err != nil {
+		if err := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), cfgEvent); err != nil {
 			m.logger.Debug("Failed to emit httpserver config loaded event", "error", err)
 		}
 	}

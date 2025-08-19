@@ -262,7 +262,7 @@ func (m *EventBusModule) Init(app modular.Application) error {
 	}, nil)
 
 	go func() {
-		if emitErr := m.EmitEvent(context.Background(), event); emitErr != nil {
+		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
 			fmt.Printf("Failed to emit eventbus config loaded event: %v\n", emitErr)
 		}
 	}()

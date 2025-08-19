@@ -10,7 +10,7 @@ import (
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cucumber/godog"
-	_ "github.com/mattn/go-sqlite3" // Import SQLite driver for BDD tests
+	_ "modernc.org/sqlite" // Import pure-Go SQLite driver for BDD tests (works with CGO_DISABLED)
 )
 
 // Database BDD Test Context
@@ -91,7 +91,7 @@ func (ctx *DatabaseBDDTestContext) iHaveAModularApplicationWithDatabaseModuleCon
 	dbConfig := &Config{
 		Connections: map[string]*ConnectionConfig{
 			"default": {
-				Driver:             "sqlite3",
+				Driver:             "sqlite",
 				DSN:                ":memory:",
 				MaxOpenConnections: 10,
 				MaxIdleConnections: 5,
@@ -356,15 +356,15 @@ func (ctx *DatabaseBDDTestContext) connectionsShouldBeReusedProperly() error {
 	if ctx.service == nil {
 		return fmt.Errorf("database service not available for connection reuse test")
 	}
-	
+
 	// Execute multiple queries to test connection reuse
 	_, err1 := ctx.service.Query("SELECT 1")
 	_, err2 := ctx.service.Query("SELECT 2")
-	
+
 	if err1 != nil || err2 != nil {
 		return fmt.Errorf("consecutive queries failed, suggesting connection reuse issues: err1=%v, err2=%v", err1, err2)
 	}
-	
+
 	return nil
 }
 
@@ -413,7 +413,7 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnab
 	dbConfig := &Config{
 		Connections: map[string]*ConnectionConfig{
 			"default": {
-				Driver:             "sqlite3",
+				Driver:             "sqlite",
 				DSN:                ":memory:",
 				MaxOpenConnections: 10,
 				MaxIdleConnections: 5,
@@ -617,12 +617,12 @@ func (ctx *DatabaseBDDTestContext) theEventShouldContainErrorDetails() error {
 func (ctx *DatabaseBDDTestContext) theDatabaseModuleStarts() error {
 	// Clear previous events to focus on module start events
 	ctx.eventObserver.Reset()
-	
+
 	// Stop the current app if running
 	if ctx.app != nil {
 		_ = ctx.app.Stop()
 	}
-	
+
 	// Reset and restart the application to capture startup events
 	return ctx.iHaveADatabaseServiceWithEventObservationEnabled()
 }
@@ -697,7 +697,7 @@ func (ctx *DatabaseBDDTestContext) aDatabaseConnectionFailsWithInvalidCredential
 	// by directly triggering the connection error event emission.
 	// This is more realistic as it simulates what would happen in a real application
 	// when a database connection fails after being established.
-	
+
 	// Get the database module which should already be initialized
 	if ctx.module == nil {
 		return fmt.Errorf("database module not initialized")
@@ -707,7 +707,7 @@ func (ctx *DatabaseBDDTestContext) aDatabaseConnectionFailsWithInvalidCredential
 	// in case of connection failure (simulating a real connection error scenario)
 	event := modular.NewCloudEvent(EventTypeConnectionError, "database-service", map[string]interface{}{
 		"connection_name": "default",
-		"driver":          "sqlite3",
+		"driver":          "sqlite",
 		"error":           "simulated connection failure with invalid credentials",
 	}, nil)
 
@@ -717,7 +717,7 @@ func (ctx *DatabaseBDDTestContext) aDatabaseConnectionFailsWithInvalidCredential
 	if err != nil {
 		return fmt.Errorf("failed to emit connection error event: %w", err)
 	}
-	
+
 	// Give time for event processing
 	time.Sleep(50 * time.Millisecond)
 
@@ -761,7 +761,7 @@ func (ctx *DatabaseBDDTestContext) iHaveStartedADatabaseTransaction() error {
 		return fmt.Errorf("no database service available")
 	}
 
-	// Reset event observer to capture only this scenario's events  
+	// Reset event observer to capture only this scenario's events
 	ctx.eventObserver.Reset()
 
 	// Set the database module as the event emitter for the service
@@ -935,7 +935,7 @@ func (ctx *DatabaseBDDTestContext) aDatabaseMigrationCompletesSuccessfully() err
 	// Create a test migration that will complete successfully
 	migration := Migration{
 		ID:      "test-migration-002",
-		Version: "1.1.0", 
+		Version: "1.1.0",
 		SQL:     "CREATE TABLE IF NOT EXISTS completed_table (id INTEGER PRIMARY KEY, status TEXT DEFAULT 'completed')",
 		Up:      true,
 	}

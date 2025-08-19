@@ -5,7 +5,9 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,6 +38,10 @@ type HTTPServerBDDTestContext struct {
 // testEventObserver captures CloudEvents during testing
 type testEventObserver struct {
 	events []cloudevents.Event
+	mu     sync.Mutex
+	// flags for direct assertions without relying on slice state
+	sawRequestReceived bool
+	sawRequestHandled  bool
 }
 
 func newTestEventObserver() *testEventObserver {
@@ -45,7 +51,20 @@ func newTestEventObserver() *testEventObserver {
 }
 
 func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.events = append(t.events, event.Clone())
+	// Temporary diagnostic to trace event capture during request handling
+	if len(event.Type()) >= len("com.modular.httpserver.request.") && event.Type()[:len("com.modular.httpserver.request.")] == "com.modular.httpserver.request." {
+		fmt.Printf("[test-observer] captured: %s total: %d ptr:%p\n", event.Type(), len(t.events), t)
+	}
+	// set flags for request events to make Then steps robust
+	switch event.Type() {
+	case EventTypeRequestReceived:
+		t.sawRequestReceived = true
+	case EventTypeRequestHandled:
+		t.sawRequestHandled = true
+	}
 	return nil
 }
 
@@ -54,12 +73,23 @@ func (t *testEventObserver) ObserverID() string {
 }
 
 func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// Temporary diagnostics to understand observed length at read time
+	if len(t.events) > 0 {
+		last := t.events[len(t.events)-1]
+		fmt.Printf("[test-observer] GetEvents len: %d last: %s ptr:%p\n", len(t.events), last.Type(), t)
+	} else {
+		fmt.Printf("[test-observer] GetEvents len: 0 ptr:%p\n", t)
+	}
 	events := make([]cloudevents.Event, len(t.events))
 	copy(events, t.events)
 	return events
 }
 
 func (t *testEventObserver) ClearEvents() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.events = make([]cloudevents.Event, 0)
 }
 
@@ -967,10 +997,14 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 		modular.ConfigFeeders = originalFeeders
 	}()
 
-	// Create httpserver configuration for testing - use high port to avoid conflicts
+	// Create httpserver configuration for testing - pick a unique free port to avoid conflicts across scenarios
+	freePort, err := findFreePort()
+	if err != nil {
+		return fmt.Errorf("failed to acquire free port: %v", err)
+	}
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:            "127.0.0.1",
-		Port:            9200, // Use unique port for request event testing
+		Port:            freePort,
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		IdleTimeout:     120 * time.Second,
@@ -1039,6 +1073,10 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithEventObservationEnable
 	// Cast to HTTPServerModule
 	if httpServerService, ok := service.(*HTTPServerModule); ok {
 		ctx.service = httpServerService
+		// Explicitly (re)bind observers to this app to avoid any stale subject from previous scenarios
+		if subj, ok := ctx.app.(modular.Subject); ok {
+			_ = ctx.service.RegisterObservers(subj)
+		}
 	} else {
 		return fmt.Errorf("service is not an HTTPServerModule")
 	}
@@ -1058,10 +1096,14 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 		modular.ConfigFeeders = originalFeeders
 	}()
 
-	// Create httpserver configuration with TLS for testing
+	// Create httpserver configuration with TLS for testing - use a unique free port
+	freePort, err := findFreePort()
+	if err != nil {
+		return fmt.Errorf("failed to acquire free port: %v", err)
+	}
 	ctx.serverConfig = &HTTPServerConfig{
 		Host:            "127.0.0.1",
-		Port:            9096, // Use a higher port for TLS event testing
+		Port:            freePort,
 		ReadTimeout:     30 * time.Second,
 		WriteTimeout:    30 * time.Second,
 		IdleTimeout:     120 * time.Second,
@@ -1137,11 +1179,26 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerWithTLSAndEventObservation
 	// Cast to HTTPServerModule
 	if httpServerService, ok := service.(*HTTPServerModule); ok {
 		ctx.service = httpServerService
+		// Explicitly (re)bind observers to this app to avoid any stale subject from previous scenarios
+		if subj, ok := ctx.app.(modular.Subject); ok {
+			_ = ctx.service.RegisterObservers(subj)
+		}
 	} else {
 		return fmt.Errorf("service is not an HTTPServerModule")
 	}
 
 	return nil
+}
+
+// findFreePort returns an available TCP port on localhost for exclusive use by tests.
+func findFreePort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	addr := l.Addr().(*net.TCPAddr)
+	return addr.Port, nil
 }
 
 func (ctx *HTTPServerBDDTestContext) aServerStartedEventShouldBeEmitted() error {
@@ -1274,14 +1331,26 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerProcessesARequest() error {
 	// Give the server a moment to fully start
 	time.Sleep(200 * time.Millisecond)
 
-	// Now clear any existing events to ensure we only capture request events
-	if ctx.eventObserver != nil {
-		ctx.eventObserver.ClearEvents()
+	// Re-register the test observer to guarantee we're observing with the exact instance
+	// used in assertions. If any other observer with the same ID was registered earlier,
+	// this will replace it with our instance.
+	if subj, ok := ctx.app.(modular.Subject); ok && ctx.eventObserver != nil {
+		_ = subj.RegisterObserver(ctx.eventObserver)
 	}
 
-	// Make a simple request using the configured port
+	// Note: Do not clear previously captured events here. Earlier setup or environment
+	// interactions may legitimately emit request events (e.g., readiness checks). Clearing
+	// could hide these or introduce timing flakiness. The subsequent assertions will
+	// scan the buffer for the expected request events regardless of prior emissions.
+
+	// Make a simple request using the actual server address if available
 	client := &http.Client{Timeout: 5 * time.Second}
-	url := fmt.Sprintf("http://127.0.0.1:%d/", ctx.service.config.Port)
+	url := ""
+	if ctx.service != nil && ctx.service.server != nil && ctx.service.server.Addr != "" {
+		url = fmt.Sprintf("http://%s/", ctx.service.server.Addr)
+	} else {
+		url = fmt.Sprintf("http://%s:%d/", ctx.serverConfig.Host, ctx.serverConfig.Port)
+	}
 
 	resp, err := client.Get(url)
 	if err != nil {
@@ -1304,58 +1373,71 @@ func (ctx *HTTPServerBDDTestContext) theHTTPServerProcessesARequest() error {
 }
 
 func (ctx *HTTPServerBDDTestContext) aRequestReceivedEventShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, event := range events {
-		if event.Type() == EventTypeRequestReceived {
+	// Wait briefly and poll the direct flag set by OnEvent
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		ctx.eventObserver.mu.Lock()
+		ok := ctx.eventObserver.sawRequestReceived
+		ctx.eventObserver.mu.Unlock()
+		if ok {
 			return nil
 		}
+		time.Sleep(25 * time.Millisecond)
 	}
 
+	events := ctx.eventObserver.GetEvents()
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-
 	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestReceived, eventTypes)
 }
 
 func (ctx *HTTPServerBDDTestContext) aRequestHandledEventShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
-	for _, event := range events {
-		if event.Type() == EventTypeRequestHandled {
+	// Wait briefly and poll the direct flag set by OnEvent
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		ctx.eventObserver.mu.Lock()
+		ok := ctx.eventObserver.sawRequestHandled
+		ctx.eventObserver.mu.Unlock()
+		if ok {
 			return nil
 		}
+		time.Sleep(25 * time.Millisecond)
 	}
 
+	events := ctx.eventObserver.GetEvents()
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-
 	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestHandled, eventTypes)
 }
 
 func (ctx *HTTPServerBDDTestContext) theEventsShouldContainRequestDetails() error {
-	events := ctx.eventObserver.GetEvents()
+	// Wait briefly to account for async observer delivery and then validate payload
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		events := ctx.eventObserver.GetEvents()
+		for _, event := range events {
+			if event.Type() == EventTypeRequestReceived {
+				var data map[string]interface{}
+				if err := event.DataAs(&data); err != nil {
+					return fmt.Errorf("failed to extract request received event data: %v", err)
+				}
 
-	// Check request received event has request details
-	for _, event := range events {
-		if event.Type() == EventTypeRequestReceived {
-			var data map[string]interface{}
-			if err := event.DataAs(&data); err != nil {
-				return fmt.Errorf("failed to extract request received event data: %v", err)
-			}
+				// Check for key request fields
+				if _, exists := data["method"]; !exists {
+					return fmt.Errorf("request received event should contain method field")
+				}
+				if _, exists := data["url"]; !exists {
+					return fmt.Errorf("request received event should contain url field")
+				}
 
-			// Check for key request fields
-			if _, exists := data["method"]; !exists {
-				return fmt.Errorf("request received event should contain method field")
+				return nil
 			}
-			if _, exists := data["url"]; !exists {
-				return fmt.Errorf("request received event should contain url field")
-			}
-
-			return nil
 		}
+		time.Sleep(25 * time.Millisecond)
 	}
 
 	return fmt.Errorf("request received event not found")

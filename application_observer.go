@@ -89,7 +89,9 @@ func (app *ObservableApplication) NotifyObservers(ctx context.Context, event clo
 		return err
 	}
 
-	// Notify observers in goroutines to avoid blocking
+	// If the context requests synchronous delivery, invoke observers directly.
+	// Otherwise, notify observers in goroutines to avoid blocking.
+	synchronous := IsSynchronousNotification(ctx)
 	for _, registration := range app.observers {
 		registration := registration // capture for goroutine
 
@@ -98,7 +100,7 @@ func (app *ObservableApplication) NotifyObservers(ctx context.Context, event clo
 			continue // observer not interested in this event type
 		}
 
-		go func() {
+		notify := func() {
 			defer func() {
 				if r := recover(); r != nil {
 					app.logger.Error("Observer panicked", "observerID", registration.observer.ObserverID(), "event", event.Type(), "panic", r)
@@ -108,7 +110,13 @@ func (app *ObservableApplication) NotifyObservers(ctx context.Context, event clo
 			if err := registration.observer.OnEvent(ctx, event); err != nil {
 				app.logger.Error("Observer error", "observerID", registration.observer.ObserverID(), "event", event.Type(), "error", err)
 			}
-		}()
+		}
+
+		if synchronous {
+			notify()
+		} else {
+			go notify()
+		}
 	}
 
 	return nil

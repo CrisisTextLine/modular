@@ -143,6 +143,8 @@ type EventLoggerModule struct {
 	started   bool
 	mutex     sync.RWMutex
 	subject   modular.Subject
+	// observerRegistered ensures we only register with the subject once
+	observerRegistered bool
 }
 
 // NewModule creates a new instance of the event logger module.
@@ -221,12 +223,9 @@ func (m *EventLoggerModule) Init(app modular.Application) error {
 	m.eventChan = make(chan cloudevents.Event, m.config.BufferSize)
 	m.stopChan = make(chan struct{})
 
-	// Register this module instance as a service so it can be retrieved by tests and other modules
-	if err := app.RegisterService(ServiceName, m); err != nil {
-		return fmt.Errorf("failed to register eventlogger service: %w", err)
+	if m.logger != nil {
+		m.logger.Info("Event logger module initialized", "targets", len(m.outputs))
 	}
-
-	m.logger.Info("Event logger module initialized", "targets", len(m.outputs))
 
 	return nil
 }
@@ -353,28 +352,49 @@ func (m *EventLoggerModule) Constructor() modular.ModuleConstructor {
 // RegisterObservers implements the ObservableModule interface to auto-register
 // with the application as an observer.
 func (m *EventLoggerModule) RegisterObservers(subject modular.Subject) error {
-	m.logger.Debug("RegisterObservers called - setting subject")
+	// Set subject reference for emitting operational events later
 	m.subject = subject
 
-	if !m.config.Enabled {
-		m.logger.Info("Event logger is disabled, skipping observer registration")
+	// Avoid duplicate registrations
+	if m.observerRegistered {
+		if m.logger != nil {
+			m.logger.Debug("RegisterObservers called - already registered, skipping")
+		}
+		return nil
+	}
+
+	// If config isn't initialized yet (RegisterObservers can be called before Init),
+	// register for all events now; filtering will be applied during processing.
+	// Also guard logger usage when it's not available yet.
+	if m.config != nil && !m.config.Enabled {
+		if m.logger != nil {
+			m.logger.Info("Event logger is disabled, skipping observer registration")
+		}
+		m.observerRegistered = true // Consider as handled to avoid repeated attempts
 		return nil
 	}
 
 	// Register for all events or filtered events
-	if len(m.config.EventTypeFilters) == 0 {
-		err := subject.RegisterObserver(m)
+	var err error
+	if m.config != nil && len(m.config.EventTypeFilters) > 0 {
+		err = subject.RegisterObserver(m, m.config.EventTypeFilters...)
 		if err != nil {
 			return fmt.Errorf("failed to register event logger as observer: %w", err)
 		}
-		m.logger.Info("Event logger registered as observer for all events")
+		if m.logger != nil {
+			m.logger.Info("Event logger registered as observer for filtered events", "filters", m.config.EventTypeFilters)
+		}
 	} else {
-		err := subject.RegisterObserver(m, m.config.EventTypeFilters...)
+		err = subject.RegisterObserver(m)
 		if err != nil {
 			return fmt.Errorf("failed to register event logger as observer: %w", err)
 		}
-		m.logger.Info("Event logger registered as observer for filtered events", "filters", m.config.EventTypeFilters)
+		if m.logger != nil {
+			m.logger.Info("Event logger registered as observer for all events")
+		}
 	}
+
+	m.observerRegistered = true
 
 	return nil
 }
@@ -421,7 +441,11 @@ func (m *EventLoggerModule) emitSyncOperationalEvent(ctx context.Context, eventT
 
 // isOwnEvent checks if an event is emitted by this eventlogger module to avoid infinite loops
 func (m *EventLoggerModule) isOwnEvent(event cloudevents.Event) bool {
-	return event.Source() == "eventlogger-module"
+	// Treat events originating from this module (including config/operational emissions)
+	// as "own events" to avoid generating recursive log/output-success events that
+	// can cause unbounded amplification and buffer overflows during processing.
+	src := event.Source()
+	return src == "eventlogger-module" || src == "eventlogger-config"
 }
 
 // OnEvent implements the Observer interface to receive and log CloudEvents.
@@ -578,9 +602,9 @@ func (m *EventLoggerModule) logEvent(ctx context.Context, event cloudevents.Even
 		}
 	}
 
-	// Emit output success event if at least one output succeeded (avoid emitting for our own events)
+	// Emit output success event synchronously if at least one output succeeded (avoid emitting for our own events)
 	if successCount > 0 && !m.isOwnEvent(event) {
-		m.emitOperationalEvent(ctx, EventTypeOutputSuccess, map[string]interface{}{
+		_ = m.emitSyncOperationalEvent(ctx, EventTypeOutputSuccess, map[string]interface{}{
 			"success_count": successCount,
 			"error_count":   errorCount,
 			"event_type":    event.Type(),

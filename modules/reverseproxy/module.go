@@ -2942,11 +2942,31 @@ func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, da
 	} else {
 		fmt.Printf("DEBUG: Successfully emitted via module subject\n")
 	}
-\n\
-// GetRegisteredEventTypes implements the ObservableModule interface.\
-// Returns all event types that this reverseproxy module can emit.\
-func (m *Module) GetRegisteredEventTypes() []string {\
-	return []string{\
-	}\
 }
+
+// GetRegisteredEventTypes implements the ObservableModule interface.
+// Returns all event types that this reverseproxy module can emit.
+func (m *ReverseProxyModule) GetRegisteredEventTypes() []string {
+	return []string{
+		EventTypeConfigLoaded,
+		EventTypeConfigValidated,
+		EventTypeProxyCreated,
+		EventTypeProxyStarted,
+		EventTypeProxyStopped,
+		EventTypeRequestReceived,
+		EventTypeRequestProxied,
+		EventTypeRequestFailed,
+		EventTypeBackendHealthy,
+		EventTypeBackendUnhealthy,
+		EventTypeBackendAdded,
+		EventTypeBackendRemoved,
+		EventTypeLoadBalanceDecision,
+		EventTypeLoadBalanceRoundRobin,
+		EventTypeCircuitBreakerOpen,
+		EventTypeCircuitBreakerClosed,
+		EventTypeCircuitBreakerHalfOpen,
+		EventTypeModuleStarted,
+		EventTypeModuleStopped,
+		EventTypeError,
+	}
 }

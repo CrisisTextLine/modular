@@ -683,11 +683,21 @@ type LogEntry struct {
 	Source    string                 `json:"source"`
 	Data      interface{}            `json:"data"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-\n\
-// GetRegisteredEventTypes implements the ObservableModule interface.\
-// Returns all event types that this eventlogger module can emit.\
-func (m *Module) GetRegisteredEventTypes() []string {\
-	return []string{\
-	}\
 }
+
+// GetRegisteredEventTypes implements the ObservableModule interface.
+// Returns all event types that this eventlogger module can emit.
+func (m *Module) GetRegisteredEventTypes() []string {
+	return []string{
+		EventTypeLoggerStarted,
+		EventTypeLoggerStopped,
+		EventTypeEventReceived,
+		EventTypeEventProcessed,
+		EventTypeEventDropped,
+		EventTypeBufferFull,
+		EventTypeOutputSuccess,
+		EventTypeOutputError,
+		EventTypeConfigLoaded,
+		EventTypeOutputRegistered,
+	}
 }

@@ -920,11 +920,31 @@ func (m *LetsEncryptModule) emitEvent(ctx context.Context, eventType string, dat
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
 		fmt.Printf("Failed to emit letsencrypt event %s: %v\n", eventType, emitErr)
 	}
-\n\
-// GetRegisteredEventTypes implements the ObservableModule interface.\
-// Returns all event types that this letsencrypt module can emit.\
-func (m *Module) GetRegisteredEventTypes() []string {\
-	return []string{\
-	}\
 }
+
+// GetRegisteredEventTypes implements the ObservableModule interface.
+// Returns all event types that this letsencrypt module can emit.
+func (m *LetsEncryptModule) GetRegisteredEventTypes() []string {
+	return []string{
+		EventTypeConfigLoaded,
+		EventTypeConfigValidated,
+		EventTypeCertificateRequested,
+		EventTypeCertificateIssued,
+		EventTypeCertificateRenewed,
+		EventTypeCertificateRevoked,
+		EventTypeCertificateExpiring,
+		EventTypeCertificateExpired,
+		EventTypeAcmeChallenge,
+		EventTypeAcmeAuthorization,
+		EventTypeAcmeOrder,
+		EventTypeServiceStarted,
+		EventTypeServiceStopped,
+		EventTypeStorageRead,
+		EventTypeStorageWrite,
+		EventTypeStorageError,
+		EventTypeModuleStarted,
+		EventTypeModuleStopped,
+		EventTypeError,
+		EventTypeWarning,
+	}
 }

@@ -6,12 +6,10 @@ toolchain go1.24.5
 
 require (
 	github.com/CrisisTextLine/modular v1.6.0
-	github.com/CrisisTextLine/modular/modules/chimux v1.1.0
-	github.com/CrisisTextLine/modular/modules/httpserver v0.1.1
+	github.com/CrisisTextLine/modular/modules/chimux v0.0.0-00010101000000-000000000000
+	github.com/CrisisTextLine/modular/modules/httpserver v0.0.0-00010101000000-000000000000
 	github.com/CrisisTextLine/modular/modules/reverseproxy v0.0.0-00010101000000-000000000000
 )
-
-replace github.com/CrisisTextLine/modular/modules/reverseproxy => ../../modules/reverseproxy
 
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect
@@ -27,3 +25,11 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/CrisisTextLine/modular => ../../
+
+replace github.com/CrisisTextLine/modular/modules/chimux => ../../modules/chimux
+
+replace github.com/CrisisTextLine/modular/modules/httpserver => ../../modules/httpserver
+
+replace github.com/CrisisTextLine/modular/modules/reverseproxy => ../../modules/reverseproxy

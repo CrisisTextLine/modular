@@ -2,6 +2,10 @@ module instance-aware-db
 
 go 1.24.2
 
+replace github.com/CrisisTextLine/modular => ../..
+
+replace github.com/CrisisTextLine/modular/modules/database => ../../modules/database
+
 require (
 	github.com/CrisisTextLine/modular v1.6.0
 	github.com/CrisisTextLine/modular/modules/database v1.1.0

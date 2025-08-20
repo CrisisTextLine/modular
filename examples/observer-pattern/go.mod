@@ -10,8 +10,6 @@ require (
 	github.com/cloudevents/sdk-go/v2 v2.16.1
 )
 
-replace github.com/CrisisTextLine/modular/modules/eventlogger => ../../modules/eventlogger
-
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/golobby/cast v1.3.3 // indirect
@@ -23,3 +21,7 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/CrisisTextLine/modular => ../..
+
+replace github.com/CrisisTextLine/modular/modules/eventlogger => ../../modules/eventlogger

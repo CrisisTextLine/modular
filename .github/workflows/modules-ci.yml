@@ -216,7 +216,7 @@ jobs:
             echo "result=success" >> $GITHUB_OUTPUT
             echo "::notice title=Lint Result for ${{ matrix.module }}::Linting passed"
           else
-            echo "result=failure" >> $GITHUB_OUTPUT  
+            echo "result=failure" >> $GITHUB_OUTPUT
             echo "::error title=Lint Result for ${{ matrix.module }}::Linting failed"
           fi
 

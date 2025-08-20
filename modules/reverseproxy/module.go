@@ -172,9 +172,6 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 	// If observable, opportunistically bind subject for early Init events
 	if subj, ok := app.(modular.Subject); ok {
 		m.subject = subj
-		slog.Info("DEBUG: Init - app is Subject, binding...")
-	} else {
-		slog.Info("DEBUG: Init - app is NOT Subject")
 	}
 
 	// Get the config section
@@ -2885,7 +2882,6 @@ func isEmptyComparisonResult(result ComparisonResult) bool {
 // RegisterObservers implements the ObservableModule interface.
 // This allows the reverseproxy module to register as an observer for events it's interested in.
 func (m *ReverseProxyModule) RegisterObservers(subject modular.Subject) error {
-	fmt.Printf("DEBUG: RegisterObservers called for reverseproxy module\n")
 	m.subject = subject
 	return nil
 }
@@ -2914,33 +2910,19 @@ func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Ev
 func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	event := modular.NewCloudEvent(eventType, "reverseproxy-service", data, nil)
 
-	// Debug: Log the emission attempt
-	fmt.Printf("DEBUG: Attempting to emit event %s (subject=%v, app=%v)\n", eventType, m.subject != nil, m.app != nil)
-
 	// Try to emit through the module's registered subject first
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-		fmt.Printf("DEBUG: Module EmitEvent failed: %v\n", emitErr)
-
 		// If module subject isn't available, try to emit directly through app if it's a Subject
 		if m.app != nil {
 			if subj, ok := any(m.app).(modular.Subject); ok {
-				fmt.Printf("DEBUG: Trying to emit via app subject\n")
 				if appErr := subj.NotifyObservers(ctx, event); appErr != nil {
 					fmt.Printf("Failed to emit reverseproxy event %s via app subject: %v\n", eventType, appErr)
-				} else {
-					fmt.Printf("DEBUG: Successfully emitted via app subject\n")
 				}
 				return // Successfully emitted via app, no need to log error
-			} else {
-				fmt.Printf("DEBUG: App is not a Subject\n")
 			}
-		} else {
-			fmt.Printf("DEBUG: App is nil\n")
 		}
 		// Log the original error if we couldn't emit via app either
 		fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
-	} else {
-		fmt.Printf("DEBUG: Successfully emitted via module subject\n")
 	}
 }
 

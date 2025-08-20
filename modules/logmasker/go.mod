@@ -2,8 +2,7 @@ module github.com/CrisisTextLine/modular/modules/logmasker
 
 go 1.23.0
 
-require github.com/CrisisTextLine/modular v1.5.3
-
+require github.com/CrisisTextLine/modular v1.6.0
 
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect

@@ -9,6 +9,8 @@ require (
 	github.com/CrisisTextLine/modular/modules/eventbus v0.0.0
 )
 
+replace github.com/CrisisTextLine/modular/modules/eventbus => ../../modules/eventbus
+
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/IBM/sarama v1.45.2 // indirect
@@ -58,7 +60,3 @@ require (
 	golang.org/x/net v0.40.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/CrisisTextLine/modular => ../../
-
-replace github.com/CrisisTextLine/modular/modules/eventbus => ../../modules/eventbus

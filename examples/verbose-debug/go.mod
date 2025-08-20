@@ -47,7 +47,5 @@ require (
 )
 
 // Use local module for development
-replace github.com/CrisisTextLine/modular => ../..
 
 // Use local database module for development
-replace github.com/CrisisTextLine/modular/modules/database => ../../modules/database

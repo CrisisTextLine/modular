@@ -2,8 +2,6 @@ module multi-tenant-app
 
 go 1.23.0
 
-replace github.com/CrisisTextLine/modular => ../../
-
 require github.com/CrisisTextLine/modular v1.6.0
 
 require (

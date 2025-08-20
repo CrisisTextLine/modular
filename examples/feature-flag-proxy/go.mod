@@ -25,11 +25,3 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/CrisisTextLine/modular => ../..
-
-replace github.com/CrisisTextLine/modular/modules/chimux => ../../modules/chimux
-
-replace github.com/CrisisTextLine/modular/modules/httpserver => ../../modules/httpserver
-
-replace github.com/CrisisTextLine/modular/modules/reverseproxy => ../../modules/reverseproxy

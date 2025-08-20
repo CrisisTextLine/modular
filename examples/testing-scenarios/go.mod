@@ -8,13 +8,16 @@ require (
 	github.com/CrisisTextLine/modular v1.6.0
 	github.com/CrisisTextLine/modular/modules/chimux v1.1.0
 	github.com/CrisisTextLine/modular/modules/httpserver v0.1.1
-	github.com/CrisisTextLine/modular/modules/reverseproxy v1.1.0
+	github.com/CrisisTextLine/modular/modules/reverseproxy v0.0.0-00010101000000-000000000000
 )
+
+replace github.com/CrisisTextLine/modular/modules/reverseproxy => ../../modules/reverseproxy
 
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/cloudevents/sdk-go/v2 v2.16.1 // indirect
 	github.com/go-chi/chi/v5 v5.2.2 // indirect
+	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/golobby/cast v1.3.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

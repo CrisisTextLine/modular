@@ -6,8 +6,6 @@ github.com/CrisisTextLine/modular/modules/chimux v1.1.0 h1:fqgdzcAGw8D62YoZ/p7Mt
 github.com/CrisisTextLine/modular/modules/chimux v1.1.0/go.mod h1:BMiO/LRUUYSC0uhSlnwDgI4Mjha4gh1bKMa4kAs+zG0=
 github.com/CrisisTextLine/modular/modules/httpserver v0.1.1 h1:iO43yrUpDuu/6H2FfPAd/Nt61TINrf3AxI0QBhvBwr8=
 github.com/CrisisTextLine/modular/modules/httpserver v0.1.1/go.mod h1:igtxcf63nptNwrFjDgz7IGHsKjpL56+2Dv8XgQ1Eq5M=
-github.com/CrisisTextLine/modular/modules/reverseproxy v1.1.0 h1:oWiAf97Lrf75lwawUnMJYf6cbUhdi6jmRsAp85d0MVk=
-github.com/CrisisTextLine/modular/modules/reverseproxy v1.1.0/go.mod h1:jjDGE7fOSGQ0ORwMilEhycmg/5BevrmUv3kOLzwYenw=
 github.com/cloudevents/sdk-go/v2 v2.16.1 h1:G91iUdqvl88BZ1GYYr9vScTj5zzXSyEuqbfE63gbu9Q=
 github.com/cloudevents/sdk-go/v2 v2.16.1/go.mod h1:v/kVOaWjNfbvc6tkhhlkhvLapj8Aa8kvXiH5GiOHCKI=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
@@ -23,6 +21,8 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/go-chi/chi/v5 v5.2.2 h1:CMwsvRVTbXVytCk1Wd72Zy1LAsAh9GxMmSNWLHCG618=
 github.com/go-chi/chi/v5 v5.2.2/go.mod h1:L2yAIGWB3H+phAw1NxKwWM+7eUH/lU8pOMm5hHcoops=
+github.com/gobwas/glob v0.2.3 h1:A4xDbljILXROh+kObIiy5kIaPYD8e96x1tgBhUI5J+Y=
+github.com/gobwas/glob v0.2.3/go.mod h1:d3Ez4x06l9bZtSvzIay5+Yzi0fmZzPgnTbPcKjJAkT8=
 github.com/gofrs/uuid v4.3.1+incompatible h1:0/KbAdpx3UXAx1kEOWHJeOkpbgRFGHVgv+CFIY7dBJI=
 github.com/gofrs/uuid v4.3.1+incompatible/go.mod h1:b2aQJv3Z4Fp6yNu3cdSllBxTCLRxnplIgP/c0N/04lM=
 github.com/golobby/cast v1.3.3 h1:s2Lawb9RMz7YyYf8IrfMQY4IFmA1R/lgfmj97Vc6fig=

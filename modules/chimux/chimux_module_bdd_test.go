@@ -920,6 +920,8 @@ func (ctx *ChiMuxBDDTestContext) theRouterIsStopped() error {
 }
 
 func (ctx *ChiMuxBDDTestContext) aRouterStoppedEventShouldBeEmitted() error {
+	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+
 	if ctx.eventObserver == nil {
 		return fmt.Errorf("event observer not available")
 	}

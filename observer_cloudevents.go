@@ -4,6 +4,7 @@
 package modular
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -78,6 +79,11 @@ func ValidateCloudEvent(event cloudevents.Event) error {
 //	}
 func HandleEventEmissionError(err error, logger Logger, moduleName, eventType string) bool {
 	// Handle the common "no subject available" error by silently ignoring it
+	if errors.Is(err, ErrNoSubjectForEventEmission) {
+		return true
+	}
+
+	// Also check for module-specific variants that have the same message
 	if err.Error() == "no subject available for event emission" {
 		return true
 	}

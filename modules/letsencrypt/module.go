@@ -127,6 +127,7 @@ import (
 	"crypto"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -931,11 +932,8 @@ func (m *LetsEncryptModule) emitEvent(ctx context.Context, eventType string, dat
 		if errors.Is(emitErr, ErrNoSubjectForEventEmission) {
 			return
 		}
-		// Use structured logger to avoid noisy stdout during tests
-		if m.logger != nil {
-			m.logger.Debug("Failed to emit letsencrypt event", "eventType", eventType, "error", emitErr)
-		}
-		// Note: Removed fmt.Printf to eliminate noisy test output
+		// Note: No logger available in letsencrypt module, so we skip additional error logging
+		// to eliminate noisy test output. The error handling is centralized in EmitEvent.
 	}
 }
 

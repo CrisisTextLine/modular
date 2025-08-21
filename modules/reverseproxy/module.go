@@ -2929,19 +2929,14 @@ func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, da
 		if m.app != nil {
 			if subj, ok := any(m.app).(modular.Subject); ok {
 				if appErr := subj.NotifyObservers(ctx, event); appErr != nil {
-					// Use structured logger to avoid noisy stdout during tests
-					if m.logger != nil {
-						m.logger.Debug("Failed to emit reverseproxy event via app subject", "eventType", eventType, "error", appErr)
-					}
+					// Note: No logger field available in module, skipping additional error logging
+					// to eliminate noisy test output. Error handling is centralized in EmitEvent.
 				}
 				return // Successfully emitted via app, no need to log error
 			}
 		}
-		// Use structured logger to avoid noisy stdout during tests
-		if m.logger != nil {
-			m.logger.Debug("Failed to emit reverseproxy event", "eventType", eventType, "error", emitErr)
-		}
-		// Note: Removed fmt.Printf to eliminate noisy test output
+		// Note: No logger field available in module, skipping additional error logging
+		// to eliminate noisy test output. Error handling is centralized in EmitEvent.
 	}
 }
 

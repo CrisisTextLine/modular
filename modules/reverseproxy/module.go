@@ -2907,22 +2907,41 @@ func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Ev
 
 // emitEvent is a helper method to create and emit CloudEvents for the reverseproxy module.
 // This centralizes the event creation logic and ensures consistent event formatting.
+// emitEvent is a helper method to create and emit CloudEvents for the reverseproxy module.
+// This centralizes the event creation logic and ensures consistent event formatting.
+// If no subject is available for event emission, it silently skips the event emission
+// to avoid noisy error messages in tests and non-observable applications.
 func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+	// Skip event emission if no subject is available (non-observable application)
+	if m.subject == nil {
+		return
+	}
+
 	event := modular.NewCloudEvent(eventType, "reverseproxy-service", data, nil)
 
 	// Try to emit through the module's registered subject first
 	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		// If no subject is registered, quietly skip to allow non-observable apps to run cleanly
+		if errors.Is(emitErr, ErrNoSubjectForEventEmission) {
+			return
+		}
 		// If module subject isn't available, try to emit directly through app if it's a Subject
 		if m.app != nil {
 			if subj, ok := any(m.app).(modular.Subject); ok {
 				if appErr := subj.NotifyObservers(ctx, event); appErr != nil {
-					fmt.Printf("Failed to emit reverseproxy event %s via app subject: %v\n", eventType, appErr)
+					// Use structured logger to avoid noisy stdout during tests
+					if m.logger != nil {
+						m.logger.Debug("Failed to emit reverseproxy event via app subject", "eventType", eventType, "error", appErr)
+					}
 				}
 				return // Successfully emitted via app, no need to log error
 			}
 		}
-		// Log the original error if we couldn't emit via app either
-		fmt.Printf("Failed to emit reverseproxy event %s: %v\n", eventType, emitErr)
+		// Use structured logger to avoid noisy stdout during tests
+		if m.logger != nil {
+			m.logger.Debug("Failed to emit reverseproxy event", "eventType", eventType, "error", emitErr)
+		}
+		// Note: Removed fmt.Printf to eliminate noisy test output
 	}
 }
 

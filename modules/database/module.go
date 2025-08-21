@@ -117,7 +117,6 @@ func (l *lazyDefaultService) ExecContext(ctx context.Context, query string, args
 
 	if err != nil {
 		// Emit query error event
-		// Emit query error event
 		l.module.emitEvent(ctx, EventTypeQueryError, map[string]interface{}{
 			"query":       query,
 			"error":       err.Error(),

@@ -2910,7 +2910,6 @@ func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Ev
 // emitEvent is a helper method to create and emit CloudEvents for the reverseproxy module.
 // This centralizes the event creation logic and ensures consistent event formatting.
 // If no subject is available for event emission, it silently skips the event emission
-// to avoid noisy error messages in tests and non-observable applications.
 func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	// Skip event emission if no subject is available (non-observable application)
 	if m.subject == nil {

@@ -1,11 +1,14 @@
 package feeders
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 
+	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v3"
 )
 
@@ -146,7 +149,7 @@ func (b *BaseConfigFeeder) loadBaseConfig() (map[string]interface{}, error) {
 		return make(map[string]interface{}), nil // Return empty config if no base file exists
 	}
 
-	return b.loadYamlFile(baseConfigPath)
+	return b.loadConfigFile(baseConfigPath)
 }
 
 // loadEnvironmentConfig loads the environment-specific overrides
@@ -160,7 +163,7 @@ func (b *BaseConfigFeeder) loadEnvironmentConfig() (map[string]interface{}, erro
 		return make(map[string]interface{}), nil // Return empty config if no env file exists
 	}
 
-	return b.loadYamlFile(envConfigPath)
+	return b.loadConfigFile(envConfigPath)
 }
 
 // loadBaseConfigForKey loads base config for a specific key (used for tenant configs)
@@ -175,7 +178,7 @@ func (b *BaseConfigFeeder) loadBaseConfigForKey(key string) (map[string]interfac
 		return make(map[string]interface{}), nil
 	}
 
-	return b.loadYamlFile(baseConfigPath)
+	return b.loadConfigFile(baseConfigPath)
 }
 
 // loadEnvironmentConfigForKey loads environment config for a specific key (used for tenant configs)
@@ -190,10 +193,12 @@ func (b *BaseConfigFeeder) loadEnvironmentConfigForKey(key string) (map[string]i
 		return make(map[string]interface{}), nil
 	}
 
-	return b.loadYamlFile(envConfigPath)
+	return b.loadConfigFile(envConfigPath)
 }
 
-// findConfigFile searches for a config file with the given name and supported extensions
+// findConfigFile searches for a config file with the given name and supported extensions.
+// Extensions are tried in order: .yaml, .yml, .json, .toml - the first found file is returned.
+// This order affects configuration precedence when multiple formats exist for the same config.
 func (b *BaseConfigFeeder) findConfigFile(dir, name string) string {
 	extensions := []string{".yaml", ".yml", ".json", ".toml"}
 
@@ -210,10 +215,11 @@ func (b *BaseConfigFeeder) findConfigFile(dir, name string) string {
 	return ""
 }
 
-// loadYamlFile loads a YAML file into a map
-func (b *BaseConfigFeeder) loadYamlFile(filePath string) (map[string]interface{}, error) {
+// loadConfigFile loads a configuration file into a map, automatically detecting the format
+// based on the file extension (.yaml, .yml, .json, .toml)
+func (b *BaseConfigFeeder) loadConfigFile(filePath string) (map[string]interface{}, error) {
 	if b.verboseDebug && b.logger != nil {
-		b.logger.Debug("BaseConfigFeeder: Loading YAML file", "path", filePath)
+		b.logger.Debug("BaseConfigFeeder: Loading config file", "path", filePath)
 	}
 
 	data, err := os.ReadFile(filePath)
@@ -222,12 +228,30 @@ func (b *BaseConfigFeeder) loadYamlFile(filePath string) (map[string]interface{}
 	}
 
 	var config map[string]interface{}
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal YAML file %s: %w", filePath, err)
+	ext := filepath.Ext(filePath)
+
+	switch ext {
+	case ".yaml", ".yml":
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal YAML file %s: %w", filePath, err)
+		}
+	case ".json":
+		if err := json.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal JSON file %s: %w", filePath, err)
+		}
+	case ".toml":
+		if err := toml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal TOML file %s: %w", filePath, err)
+		}
+	default:
+		// Default to YAML for backward compatibility
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal config file %s (defaulted to YAML): %w", filePath, err)
+		}
 	}
 
 	if b.verboseDebug && b.logger != nil {
-		b.logger.Debug("BaseConfigFeeder: Successfully loaded YAML file", "path", filePath, "keys", len(config))
+		b.logger.Debug("BaseConfigFeeder: Successfully loaded config file", "path", filePath, "format", ext, "keys", len(config))
 	}
 
 	return config, nil
@@ -314,6 +338,7 @@ func IsBaseConfigStructure(configDir string) bool {
 }
 
 // GetAvailableEnvironments returns the list of available environments in the config directory
+// in alphabetical order for consistent, deterministic behavior
 func GetAvailableEnvironments(configDir string) []string {
 	envDir := filepath.Join(configDir, "environments")
 	entries, err := os.ReadDir(envDir)
@@ -328,5 +353,7 @@ func GetAvailableEnvironments(configDir string) []string {
 		}
 	}
 
+	// Sort alphabetically for deterministic behavior
+	sort.Strings(environments)
 	return environments
 }

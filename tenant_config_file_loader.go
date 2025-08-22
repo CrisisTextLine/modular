@@ -157,7 +157,10 @@ func loadBaseConfigTenant(app Application, tenantService TenantService, tenantID
 	return nil
 }
 
-// findTenantConfigFile searches for a tenant config file in the specified path
+// findTenantConfigFile searches for a tenant config file with multiple supported extensions.
+// It searches for files with extensions .yaml, .yml, .json, .toml in that order, returning
+// the first file found. The pathComponents are used to construct the search directory path,
+// with the last component being the tenant name and earlier components forming the directory path.
 func findTenantConfigFile(baseDir string, pathComponents ...string) string {
 	extensions := []string{".yaml", ".yml", ".json", ".toml"}
 

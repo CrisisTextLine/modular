@@ -11,11 +11,11 @@ import (
 
 // BaseTestConfig represents a simple test configuration structure for base config tests
 type BaseTestConfig struct {
-	AppName     string                 `yaml:"app_name"`
-	Environment string                 `yaml:"environment"`
-	Database    BaseDatabaseConfig     `yaml:"database"`
-	Features    map[string]bool        `yaml:"features"`
-	Servers     []BaseServerConfig     `yaml:"servers"`
+	AppName     string             `yaml:"app_name"`
+	Environment string             `yaml:"environment"`
+	Database    BaseDatabaseConfig `yaml:"database"`
+	Features    map[string]bool    `yaml:"features"`
+	Servers     []BaseServerConfig `yaml:"servers"`
 }
 
 type BaseDatabaseConfig struct {
@@ -86,7 +86,7 @@ servers:
 
 	// Create feeder and test
 	feeder := NewBaseConfigFeeder(tempDir, "prod")
-	
+
 	var config BaseTestConfig
 	err := feeder.Feed(&config)
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ servers:
 	// Verify merged configuration
 	assert.Equal(t, "MyApp", config.AppName, "App name should come from base config")
 	assert.Equal(t, "production", config.Environment, "Environment should be overridden")
-	
+
 	// Database config should be merged
 	assert.Equal(t, "prod-db.example.com", config.Database.Host, "Database host should be overridden")
 	assert.Equal(t, 5432, config.Database.Port, "Database port should come from base")
@@ -131,7 +131,7 @@ database:
 
 	// Create feeder for non-existent environment
 	feeder := NewBaseConfigFeeder(tempDir, "nonexistent")
-	
+
 	var config BaseTestConfig
 	err := feeder.Feed(&config)
 	require.NoError(t, err)
@@ -160,7 +160,7 @@ database:
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "environments", "prod", "overrides.yaml"), []byte(prodConfig), 0644))
 
 	feeder := NewBaseConfigFeeder(tempDir, "prod")
-	
+
 	var config BaseTestConfig
 	err := feeder.Feed(&config)
 	require.NoError(t, err)
@@ -204,7 +204,7 @@ features:
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "environments", "prod", "tenants", "tenant1.yaml"), []byte(prodTenantConfig), 0644))
 
 	feeder := NewBaseConfigFeeder(tempDir, "prod")
-	
+
 	var config BaseTestConfig
 	err := feeder.FeedKey("tenant1", &config)
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestBaseConfigFeeder_VerboseDebug(t *testing.T) {
 
 	feeder := NewBaseConfigFeeder(tempDir, "prod")
 	feeder.SetVerboseDebug(true, mockLogger)
-	
+
 	var config BaseTestConfig
 	err := feeder.Feed(&config)
 	require.NoError(t, err)
@@ -269,7 +269,7 @@ func TestGetAvailableEnvironments(t *testing.T) {
 	environments := GetAvailableEnvironments(tempDir)
 	require.Len(t, environments, 3)
 	assert.Contains(t, environments, "prod")
-	assert.Contains(t, environments, "staging") 
+	assert.Contains(t, environments, "staging")
 	assert.Contains(t, environments, "dev")
 }
 

@@ -58,8 +58,8 @@ func DetectBaseConfigStructure() bool {
 				// Check if we can find any environments
 				environments := feeders.GetAvailableEnvironments(configDir)
 				if len(environments) > 0 {
-					// Use the first available environment as default
-					environment = environments[0]
+					// Use the first environment alphabetically for deterministic behavior
+					environment = environments[0] // environments is already sorted by GetAvailableEnvironments
 				} else {
 					environment = "dev"
 				}

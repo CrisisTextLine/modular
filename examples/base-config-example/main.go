@@ -151,10 +151,15 @@ func displayConfiguration(config *AppConfig, environment string) {
 }
 
 func maskPassword(password string) string {
-	if len(password) <= 3 {
-		return "***"
+	if len(password) == 0 {
+		return ""
 	}
-	return password[:2] + strings.Repeat("*", len(password)-2)
+	// Always return at least 8 asterisks to avoid leaking length information
+	minLength := 8
+	if len(password) > minLength {
+		return strings.Repeat("*", len(password))
+	}
+	return strings.Repeat("*", minLength)
 }
 
 func enabledStatus(enabled bool) string {

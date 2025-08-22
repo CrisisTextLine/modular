@@ -12,25 +12,25 @@ import (
 
 // BaseConfigBDDTestContext holds state for base configuration BDD tests
 type BaseConfigBDDTestContext struct {
-	app                Application
-	logger             Logger
-	configDir          string
-	environment        string
-	baseConfigContent  string
-	envConfigContent   string
-	tenantConfigs      map[string]string
-	actualConfig       *TestBDDConfig
-	configError        error
-	tempDirs           []string
+	app               Application
+	logger            Logger
+	configDir         string
+	environment       string
+	baseConfigContent string
+	envConfigContent  string
+	tenantConfigs     map[string]string
+	actualConfig      *TestBDDConfig
+	configError       error
+	tempDirs          []string
 }
 
 // TestBDDConfig represents a test configuration structure for BDD tests
 type TestBDDConfig struct {
-	AppName     string                 `yaml:"app_name"`
-	Environment string                 `yaml:"environment"`
-	Database    TestBDDDatabaseConfig  `yaml:"database"`
-	Features    map[string]bool        `yaml:"features"`
-	Servers     []TestBDDServerConfig  `yaml:"servers"`
+	AppName     string                `yaml:"app_name"`
+	Environment string                `yaml:"environment"`
+	Database    TestBDDDatabaseConfig `yaml:"database"`
+	Features    map[string]bool       `yaml:"features"`
+	Servers     []TestBDDServerConfig `yaml:"servers"`
 }
 
 type TestBDDDatabaseConfig struct {
@@ -51,7 +51,7 @@ type TestBDDServerConfig struct {
 
 func (ctx *BaseConfigBDDTestContext) iHaveABaseConfigStructureWithEnvironment(environment string) error {
 	ctx.environment = environment
-	
+
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "base-config-bdd-*")
 	if err != nil {
@@ -84,41 +84,41 @@ func (ctx *BaseConfigBDDTestContext) iHaveABaseConfigStructureWithEnvironment(en
 
 func (ctx *BaseConfigBDDTestContext) theBaseConfigContains(configContent string) error {
 	ctx.baseConfigContent = configContent
-	
+
 	baseConfigPath := filepath.Join(ctx.configDir, "base", "default.yaml")
 	if err := os.WriteFile(baseConfigPath, []byte(configContent), 0644); err != nil {
 		return fmt.Errorf("failed to write base config: %w", err)
 	}
-	
+
 	return nil
 }
 
 func (ctx *BaseConfigBDDTestContext) theEnvironmentConfigContains(configContent string) error {
 	ctx.envConfigContent = configContent
-	
+
 	envConfigPath := filepath.Join(ctx.configDir, "environments", ctx.environment, "overrides.yaml")
 	if err := os.WriteFile(envConfigPath, []byte(configContent), 0644); err != nil {
 		return fmt.Errorf("failed to write environment config: %w", err)
 	}
-	
+
 	return nil
 }
 
 func (ctx *BaseConfigBDDTestContext) iSetTheEnvironmentToAndLoadTheConfiguration(environment string) error {
 	// Set base config settings
 	SetBaseConfig(ctx.configDir, environment)
-	
+
 	// Create application with test config
 	ctx.actualConfig = &TestBDDConfig{}
 	configProvider := NewStdConfigProvider(ctx.actualConfig)
 	ctx.logger = &testBDDLogger{}
 	ctx.app = NewStdApplication(configProvider, ctx.logger)
-	
+
 	// Initialize the application to trigger config loading
 	if err := ctx.app.Init(); err != nil {
 		ctx.configError = err
 	}
-	
+
 	return nil
 }
 
@@ -169,12 +169,12 @@ func (ctx *BaseConfigBDDTestContext) iHaveBaseTenantConfigForTenant(tenantID str
 		ctx.tenantConfigs = make(map[string]string)
 	}
 	ctx.tenantConfigs[tenantID] = configContent
-	
+
 	baseTenantPath := filepath.Join(ctx.configDir, "base", "tenants", tenantID+".yaml")
 	if err := os.WriteFile(baseTenantPath, []byte(configContent), 0644); err != nil {
 		return fmt.Errorf("failed to write base tenant config: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -183,7 +183,7 @@ func (ctx *BaseConfigBDDTestContext) iHaveEnvironmentTenantConfigForTenant(tenan
 	if err := os.WriteFile(envTenantPath, []byte(configContent), 0644); err != nil {
 		return fmt.Errorf("failed to write environment tenant config: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -198,7 +198,7 @@ func (ctx *BaseConfigBDDTestContext) theConfigurationLoadingShouldSucceed() erro
 func (ctx *BaseConfigBDDTestContext) cleanup() {
 	// Reset base config settings
 	BaseConfigSettings = BaseConfigOptions{}
-	
+
 	// Clean up temporary directories
 	for _, dir := range ctx.tempDirs {
 		os.RemoveAll(dir)
@@ -208,10 +208,10 @@ func (ctx *BaseConfigBDDTestContext) cleanup() {
 // testBDDLogger implements a simple logger for BDD tests
 type testBDDLogger struct{}
 
-func (l *testBDDLogger) Debug(msg string, args ...any)   {}
-func (l *testBDDLogger) Info(msg string, args ...any)    {}
-func (l *testBDDLogger) Warn(msg string, args ...any)    {}
-func (l *testBDDLogger) Error(msg string, args ...any)   {}
+func (l *testBDDLogger) Debug(msg string, args ...any) {}
+func (l *testBDDLogger) Info(msg string, args ...any)  {}
+func (l *testBDDLogger) Warn(msg string, args ...any)  {}
+func (l *testBDDLogger) Error(msg string, args ...any) {}
 
 // Test scenarios initialization
 func InitializeBaseConfigScenario(ctx *godog.ScenarioContext) {

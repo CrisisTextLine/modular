@@ -421,7 +421,7 @@ func loadAppConfig(app *StdApplication) error {
 
 	// Prepare config feeders - include base config feeder if enabled
 	configFeeders := make([]Feeder, 0, len(ConfigFeeders)+1)
-	
+
 	// Add base config feeder first if enabled (so it gets processed first)
 	if IsBaseConfigEnabled() {
 		baseFeeder := GetBaseConfigFeeder()

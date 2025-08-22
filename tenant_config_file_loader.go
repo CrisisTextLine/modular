@@ -50,10 +50,7 @@ func isBaseConfigTenantStructure(configDir string) bool {
 	}
 	// Also check if configDir might be a subdirectory like config/tenants
 	parent := filepath.Dir(configDir)
-	if feeders.IsBaseConfigStructure(parent) {
-		return true
-	}
-	return false
+	return feeders.IsBaseConfigStructure(parent)
 }
 
 // loadTenantConfigsWithBaseSupport loads tenant configs using base config structure
@@ -163,25 +160,25 @@ func loadBaseConfigTenant(app Application, tenantService TenantService, tenantID
 // findTenantConfigFile searches for a tenant config file in the specified path
 func findTenantConfigFile(baseDir string, pathComponents ...string) string {
 	extensions := []string{".yaml", ".yml", ".json", ".toml"}
-	
+
 	// Build the directory path
 	dirPath := filepath.Join(append([]string{baseDir}, pathComponents[:len(pathComponents)-1]...)...)
 	tenantName := pathComponents[len(pathComponents)-1]
-	
+
 	for _, ext := range extensions {
 		configPath := filepath.Join(dirPath, tenantName+ext)
 		if _, err := os.Stat(configPath); err == nil {
 			return configPath
 		}
 	}
-	
+
 	return ""
 }
 
 // createTenantFeeder creates an appropriate feeder for a tenant config file
 func createTenantFeeder(filePath string) Feeder {
 	ext := strings.ToLower(filepath.Ext(filePath))
-	
+
 	switch ext {
 	case ".yaml", ".yml":
 		return feeders.NewYamlFeeder(filePath)

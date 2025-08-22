@@ -11,11 +11,11 @@ import (
 
 // BaseConfigFeeder supports layered configuration loading with base configs and environment-specific overrides
 type BaseConfigFeeder struct {
-	BaseDir        string // Directory containing base/ and environments/ subdirectories
-	Environment    string // Environment name (e.g., "prod", "staging", "dev")
-	verboseDebug   bool
-	logger         interface{ Debug(msg string, args ...any) }
-	fieldTracker   FieldTracker
+	BaseDir      string // Directory containing base/ and environments/ subdirectories
+	Environment  string // Environment name (e.g., "prod", "staging", "dev")
+	verboseDebug bool
+	logger       interface{ Debug(msg string, args ...any) }
+	fieldTracker FieldTracker
 }
 
 // NewBaseConfigFeeder creates a new base configuration feeder
@@ -48,9 +48,9 @@ func (b *BaseConfigFeeder) SetFieldTracker(tracker FieldTracker) {
 // Feed loads and merges base configuration with environment-specific overrides
 func (b *BaseConfigFeeder) Feed(structure interface{}) error {
 	if b.verboseDebug && b.logger != nil {
-		b.logger.Debug("BaseConfigFeeder: Starting feed process", 
-			"baseDir", b.BaseDir, 
-			"environment", b.Environment, 
+		b.logger.Debug("BaseConfigFeeder: Starting feed process",
+			"baseDir", b.BaseDir,
+			"environment", b.Environment,
 			"structureType", reflect.TypeOf(structure))
 	}
 
@@ -94,8 +94,8 @@ func (b *BaseConfigFeeder) Feed(structure interface{}) error {
 // FeedKey loads and merges configurations for a specific key
 func (b *BaseConfigFeeder) FeedKey(key string, target interface{}) error {
 	if b.verboseDebug && b.logger != nil {
-		b.logger.Debug("BaseConfigFeeder: Starting FeedKey process", 
-			"key", key, 
+		b.logger.Debug("BaseConfigFeeder: Starting FeedKey process",
+			"key", key,
 			"targetType", reflect.TypeOf(target))
 	}
 
@@ -154,7 +154,7 @@ func (b *BaseConfigFeeder) loadEnvironmentConfig() (map[string]interface{}, erro
 	envConfigPath := b.findConfigFile(filepath.Join(b.BaseDir, "environments", b.Environment), "overrides")
 	if envConfigPath == "" {
 		if b.verboseDebug && b.logger != nil {
-			b.logger.Debug("BaseConfigFeeder: No environment config file found", 
+			b.logger.Debug("BaseConfigFeeder: No environment config file found",
 				"envDir", filepath.Join(b.BaseDir, "environments", b.Environment))
 		}
 		return make(map[string]interface{}), nil // Return empty config if no env file exists
@@ -168,8 +168,8 @@ func (b *BaseConfigFeeder) loadBaseConfigForKey(key string) (map[string]interfac
 	baseConfigPath := b.findConfigFile(filepath.Join(b.BaseDir, "base", "tenants"), key)
 	if baseConfigPath == "" {
 		if b.verboseDebug && b.logger != nil {
-			b.logger.Debug("BaseConfigFeeder: No base tenant config found", 
-				"key", key, 
+			b.logger.Debug("BaseConfigFeeder: No base tenant config found",
+				"key", key,
 				"baseDir", filepath.Join(b.BaseDir, "base", "tenants"))
 		}
 		return make(map[string]interface{}), nil
@@ -183,8 +183,8 @@ func (b *BaseConfigFeeder) loadEnvironmentConfigForKey(key string) (map[string]i
 	envConfigPath := b.findConfigFile(filepath.Join(b.BaseDir, "environments", b.Environment, "tenants"), key)
 	if envConfigPath == "" {
 		if b.verboseDebug && b.logger != nil {
-			b.logger.Debug("BaseConfigFeeder: No environment tenant config found", 
-				"key", key, 
+			b.logger.Debug("BaseConfigFeeder: No environment tenant config found",
+				"key", key,
 				"envDir", filepath.Join(b.BaseDir, "environments", b.Environment, "tenants"))
 		}
 		return make(map[string]interface{}), nil
@@ -196,7 +196,7 @@ func (b *BaseConfigFeeder) loadEnvironmentConfigForKey(key string) (map[string]i
 // findConfigFile searches for a config file with the given name and supported extensions
 func (b *BaseConfigFeeder) findConfigFile(dir, name string) string {
 	extensions := []string{".yaml", ".yml", ".json", ".toml"}
-	
+
 	for _, ext := range extensions {
 		configPath := filepath.Join(dir, name+ext)
 		if _, err := os.Stat(configPath); err == nil {
@@ -206,7 +206,7 @@ func (b *BaseConfigFeeder) findConfigFile(dir, name string) string {
 			return configPath
 		}
 	}
-	
+
 	return ""
 }
 
@@ -236,8 +236,8 @@ func (b *BaseConfigFeeder) loadYamlFile(filePath string) (map[string]interface{}
 // mergeConfigs merges environment config over base config (deep merge)
 func (b *BaseConfigFeeder) mergeConfigs(base, override map[string]interface{}) map[string]interface{} {
 	if b.verboseDebug && b.logger != nil {
-		b.logger.Debug("BaseConfigFeeder: Merging configurations", 
-			"baseKeys", len(base), 
+		b.logger.Debug("BaseConfigFeeder: Merging configurations",
+			"baseKeys", len(base),
 			"overrideKeys", len(override))
 	}
 
@@ -273,8 +273,8 @@ func (b *BaseConfigFeeder) mergeConfigs(base, override map[string]interface{}) m
 // applyConfigToStruct applies the merged configuration to the target structure
 func (b *BaseConfigFeeder) applyConfigToStruct(config map[string]interface{}, target interface{}) error {
 	if b.verboseDebug && b.logger != nil {
-		b.logger.Debug("BaseConfigFeeder: Applying config to struct", 
-			"targetType", reflect.TypeOf(target), 
+		b.logger.Debug("BaseConfigFeeder: Applying config to struct",
+			"targetType", reflect.TypeOf(target),
 			"configKeys", len(config))
 	}
 

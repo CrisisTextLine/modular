@@ -133,16 +133,17 @@ const ServiceName = "eventlogger.observer"
 // and log them to configured output targets. Supports both traditional ObserverEvents
 // and CloudEvents for standardized event handling.
 type EventLoggerModule struct {
-	name      string
-	config    *EventLoggerConfig
-	logger    modular.Logger
-	outputs   []OutputTarget
-	eventChan chan cloudevents.Event
-	stopChan  chan struct{}
-	wg        sync.WaitGroup
-	started   bool
-	mutex     sync.RWMutex
-	subject   modular.Subject
+	name         string
+	config       *EventLoggerConfig
+	logger       modular.Logger
+	outputs      []OutputTarget
+	eventChan    chan cloudevents.Event
+	stopChan     chan struct{}
+	wg           sync.WaitGroup
+	started      bool
+	shuttingDown bool
+	mutex        sync.RWMutex
+	subject      modular.Subject
 	// observerRegistered ensures we only register with the subject once
 	observerRegistered bool
 }
@@ -174,13 +175,16 @@ func (m *EventLoggerModule) RegisterConfig(app modular.Application) error {
 
 	// Register the configuration with default values
 	defaultConfig := &EventLoggerConfig{
-		Enabled:           true,
-		LogLevel:          "INFO",
-		Format:            "structured",
-		BufferSize:        100,
-		FlushInterval:     5 * time.Second,
-		IncludeMetadata:   true,
-		IncludeStackTrace: false,
+		Enabled:              true,
+		LogLevel:             "INFO",
+		Format:               "structured",
+		BufferSize:           100,
+		FlushInterval:        5 * time.Second,
+		IncludeMetadata:      true,
+		IncludeStackTrace:    false,
+		StartupSync:          false,
+		ShutdownEmitStopped:  true,
+		ShutdownDrainTimeout: 2 * time.Second,
 		OutputTargets: []OutputTargetConfig{
 			{
 				Type:   "console",
@@ -258,34 +262,37 @@ func (m *EventLoggerModule) Start(ctx context.Context) error {
 	m.started = true
 	m.logger.Info("Event logger started")
 
-	// Emit startup events asynchronously to avoid deadlock during module startup
-	go func() {
-		// Small delay to ensure the Start() method has completed
-		time.Sleep(10 * time.Millisecond)
-		
-		// Emit configuration loaded event
-		m.emitOperationalEvent(ctx, EventTypeConfigLoaded, map[string]interface{}{
+	emit := func(sync bool) {
+		baseCtx := ctx
+		if sync {
+			baseCtx = modular.WithSynchronousNotification(baseCtx)
+		}
+		m.emitOperationalEvent(baseCtx, EventTypeConfigLoaded, map[string]interface{}{
 			"enabled":              m.config.Enabled,
 			"buffer_size":          m.config.BufferSize,
 			"output_targets_count": len(m.config.OutputTargets),
 			"log_level":            m.config.LogLevel,
 		})
-
-		// Emit output registered events
 		for i, targetConfig := range m.config.OutputTargets {
-			m.emitOperationalEvent(ctx, EventTypeOutputRegistered, map[string]interface{}{
+			m.emitOperationalEvent(baseCtx, EventTypeOutputRegistered, map[string]interface{}{
 				"output_index": i,
 				"output_type":  targetConfig.Type,
 				"output_level": targetConfig.Level,
 			})
 		}
-
-		// Emit logger started event
-		m.emitOperationalEvent(ctx, EventTypeLoggerStarted, map[string]interface{}{
+		m.emitOperationalEvent(baseCtx, EventTypeLoggerStarted, map[string]interface{}{
 			"output_count": len(m.outputs),
 			"buffer_size":  len(m.eventChan),
 		})
-	}()
+	}
+
+	if m.config.StartupSync {
+		// Emit synchronously within Start() (tests can rely on immediate availability)
+		emit(true)
+	} else {
+		// Preserve previous async behavior without fixed sleep (still asynchronous, faster)
+		go emit(false)
+	}
 
 	return nil
 }
@@ -299,11 +306,32 @@ func (m *EventLoggerModule) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	// Signal stop
-	close(m.stopChan)
+	// Mark shutting down to suppress emission side-effects
+	m.shuttingDown = true
 
-	// Wait for processing to finish
-	m.wg.Wait()
+	// Signal stop (idempotent safety)
+	select {
+	case <-m.stopChan:
+		// already closed
+	default:
+		close(m.stopChan)
+	}
+
+	// Wait for processing with optional timeout
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+	if m.config.ShutdownDrainTimeout > 0 {
+		select {
+		case <-done:
+		case <-time.After(m.config.ShutdownDrainTimeout):
+			m.logger.Warn("Event logger drain timeout reached; proceeding with shutdown")
+		}
+	} else {
+		<-done
+	}
 
 	// Stop output targets
 	for _, output := range m.outputs {
@@ -315,8 +343,12 @@ func (m *EventLoggerModule) Stop(ctx context.Context) error {
 	m.started = false
 	m.logger.Info("Event logger stopped")
 
-	// Emit logger stopped event
-	m.emitOperationalEvent(ctx, EventTypeLoggerStopped, map[string]interface{}{})
+	if m.config.ShutdownEmitStopped {
+		// Emit logger stopped event BEFORE releasing shuttingDown (suppressed OnEvent still checks started)
+		m.emitOperationalEvent(ctx, EventTypeLoggerStopped, map[string]interface{}{})
+	}
+
+	m.shuttingDown = false
 
 	return nil
 }
@@ -448,9 +480,14 @@ func (m *EventLoggerModule) isOwnEvent(event cloudevents.Event) bool {
 func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event) error {
 	m.mutex.RLock()
 	started := m.started
+	shuttingDown := m.shuttingDown
 	m.mutex.RUnlock()
 
 	if !started {
+		// Silently drop known early lifecycle events instead of returning error to reduce noise
+		if isBenignEarlyLifecycleEvent(event.Type()) || shuttingDown {
+			return nil
+		}
 		return ErrLoggerNotStarted
 	}
 
@@ -697,5 +734,19 @@ func (m *EventLoggerModule) GetRegisteredEventTypes() []string {
 		EventTypeOutputError,
 		EventTypeConfigLoaded,
 		EventTypeOutputRegistered,
+	}
+}
+
+// isBenignEarlyLifecycleEvent returns true for framework lifecycle events that may occur
+// before the eventlogger starts and should not generate noise if dropped.
+func isBenignEarlyLifecycleEvent(eventType string) bool {
+	switch eventType {
+	case modular.EventTypeConfigLoaded,
+		modular.EventTypeConfigValidated,
+		modular.EventTypeModuleRegistered,
+		modular.EventTypeServiceRegistered:
+		return true
+	default:
+		return false
 	}
 }

@@ -48,7 +48,7 @@ jobs:
             module_name=$(basename "$module_dir")
             if [ -f "$module_dir/go.mod" ]; then
               echo "Extracting contract for module: $module_name"
-              ./cmd/modcli/modcli contract extract "$module_dir" -o "artifacts/contracts/main/${module_name}.json" || echo "Failed to extract $module_name"
+              ./cmd/modcli/modcli contract extract "./$module_dir" -o "artifacts/contracts/main/${module_name}.json" || echo "Failed to extract $module_name"
             fi
           done
 
@@ -68,7 +68,7 @@ jobs:
             module_name=$(basename "$module_dir")
             if [ -f "$module_dir/go.mod" ]; then
               echo "Extracting contract for module: $module_name"
-              ./cmd/modcli/modcli contract extract "$module_dir" -o "artifacts/contracts/pr/${module_name}.json" || echo "Failed to extract $module_name"
+              ./cmd/modcli/modcli contract extract "./$module_dir" -o "artifacts/contracts/pr/${module_name}.json" || echo "Failed to extract $module_name"
             fi
           done
 

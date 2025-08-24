@@ -172,25 +172,17 @@ func TestFunc() {}
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
-	// Reset global flags
-	outputFile = ""
-	includePrivate = false
-	verbose = false
-
-	// Test the command
+	// Test the command with new function signature
 	cmd := &cobra.Command{}
-	err = runExtractContract(cmd, []string{tmpDir})
+	err = runExtractContractWithFlags(cmd, []string{tmpDir}, "", false, false, false, false)
 	if err != nil {
 		t.Fatalf("Failed to extract contract: %v", err)
 	}
 }
 
 func TestRunExtractContract_InvalidDirectory(t *testing.T) {
-	// Reset global flags
-	outputFile = ""
-
 	cmd := &cobra.Command{}
-	err := runExtractContract(cmd, []string{"/nonexistent/directory"})
+	err := runExtractContractWithFlags(cmd, []string{"/nonexistent/directory"}, "", false, false, false, false)
 	if err == nil {
 		t.Error("Expected error for nonexistent directory")
 	}
@@ -233,25 +225,17 @@ func TestRunCompareContract_ValidContracts(t *testing.T) {
 		t.Fatalf("Failed to save contract2: %v", err)
 	}
 
-	// Reset global flags
-	outputFile = ""
-	outputFormat = "json"
-	verbose = false
-
-	// Test the command
+	// Test the command with new function signature
 	cmd := &cobra.Command{}
-	err = runCompareContract(cmd, []string{file1.Name(), file2.Name()})
+	err = runCompareContractWithFlags(cmd, []string{file1.Name(), file2.Name()}, "", "json", true, false, false)
 	if err != nil {
 		t.Fatalf("Failed to compare contracts: %v", err)
 	}
 }
 
 func TestRunCompareContract_InvalidFiles(t *testing.T) {
-	// Reset global flags
-	outputFile = ""
-
 	cmd := &cobra.Command{}
-	err := runCompareContract(cmd, []string{"/nonexistent/file1.json", "/nonexistent/file2.json"})
+	err := runCompareContractWithFlags(cmd, []string{"/nonexistent/file1.json", "/nonexistent/file2.json"}, "", "json", true, false, false)
 	if err == nil {
 		t.Error("Expected error for nonexistent files")
 	}

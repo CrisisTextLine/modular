@@ -100,7 +100,7 @@ func (d *Differ) compareInterfaces(old, new []InterfaceContract, diff *ContractD
 	}
 
 	// Check for added interfaces
-	for name, _ := range newMap {
+	for name := range newMap {
 		if _, exists := oldMap[name]; !exists {
 			diff.AddedItems = append(diff.AddedItems, AddedItem{
 				Type:        "interface",
@@ -143,7 +143,7 @@ func (d *Differ) compareInterfaceMethods(old, new InterfaceContract, diff *Contr
 	}
 
 	// Check for added methods
-	for methodName, _ := range newMethods {
+	for methodName := range newMethods {
 		if _, exists := oldMethods[methodName]; !exists {
 			diff.AddedItems = append(diff.AddedItems, AddedItem{
 				Type:        "method",
@@ -202,7 +202,7 @@ func (d *Differ) compareTypes(old, new []TypeContract, diff *ContractDiff) {
 	}
 
 	// Check for added types
-	for name, _ := range newMap {
+	for name := range newMap {
 		if _, exists := oldMap[name]; !exists {
 			diff.AddedItems = append(diff.AddedItems, AddedItem{
 				Type:        "type",
@@ -281,7 +281,7 @@ func (d *Differ) compareStructFields(old, new TypeContract, diff *ContractDiff) 
 	}
 
 	// Check for added fields
-	for fieldName, _ := range newFields {
+	for fieldName := range newFields {
 		if _, exists := oldFields[fieldName]; !exists {
 			diff.AddedItems = append(diff.AddedItems, AddedItem{
 				Type:        "field",
@@ -340,7 +340,7 @@ func (d *Differ) compareTypeMethods(old, new TypeContract, diff *ContractDiff) {
 	}
 
 	// Check for added methods
-	for methodName, _ := range newMethods {
+	for methodName := range newMethods {
 		if _, exists := oldMethods[methodName]; !exists {
 			diff.AddedItems = append(diff.AddedItems, AddedItem{
 				Type:        "method",
@@ -391,7 +391,7 @@ func (d *Differ) compareFunctions(old, new []FunctionContract, diff *ContractDif
 	}
 
 	// Check for added functions
-	for name, _ := range newMap {
+	for name := range newMap {
 		if _, exists := oldMap[name]; !exists {
 			diff.AddedItems = append(diff.AddedItems, AddedItem{
 				Type:        "function",
@@ -442,7 +442,7 @@ func (d *Differ) compareVariables(old, new []VariableContract, diff *ContractDif
 	}
 
 	// Check for added variables
-	for name, _ := range newMap {
+	for name := range newMap {
 		if _, exists := oldMap[name]; !exists {
 			diff.AddedItems = append(diff.AddedItems, AddedItem{
 				Type:        "variable",
@@ -493,7 +493,7 @@ func (d *Differ) compareConstants(old, new []ConstantContract, diff *ContractDif
 	}
 
 	// Check for added constants
-	for name, _ := range newMap {
+	for name := range newMap {
 		if _, exists := oldMap[name]; !exists {
 			diff.AddedItems = append(diff.AddedItems, AddedItem{
 				Type:        "constant",

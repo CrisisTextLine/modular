@@ -17,56 +17,20 @@ var (
 	ErrUnsupportedFormat = errors.New("unsupported output format")
 )
 
-// extractCmd represents the extract command
-var extractCmd = &cobra.Command{
-	Use:   "extract [package]",
-	Short: "Extract API contract from a Go package",
-	Long: `Extract the public API contract from a Go package or directory.
-The contract includes exported interfaces, types, functions, variables, and constants.
-
-Examples:
-  modcli contract extract .                     # Current directory
-  modcli contract extract ./modules/auth       # Specific directory
-  modcli contract extract github.com/user/pkg  # Remote package
-  modcli contract extract -o contract.json .   # Save to file`,
-	Args: cobra.ExactArgs(1),
-	RunE: runExtractContract,
-}
-
-// compareCmd represents the compare command
-var compareCmd = &cobra.Command{
-	Use:   "compare <old-contract> <new-contract>",
-	Short: "Compare two API contracts",
-	Long: `Compare two API contract files and show the differences.
-This command identifies breaking changes, additions, and modifications.
-
-Examples:
-  modcli contract compare old.json new.json
-  modcli contract compare old.json new.json -o diff.json
-  modcli contract compare old.json new.json --format=markdown`,
-	Args:    cobra.ExactArgs(2),
-	Aliases: []string{"diff"},
-	RunE:    runCompareContract,
-}
-
-// Command flags
-var (
-	outputFile      string
-	includePrivate  bool
-	includeTests    bool
-	includeInternal bool
-	outputFormat    string
-	ignorePositions bool
-	ignoreComments  bool
-	verbose         bool
-)
-
-func init() {
-	// This will be called from NewRootCommand
-}
-
 // NewContractCommand creates the contract command
 func NewContractCommand() *cobra.Command {
+	// Local flag variables to avoid global state issues in tests
+	var (
+		outputFile      string
+		includePrivate  bool
+		includeTests    bool
+		includeInternal bool
+		outputFormat    string
+		ignorePositions bool
+		ignoreComments  bool
+		verbose         bool
+	)
+
 	contractCmd := &cobra.Command{
 		Use:   "contract",
 		Short: "API contract management for Go packages",
@@ -78,6 +42,42 @@ Available subcommands:
   extract  - Extract API contract from a Go package
   compare  - Compare two API contracts and show differences
   diff     - Alias for compare command`,
+	}
+
+	// Create extract command with local flag variables
+	extractCmd := &cobra.Command{
+		Use:   "extract [package]",
+		Short: "Extract API contract from a Go package",
+		Long: `Extract the public API contract from a Go package or directory.
+The contract includes exported interfaces, types, functions, variables, and constants.
+
+Examples:
+  modcli contract extract .                     # Current directory
+  modcli contract extract ./modules/auth       # Specific directory
+  modcli contract extract github.com/user/pkg  # Remote package
+  modcli contract extract -o contract.json .   # Save to file`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExtractContractWithFlags(cmd, args, outputFile, includePrivate, includeTests, includeInternal, verbose)
+		},
+	}
+
+	// Create compare command with local flag variables
+	compareCmd := &cobra.Command{
+		Use:   "compare <old-contract> <new-contract>",
+		Short: "Compare two API contracts",
+		Long: `Compare two API contract files and show the differences.
+This command identifies breaking changes, additions, and modifications.
+
+Examples:
+  modcli contract compare old.json new.json
+  modcli contract compare old.json new.json -o diff.json
+  modcli contract compare old.json new.json --format=markdown`,
+		Args:    cobra.ExactArgs(2),
+		Aliases: []string{"diff"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCompareContractWithFlags(cmd, args, outputFile, outputFormat, ignorePositions, ignoreComments, verbose)
+		},
 	}
 
 	// Setup extract command flags
@@ -99,7 +99,7 @@ Available subcommands:
 	return contractCmd
 }
 
-func runExtractContract(cmd *cobra.Command, args []string) error {
+func runExtractContractWithFlags(cmd *cobra.Command, args []string, outputFile string, includePrivate bool, includeTests bool, includeInternal bool, verbose bool) error {
 	packagePath := args[0]
 
 	if verbose {
@@ -163,7 +163,7 @@ func runExtractContract(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runCompareContract(cmd *cobra.Command, args []string) error {
+func runCompareContractWithFlags(cmd *cobra.Command, args []string, outputFile string, outputFormat string, ignorePositions bool, ignoreComments bool, verbose bool) error {
 	oldFile := args[0]
 	newFile := args[1]
 

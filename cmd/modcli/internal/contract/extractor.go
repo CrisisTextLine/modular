@@ -49,7 +49,7 @@ func (e *Extractor) ExtractFromPackage(packagePath string) (*Contract, error) {
 	}
 
 	if len(pkgs) == 0 {
-		return nil, fmt.Errorf("no packages found for %s", packagePath)
+		return nil, fmt.Errorf("%w: %s", ErrNoPackagesFound, packagePath)
 	}
 
 	if len(pkgs[0].Errors) > 0 {
@@ -57,7 +57,7 @@ func (e *Extractor) ExtractFromPackage(packagePath string) (*Contract, error) {
 		for _, err := range pkgs[0].Errors {
 			errors = append(errors, err.Error())
 		}
-		return nil, fmt.Errorf("package errors: %s", strings.Join(errors, "; "))
+		return nil, fmt.Errorf("%w: %s", ErrPackageErrors, strings.Join(errors, "; "))
 	}
 
 	return e.extractFromPackageInfo(pkgs[0])
@@ -66,7 +66,7 @@ func (e *Extractor) ExtractFromPackage(packagePath string) (*Contract, error) {
 // ExtractFromDirectory extracts the API contract from a directory containing Go files
 func (e *Extractor) ExtractFromDirectory(dir string) (*Contract, error) {
 	fset := token.NewFileSet()
-	
+
 	// Parse all Go files in the directory
 	pkgs, err := parser.ParseDir(fset, dir, func(info os.FileInfo) bool {
 		name := info.Name()
@@ -78,13 +78,13 @@ func (e *Extractor) ExtractFromDirectory(dir string) (*Contract, error) {
 		}
 		return true
 	}, parser.ParseComments)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse directory %s: %w", dir, err)
 	}
 
 	if len(pkgs) == 0 {
-		return nil, fmt.Errorf("no Go packages found in %s", dir)
+		return nil, fmt.Errorf("%w in %s", ErrNoGoPackagesFound, dir)
 	}
 
 	// Use the first non-main package, or main if that's all there is
@@ -122,7 +122,7 @@ func (e *Extractor) extractFromPackageInfo(pkg *packages.Package) (*Contract, er
 	scope := pkg.Types.Scope()
 	for _, name := range scope.Names() {
 		obj := scope.Lookup(name)
-		
+
 		// Skip unexported items if not including private
 		if !e.IncludePrivate && !obj.Exported() {
 			continue
@@ -168,7 +168,7 @@ func (e *Extractor) extractFromAST(pkg *ast.Package, fset *token.FileSet) (*Cont
 		}
 
 		typeContract := e.extractTypeFromDoc(t, fset)
-		
+
 		if e.isInterface(t) {
 			// Convert to interface contract
 			ifaceContract := InterfaceContract{
@@ -200,7 +200,7 @@ func (e *Extractor) extractFromAST(pkg *ast.Package, fset *token.FileSet) (*Cont
 			if !e.IncludePrivate && !ast.IsExported(name) {
 				continue
 			}
-			
+
 			varContract := VariableContract{
 				Name:       name,
 				Package:    pkg.Name,
@@ -216,7 +216,7 @@ func (e *Extractor) extractFromAST(pkg *ast.Package, fset *token.FileSet) (*Cont
 			if !e.IncludePrivate && !ast.IsExported(name) {
 				continue
 			}
-			
+
 			constContract := ConstantContract{
 				Name:       name,
 				Package:    pkg.Name,
@@ -246,7 +246,7 @@ func (e *Extractor) extractType(contract *Contract, pkg *packages.Package, obj *
 	}
 
 	underlying := named.Underlying()
-	
+
 	// Check if it's an interface
 	if iface, ok := underlying.(*types.Interface); ok {
 		ifaceContract := InterfaceContract{
@@ -388,8 +388,8 @@ func (e *Extractor) extractFunctionFromDoc(f *doc.Func, fset *token.FileSet) Fun
 
 func (e *Extractor) isInterface(t *doc.Type) bool {
 	// Simple check - in a full implementation, you'd parse the type spec
-	return strings.Contains(t.Doc, "interface") || 
-		   (t.Decl != nil && e.isInterfaceDecl(t.Decl))
+	return strings.Contains(t.Doc, "interface") ||
+		(t.Decl != nil && e.isInterfaceDecl(t.Decl))
 }
 
 func (e *Extractor) isInterfaceDecl(decl *ast.GenDecl) bool {
@@ -407,7 +407,7 @@ func (e *Extractor) isInterfaceDecl(decl *ast.GenDecl) bool {
 
 func (e *Extractor) extractMethodSignature(method *types.Func, fset *token.FileSet) MethodContract {
 	sig := method.Type().(*types.Signature)
-	
+
 	methodContract := MethodContract{
 		Name:       method.Name(),
 		Parameters: e.extractParameters(sig.Params()),
@@ -420,7 +420,7 @@ func (e *Extractor) extractMethodSignature(method *types.Func, fset *token.FileS
 		methodContract.Receiver = &ReceiverInfo{
 			Type: formatType(recv.Type()),
 		}
-		
+
 		// Check if it's a pointer receiver
 		if ptr, ok := recv.Type().(*types.Pointer); ok {
 			methodContract.Receiver.Pointer = true
@@ -449,10 +449,10 @@ func (e *Extractor) extractParameters(tuple *types.Tuple) []ParameterInfo {
 
 func (e *Extractor) extractStructFields(structType *types.Struct, fset *token.FileSet) []FieldContract {
 	fields := make([]FieldContract, structType.NumFields())
-	
+
 	for i := 0; i < structType.NumFields(); i++ {
 		field := structType.Field(i)
-		
+
 		if !e.IncludePrivate && !field.Exported() {
 			continue
 		}
@@ -483,19 +483,19 @@ func (e *Extractor) sortContract(contract *Contract) {
 	sort.Slice(contract.Interfaces, func(i, j int) bool {
 		return contract.Interfaces[i].Name < contract.Interfaces[j].Name
 	})
-	
+
 	sort.Slice(contract.Types, func(i, j int) bool {
 		return contract.Types[i].Name < contract.Types[j].Name
 	})
-	
+
 	sort.Slice(contract.Functions, func(i, j int) bool {
 		return contract.Functions[i].Name < contract.Functions[j].Name
 	})
-	
+
 	sort.Slice(contract.Variables, func(i, j int) bool {
 		return contract.Variables[i].Name < contract.Variables[j].Name
 	})
-	
+
 	sort.Slice(contract.Constants, func(i, j int) bool {
 		return contract.Constants[i].Name < contract.Constants[j].Name
 	})
@@ -506,7 +506,7 @@ func (e *Extractor) sortContract(contract *Contract) {
 			return contract.Interfaces[i].Methods[a].Name < contract.Interfaces[i].Methods[b].Name
 		})
 	}
-	
+
 	for i := range contract.Types {
 		sort.Slice(contract.Types[i].Methods, func(a, b int) bool {
 			return contract.Types[i].Methods[a].Name < contract.Types[i].Methods[b].Name
@@ -524,7 +524,7 @@ func (c *Contract) SaveToFile(filename string) error {
 		return fmt.Errorf("failed to marshal contract: %w", err)
 	}
 
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	if err := os.WriteFile(filename, data, 0600); err != nil {
 		return fmt.Errorf("failed to write contract file: %w", err)
 	}
 

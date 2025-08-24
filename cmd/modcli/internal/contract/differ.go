@@ -2,10 +2,20 @@ package contract
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+)
+
+// Define static errors
+var (
+	ErrNilContracts      = errors.New("contracts cannot be nil")
+	ErrUnsupportedFormat = errors.New("unsupported output format")
+	ErrNoPackagesFound   = errors.New("no packages found")
+	ErrNoGoPackagesFound = errors.New("no Go packages found in directory")
+	ErrPackageErrors     = errors.New("package compilation errors")
 )
 
 // Differ handles comparing two API contracts
@@ -27,7 +37,7 @@ func NewDiffer() *Differ {
 // Compare compares two contracts and returns the differences
 func (d *Differ) Compare(old, new *Contract) (*ContractDiff, error) {
 	if old == nil || new == nil {
-		return nil, fmt.Errorf("contracts cannot be nil")
+		return nil, ErrNilContracts
 	}
 
 	diff := &ContractDiff{
@@ -41,16 +51,16 @@ func (d *Differ) Compare(old, new *Contract) (*ContractDiff, error) {
 
 	// Compare interfaces
 	d.compareInterfaces(old.Interfaces, new.Interfaces, diff)
-	
+
 	// Compare types
 	d.compareTypes(old.Types, new.Types, diff)
-	
+
 	// Compare functions
 	d.compareFunctions(old.Functions, new.Functions, diff)
-	
+
 	// Compare variables
 	d.compareVariables(old.Variables, new.Variables, diff)
-	
+
 	// Compare constants
 	d.compareConstants(old.Constants, new.Constants, diff)
 
@@ -524,17 +534,17 @@ func (d *Differ) methodSignaturesEqual(old, new MethodContract) bool {
 	if old.Name != new.Name {
 		return false
 	}
-	
+
 	// Compare receiver
 	if !d.receiversEqual(old.Receiver, new.Receiver) {
 		return false
 	}
-	
+
 	// Compare parameters
 	if !d.parametersEqual(old.Parameters, new.Parameters) {
 		return false
 	}
-	
+
 	// Compare results
 	return d.parametersEqual(old.Results, new.Results)
 }
@@ -543,12 +553,12 @@ func (d *Differ) functionSignaturesEqual(old, new FunctionContract) bool {
 	if old.Name != new.Name {
 		return false
 	}
-	
+
 	// Compare parameters
 	if !d.parametersEqual(old.Parameters, new.Parameters) {
 		return false
 	}
-	
+
 	// Compare results
 	return d.parametersEqual(old.Results, new.Results)
 }
@@ -567,7 +577,7 @@ func (d *Differ) parametersEqual(old, new []ParameterInfo) bool {
 	if len(old) != len(new) {
 		return false
 	}
-	
+
 	for i, oldParam := range old {
 		newParam := new[i]
 		if oldParam.Type != newParam.Type {
@@ -575,7 +585,7 @@ func (d *Differ) parametersEqual(old, new []ParameterInfo) bool {
 		}
 		// Note: Parameter names can change without breaking compatibility
 	}
-	
+
 	return true
 }
 
@@ -592,7 +602,7 @@ func (d *Differ) interfaceSignature(iface InterfaceContract) string {
 
 func (d *Differ) methodSignature(method MethodContract) string {
 	var parts []string
-	
+
 	if method.Receiver != nil {
 		receiver := method.Receiver.Type
 		if method.Receiver.Pointer {
@@ -600,25 +610,25 @@ func (d *Differ) methodSignature(method MethodContract) string {
 		}
 		parts = append(parts, fmt.Sprintf("(%s)", receiver))
 	}
-	
+
 	parts = append(parts, method.Name)
 	parts = append(parts, fmt.Sprintf("(%s)", d.formatParameters(method.Parameters)))
-	
+
 	if len(method.Results) > 0 {
 		parts = append(parts, fmt.Sprintf("(%s)", d.formatParameters(method.Results)))
 	}
-	
+
 	return strings.Join(parts, " ")
 }
 
 func (d *Differ) functionSignature(fn FunctionContract) string {
 	parts := []string{fn.Name}
 	parts = append(parts, fmt.Sprintf("(%s)", d.formatParameters(fn.Parameters)))
-	
+
 	if len(fn.Results) > 0 {
 		parts = append(parts, fmt.Sprintf("(%s)", d.formatParameters(fn.Results)))
 	}
-	
+
 	return strings.Join(parts, " ")
 }
 
@@ -653,7 +663,7 @@ func (d *ContractDiff) SaveToFile(filename string) error {
 		return fmt.Errorf("failed to marshal diff: %w", err)
 	}
 
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	if err := os.WriteFile(filename, data, 0600); err != nil {
 		return fmt.Errorf("failed to write diff file: %w", err)
 	}
 

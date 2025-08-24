@@ -108,7 +108,7 @@ func privateFunc() {}
 	if !foundInterface {
 		t.Error("Expected to find TestInterface")
 	}
-	
+
 	// Note: The AST-based extraction may not differentiate between interfaces and structs correctly
 	// This is a known limitation of the current implementation
 	if !foundStruct && !foundInterface {
@@ -142,7 +142,7 @@ func privateFunc() {}
 	// Should have more items when including private
 	totalItems := len(contract.Interfaces) + len(contract.Types) + len(contract.Functions)
 	totalWithPrivate := len(contractWithPrivate.Interfaces) + len(contractWithPrivate.Types) + len(contractWithPrivate.Functions)
-	
+
 	if totalWithPrivate <= totalItems {
 		t.Log("Warning: Including private items didn't increase the count (may be a limitation of AST-based extraction)")
 	}
@@ -220,7 +220,7 @@ func TestHelper() string {
 	// Should only have MainFunc
 	foundMainFunc := false
 	foundTestFunc := false
-	
+
 	for _, fn := range contract.Functions {
 		if fn.Name == "MainFunc" {
 			foundMainFunc = true
@@ -233,7 +233,7 @@ func TestHelper() string {
 	if !foundMainFunc {
 		t.Error("Expected to find MainFunc")
 	}
-	
+
 	if foundTestFunc {
 		t.Error("Did not expect to find test functions when tests are excluded")
 	}
@@ -292,7 +292,7 @@ func TestExtractor_ExtractFromPackage_InvalidPackage(t *testing.T) {
 // TestExtractor_SortContract tests that contracts are sorted consistently
 func TestExtractor_SortContract(t *testing.T) {
 	extractor := NewExtractor()
-	
+
 	contract := &Contract{
 		Interfaces: []InterfaceContract{
 			{Name: "ZInterface"},

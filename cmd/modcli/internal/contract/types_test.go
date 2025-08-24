@@ -191,7 +191,7 @@ func TestContract_MarshalJSON(t *testing.T) {
 	}
 
 	if unmarshaled.PackageName != contract.PackageName {
-		t.Errorf("Package name mismatch after JSON round-trip: got %s, want %s", 
+		t.Errorf("Package name mismatch after JSON round-trip: got %s, want %s",
 			unmarshaled.PackageName, contract.PackageName)
 	}
 }

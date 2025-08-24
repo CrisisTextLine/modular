@@ -105,10 +105,10 @@ func TestDiffer_Compare(t *testing.T) {
 		},
 		Variables: []VariableContract{
 			{Name: "ExistingVar", Package: "testpkg", Type: "int"}, // Changed type - breaking change
-			{Name: "NewVar", Package: "testpkg", Type: "string"},  // Added
+			{Name: "NewVar", Package: "testpkg", Type: "string"},   // Added
 		},
 		Constants: []ConstantContract{
-			{Name: "ExistingConst", Package: "testpkg", Type: "int", Value: "100"}, // Changed value
+			{Name: "ExistingConst", Package: "testpkg", Type: "int", Value: "100"},  // Changed value
 			{Name: "NewConst", Package: "testpkg", Type: "string", Value: `"test"`}, // Added
 		},
 	}
@@ -196,7 +196,7 @@ func TestDiffer_Compare(t *testing.T) {
 
 func TestDiffer_Compare_NilContracts(t *testing.T) {
 	differ := NewDiffer()
-	
+
 	_, err := differ.Compare(nil, &Contract{})
 	if err == nil {
 		t.Error("Expected error for nil old contract")
@@ -344,17 +344,17 @@ func TestDiffer_SaveAndLoadDiff(t *testing.T) {
 	}
 
 	if loaded.Summary.HasBreakingChanges != diff.Summary.HasBreakingChanges {
-		t.Errorf("Breaking changes flag mismatch: got %t, want %t", 
+		t.Errorf("Breaking changes flag mismatch: got %t, want %t",
 			loaded.Summary.HasBreakingChanges, diff.Summary.HasBreakingChanges)
 	}
 
 	if len(loaded.BreakingChanges) != len(diff.BreakingChanges) {
-		t.Errorf("Breaking changes count mismatch: got %d, want %d", 
+		t.Errorf("Breaking changes count mismatch: got %d, want %d",
 			len(loaded.BreakingChanges), len(diff.BreakingChanges))
 	}
 
 	if len(loaded.AddedItems) != len(diff.AddedItems) {
-		t.Errorf("Added items count mismatch: got %d, want %d", 
+		t.Errorf("Added items count mismatch: got %d, want %d",
 			len(loaded.AddedItems), len(diff.AddedItems))
 	}
 }

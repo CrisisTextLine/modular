@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,11 @@ import (
 
 	"github.com/CrisisTextLine/modular/cmd/modcli/internal/contract"
 	"github.com/spf13/cobra"
+)
+
+// Define static errors
+var (
+	ErrUnsupportedFormat = errors.New("unsupported output format")
 )
 
 // extractCmd represents the extract command
@@ -129,11 +135,11 @@ func runExtractContract(cmd *cobra.Command, args []string) error {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "Saving contract to: %s\n", outputFile)
 		}
-		
+
 		if err := apiContract.SaveToFile(outputFile); err != nil {
 			return fmt.Errorf("failed to save contract: %w", err)
 		}
-		
+
 		fmt.Printf("API contract extracted and saved to %s\n", outputFile)
 	} else {
 		// Output to stdout as pretty JSON
@@ -196,7 +202,7 @@ func runCompareContract(cmd *cobra.Command, args []string) error {
 	case "text", "txt":
 		output, err = formatDiffAsText(diff)
 	default:
-		return fmt.Errorf("unsupported output format: %s", outputFormat)
+		return fmt.Errorf("%w: %s", ErrUnsupportedFormat, outputFormat)
 	}
 
 	if err != nil {
@@ -208,11 +214,11 @@ func runCompareContract(cmd *cobra.Command, args []string) error {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "Saving diff to: %s\n", outputFile)
 		}
-		
-		if err := os.WriteFile(outputFile, []byte(output), 0644); err != nil {
+
+		if err := os.WriteFile(outputFile, []byte(output), 0600); err != nil {
 			return fmt.Errorf("failed to save diff: %w", err)
 		}
-		
+
 		fmt.Printf("Contract diff saved to %s\n", outputFile)
 	} else {
 		fmt.Print(output)
@@ -237,7 +243,7 @@ func runCompareContract(cmd *cobra.Command, args []string) error {
 func formatDiffAsJSON(diff *contract.ContractDiff) (string, error) {
 	data, err := json.MarshalIndent(diff, "", "  ")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal diff as JSON: %w", err)
 	}
 	return string(data), nil
 }
@@ -246,7 +252,7 @@ func formatDiffAsMarkdown(diff *contract.ContractDiff) (string, error) {
 	var md strings.Builder
 
 	md.WriteString(fmt.Sprintf("# API Contract Diff: %s\n\n", diff.PackageName))
-	
+
 	if diff.OldVersion != "" || diff.NewVersion != "" {
 		md.WriteString("## Version Information\n")
 		if diff.OldVersion != "" {
@@ -263,7 +269,7 @@ func formatDiffAsMarkdown(diff *contract.ContractDiff) (string, error) {
 	md.WriteString(fmt.Sprintf("- **Breaking Changes**: %d\n", diff.Summary.TotalBreakingChanges))
 	md.WriteString(fmt.Sprintf("- **Additions**: %d\n", diff.Summary.TotalAdditions))
 	md.WriteString(fmt.Sprintf("- **Modifications**: %d\n", diff.Summary.TotalModifications))
-	
+
 	if diff.Summary.HasBreakingChanges {
 		md.WriteString("\n⚠️  **Warning: This update contains breaking changes!**\n")
 	}
@@ -320,7 +326,7 @@ func formatDiffAsText(diff *contract.ContractDiff) (string, error) {
 	txt.WriteString(fmt.Sprintf("  Breaking Changes: %d\n", diff.Summary.TotalBreakingChanges))
 	txt.WriteString(fmt.Sprintf("  Additions: %d\n", diff.Summary.TotalAdditions))
 	txt.WriteString(fmt.Sprintf("  Modifications: %d\n", diff.Summary.TotalModifications))
-	
+
 	if diff.Summary.HasBreakingChanges {
 		txt.WriteString("\n*** WARNING: Breaking changes detected! ***\n")
 	}

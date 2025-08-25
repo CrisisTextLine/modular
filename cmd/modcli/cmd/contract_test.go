@@ -18,13 +18,15 @@ func TestContractCommand(t *testing.T) {
 		t.Errorf("Expected Use to be 'contract', got %s", cmd.Use)
 	}
 
-	if len(cmd.Commands()) != 2 {
-		t.Errorf("Expected 2 subcommands, got %d", len(cmd.Commands()))
+	if len(cmd.Commands()) != 4 {
+		t.Errorf("Expected 4 subcommands, got %d", len(cmd.Commands()))
 	}
 
-	// Check that extract and compare commands are present
+	// Check that all expected commands are present
 	hasExtract := false
 	hasCompare := false
+	hasGitDiff := false
+	hasTags := false
 
 	for _, subcmd := range cmd.Commands() {
 		switch subcmd.Use {
@@ -32,6 +34,10 @@ func TestContractCommand(t *testing.T) {
 			hasExtract = true
 		case "compare <old-contract> <new-contract>":
 			hasCompare = true
+		case "git-diff [old-ref] [new-ref] [package-path]":
+			hasGitDiff = true
+		case "tags [package-path]":
+			hasTags = true
 		}
 	}
 
@@ -40,6 +46,12 @@ func TestContractCommand(t *testing.T) {
 	}
 	if !hasCompare {
 		t.Error("Expected compare command to be present")
+	}
+	if !hasGitDiff {
+		t.Error("Expected git-diff command to be present")
+	}
+	if !hasTags {
+		t.Error("Expected tags command to be present")
 	}
 }
 
@@ -330,11 +342,11 @@ func TestFormatDiffAsText(t *testing.T) {
 	}
 
 	expectedElements := []string{
-		"API Contract Diff: test",
-		"Summary:",
-		"Additions: 1",
+		"=== API Contract Diff ===",
+		"Package: test",
+		"Added items: 1",
 		"ADDITIONS:",
-		"+ function: NewFunc",
+		"- function: NewFunc - New function added",
 	}
 
 	for _, element := range expectedElements {

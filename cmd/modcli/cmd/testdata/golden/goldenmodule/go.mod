@@ -1,6 +1,6 @@
 module example.com/goldenmodule
 
-go 1.23.5
+go 1.25
 
 require (
 	github.com/CrisisTextLine/modular v1.6.0

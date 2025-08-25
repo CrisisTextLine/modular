@@ -1,13 +1,27 @@
 # API Contract Management
 
-This document describes the API contract management functionality in the Modular Go framework. This feature helps capture, track, and manage API changes across your modules and framework versions.
+This document describes the API contract management functionality provided by the Modular Go framework's `modcli` tool. 
+
+## Scope and Applicability
+
+**The API contract management system is designed to work with any Go codebase**, not just projects using the Modular framework. While it was developed as part of the Modular Go framework, the contract extraction and comparison functionality can be used for:
+
+- **Any Go package or module** - Extract contracts from standard Go libraries, third-party packages, or your own code
+- **Go monorepos** - Manage contracts across multiple modules in a single repository  
+- **Standalone Go projects** - Track API evolution in single-package projects
+- **Library development** - Ensure backward compatibility when publishing Go libraries
+- **Enterprise Go codebases** - Maintain API governance across large organizations
+
+The only requirement is that your code follows standard Go package conventions and can be compiled by the Go toolchain.
 
 ## Overview
 
 The API contract management system provides:
 
-- **Automated API Contract Extraction**: Extract public API contracts from Go packages
+- **Automated API Contract Extraction**: Extract public API contracts from any Go package
 - **Breaking Change Detection**: Identify breaking changes between API versions
+- **Git Integration**: Compare contracts across git references (branches, tags, commits)
+- **Version Tag Support**: Automatically identify and work with semantic version tags
 - **CI/CD Integration**: Automatic contract checking in pull requests
 - **Multiple Output Formats**: JSON artifacts, Markdown reports, and plain text summaries
 
@@ -95,6 +109,65 @@ modcli contract compare old.json new.json --format=markdown -o diff.md
 
 # Compare and save to file
 modcli contract compare v1.json v2.json -o changes.json
+```
+
+### `contract git-diff`
+
+Compares API contracts between git references (branches, tags, or commits).
+
+```bash
+modcli contract git-diff [old-ref] [new-ref] [package-path] [flags]
+
+Flags:
+  -o, --output string           Output file (default: stdout)  
+      --format string           Output format: json, markdown, text (default "markdown")
+      --ignore-positions        Ignore source position changes (default true)
+      --ignore-comments         Ignore documentation comment changes
+      --baseline string         Baseline reference (for single-ref comparisons)
+      --version-pattern string  Pattern for identifying version tags (default "^v\\d+\\.\\d+\\.\\d+.*$")
+  -v, --verbose                Verbose output
+```
+
+**Examples:**
+```bash
+# Compare tag v1.0.0 with current working directory
+modcli contract git-diff v1.0.0
+
+# Compare two tags
+modcli contract git-diff v1.0.0 v1.1.0 
+
+# Compare with specific package path
+modcli contract git-diff v1.0.0 main ./modules/auth
+
+# Compare last commit with current state
+modcli contract git-diff HEAD~1
+
+# Use baseline flag for cleaner command
+modcli contract git-diff --baseline v1.0.0 .
+```
+
+### `contract tags`
+
+Lists available version tags that can be used for contract comparison.
+
+```bash
+modcli contract tags [package-path] [flags]
+
+Flags:
+      --pattern string  Pattern for matching version tags (default "^v\\d+\\.\\d+\\.\\d+.*$")
+  -v, --verbose        Show detailed tag information
+```
+
+**Examples:**
+```bash
+# List version tags in current directory
+modcli contract tags .
+
+# List with custom pattern
+modcli contract tags --pattern "^release-.*"
+
+# Verbose output with dates and commit info
+modcli contract tags . -v
 ```
 
 ## Contract Structure
@@ -267,13 +340,41 @@ for module in modules/*/; do
 done
 ```
 
-### 3. Automated Documentation
+### 3. Git-Based Workflows
+```bash
+# Compare current changes with latest release
+modcli contract git-diff $(modcli contract tags . | head -n1)
+
+# Compare two releases to generate release notes
+modcli contract git-diff v1.0.0 v1.1.0 --format=markdown > release-notes.md
+
+# Check what's changed since last major version
+modcli contract git-diff --baseline v1.0.0 --format=markdown
+
+# Pre-commit hook: compare with main branch
+modcli contract git-diff origin/main HEAD .
+```
+
+### 4. Version Tag Management
+```bash
+# List available version tags
+modcli contract tags .
+
+# Find latest version automatically
+latest=$(modcli contract tags . | head -n1)
+modcli contract git-diff $latest
+
+# Custom version patterns for different projects
+modcli contract tags --pattern "^release-\d+\.\d+$"
+```
+
+### 5. Automated Documentation
 ```bash
 # Generate API documentation from contracts
 modcli contract compare old.json new.json --format=markdown > CHANGELOG.md
 ```
 
-### 4. Breaking Change Workflow
+### 6. Breaking Change Workflow
 1. **Pre-merge**: CI automatically detects breaking changes
 2. **Review**: Team reviews breaking changes in PR comments
 3. **Decision**: Approve for major version or request changes

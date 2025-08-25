@@ -365,11 +365,33 @@ func (e *Extractor) extractTypeFromDoc(t *doc.Type, fset *token.FileSet) TypeCon
 			continue
 		}
 
-		// This is simplified - a full implementation would parse the method signature
+		// Parse method signature completely
 		methodContract := MethodContract{
 			Name:       method.Name,
 			DocComment: method.Doc,
 			Position:   getPositionInfo(fset, method.Decl.Pos()),
+		}
+
+		// Extract full method signature including parameters and results
+		if method.Decl != nil {
+			funDecl := method.Decl
+			if funDecl.Type != nil {
+				// Extract receiver
+				if funDecl.Recv != nil && len(funDecl.Recv.List) > 0 {
+					recv := funDecl.Recv.List[0]
+					methodContract.Receiver = e.extractReceiverInfo(recv)
+				}
+
+				// Extract parameters
+				if funDecl.Type.Params != nil {
+					methodContract.Parameters = e.extractParameterList(funDecl.Type.Params)
+				}
+
+				// Extract results
+				if funDecl.Type.Results != nil {
+					methodContract.Results = e.extractParameterList(funDecl.Type.Results)
+				}
+			}
 		}
 		typeContract.Methods = append(typeContract.Methods, methodContract)
 	}
@@ -378,12 +400,29 @@ func (e *Extractor) extractTypeFromDoc(t *doc.Type, fset *token.FileSet) TypeCon
 }
 
 func (e *Extractor) extractFunctionFromDoc(f *doc.Func, fset *token.FileSet) FunctionContract {
-	return FunctionContract{
+	funcContract := FunctionContract{
 		Name:       f.Name,
 		DocComment: f.Doc,
 		Position:   getPositionInfo(fset, f.Decl.Pos()),
-		// Parameters and Results would need more complex parsing
 	}
+
+	// Extract full function signature including parameters and results
+	if f.Decl != nil {
+		funDecl := f.Decl
+		if funDecl.Type != nil {
+			// Extract parameters
+			if funDecl.Type.Params != nil {
+				funcContract.Parameters = e.extractParameterList(funDecl.Type.Params)
+			}
+
+			// Extract results
+			if funDecl.Type.Results != nil {
+				funcContract.Results = e.extractParameterList(funDecl.Type.Results)
+			}
+		}
+	}
+
+	return funcContract
 }
 
 func (e *Extractor) isInterface(t *doc.Type) bool {
@@ -473,9 +512,200 @@ func (e *Extractor) extractStructFields(structType *types.Struct, fset *token.Fi
 }
 
 func (e *Extractor) getDocComment(pkg *packages.Package, pos token.Pos) string {
-	// This is a simplified implementation
-	// A full implementation would map positions to AST nodes and extract comments
+	// Full implementation to map positions to AST nodes and extract comments
+	for _, syntax := range pkg.Syntax {
+		if syntax.Pos() <= pos && pos < syntax.End() {
+			// Find the node at this position
+			return e.extractCommentForPos(syntax, pkg.Fset, pos)
+		}
+	}
 	return ""
+}
+
+func (e *Extractor) extractCommentForPos(file *ast.File, fset *token.FileSet, pos token.Pos) string {
+	// Walk the AST to find the node at the given position
+	var result string
+	ast.Inspect(file, func(n ast.Node) bool {
+		if n == nil {
+			return false
+		}
+		
+		// Check if this node contains our position
+		if n.Pos() <= pos && pos < n.End() {
+			switch node := n.(type) {
+			case *ast.GenDecl:
+				if node.Doc != nil {
+					result = node.Doc.Text()
+				}
+			case *ast.FuncDecl:
+				if node.Doc != nil {
+					result = node.Doc.Text()
+				}
+			case *ast.TypeSpec:
+				if node.Doc != nil {
+					result = node.Doc.Text()
+				}
+			case *ast.Field:
+				if node.Doc != nil {
+					result = node.Doc.Text()
+				}
+			}
+			return true
+		}
+		return true
+	})
+	
+	return strings.TrimSpace(result)
+}
+
+func (e *Extractor) extractReceiverInfo(field *ast.Field) *ReceiverInfo {
+	if field == nil || field.Type == nil {
+		return nil
+	}
+	
+	receiverInfo := &ReceiverInfo{}
+	
+	// Get receiver name if available
+	if len(field.Names) > 0 {
+		receiverInfo.Name = field.Names[0].Name
+	}
+	
+	// Determine if it's a pointer and get the type
+	switch t := field.Type.(type) {
+	case *ast.StarExpr:
+		receiverInfo.Pointer = true
+		receiverInfo.Type = e.typeToString(t.X)
+	default:
+		receiverInfo.Pointer = false
+		receiverInfo.Type = e.typeToString(t)
+	}
+	
+	return receiverInfo
+}
+
+func (e *Extractor) extractParameterList(fieldList *ast.FieldList) []ParameterInfo {
+	if fieldList == nil {
+		return nil
+	}
+	
+	var parameters []ParameterInfo
+	
+	for _, field := range fieldList.List {
+		typeStr := e.typeToString(field.Type)
+		
+		if len(field.Names) > 0 {
+			// Named parameters
+			for _, name := range field.Names {
+				parameters = append(parameters, ParameterInfo{
+					Name: name.Name,
+					Type: typeStr,
+				})
+			}
+		} else {
+			// Unnamed parameter (e.g., in function results)
+			parameters = append(parameters, ParameterInfo{
+				Type: typeStr,
+			})
+		}
+	}
+	
+	return parameters
+}
+
+func (e *Extractor) typeToString(expr ast.Expr) string {
+	if expr == nil {
+		return ""
+	}
+	
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.SelectorExpr:
+		return e.typeToString(t.X) + "." + t.Sel.Name
+	case *ast.StarExpr:
+		return "*" + e.typeToString(t.X)
+	case *ast.ArrayType:
+		if t.Len == nil {
+			return "[]" + e.typeToString(t.Elt)
+		}
+		return "[" + e.exprToString(t.Len) + "]" + e.typeToString(t.Elt)
+	case *ast.MapType:
+		return "map[" + e.typeToString(t.Key) + "]" + e.typeToString(t.Value)
+	case *ast.ChanType:
+		switch t.Dir {
+		case ast.SEND:
+			return "chan<- " + e.typeToString(t.Value)
+		case ast.RECV:
+			return "<-chan " + e.typeToString(t.Value)
+		default:
+			return "chan " + e.typeToString(t.Value)
+		}
+	case *ast.InterfaceType:
+		return "interface{}"
+	case *ast.StructType:
+		return "struct{}"
+	case *ast.FuncType:
+		return e.funcTypeToString(t)
+	case *ast.Ellipsis:
+		return "..." + e.typeToString(t.Elt)
+	default:
+		// Fallback to basic string representation
+		return fmt.Sprintf("%T", t)
+	}
+}
+
+func (e *Extractor) exprToString(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.BasicLit:
+		return e.Value
+	case *ast.Ident:
+		return e.Name
+	default:
+		return ""
+	}
+}
+
+func (e *Extractor) funcTypeToString(ft *ast.FuncType) string {
+	var parts []string
+	parts = append(parts, "func")
+	
+	if ft.Params != nil {
+		var params []string
+		for _, field := range ft.Params.List {
+			typeStr := e.typeToString(field.Type)
+			if len(field.Names) > 0 {
+				for range field.Names {
+					params = append(params, typeStr)
+				}
+			} else {
+				params = append(params, typeStr)
+			}
+		}
+		parts = append(parts, "("+strings.Join(params, ", ")+")")
+	} else {
+		parts = append(parts, "()")
+	}
+	
+	if ft.Results != nil && len(ft.Results.List) > 0 {
+		var results []string
+		for _, field := range ft.Results.List {
+			typeStr := e.typeToString(field.Type)
+			if len(field.Names) > 0 {
+				for range field.Names {
+					results = append(results, typeStr)
+				}
+			} else {
+				results = append(results, typeStr)
+			}
+		}
+		if len(results) == 1 {
+			parts = append(parts, " "+results[0])
+		} else {
+			parts = append(parts, " ("+strings.Join(results, ", ")+")")
+		}
+	}
+	
+	return strings.Join(parts, "")
 }
 
 func (e *Extractor) sortContract(contract *Contract) {

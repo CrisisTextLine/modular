@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/CrisisTextLine/modular/cmd/modcli/internal/contract"
+	"github.com/CrisisTextLine/modular/cmd/modcli/internal/git"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +30,8 @@ func NewContractCommand() *cobra.Command {
 		ignorePositions bool
 		ignoreComments  bool
 		verbose         bool
+		baseline        string
+		versionPattern  string
 	)
 
 	contractCmd := &cobra.Command{
@@ -94,8 +97,56 @@ Examples:
 	compareCmd.Flags().BoolVar(&ignoreComments, "ignore-comments", false, "Ignore documentation comment changes")
 	compareCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 
+	// Create git-diff command for comparing git refs
+	gitDiffCmd := &cobra.Command{
+		Use:   "git-diff [old-ref] [new-ref] [package-path]",
+		Short: "Compare API contracts between git references",
+		Long: `Compare API contracts between two git references (branches, tags, commits).
+This command extracts contracts from both references and shows the differences.
+
+Examples:
+  modcli contract git-diff v1.0.0 main .           # Compare tag v1.0.0 with main branch
+  modcli contract git-diff HEAD~1 HEAD ./module    # Compare last commit with current
+  modcli contract git-diff --baseline v1.1.0 .     # Compare v1.1.0 with current working directory`,
+		Args: cobra.RangeArgs(0, 3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGitDiffContractWithFlags(cmd, args, outputFile, outputFormat, ignorePositions, ignoreComments, verbose, baseline, versionPattern)
+		},
+	}
+
+	// Create tags command for listing version tags
+	tagsCmd := &cobra.Command{
+		Use:   "tags [package-path]",
+		Short: "List available version tags for contract comparison",
+		Long: `List all version tags in the repository that can be used for contract comparison.
+By default, shows tags matching semantic versioning pattern (v1.2.3).
+
+Examples:
+  modcli contract tags .                           # List version tags in current directory
+  modcli contract tags --pattern "^release-.*"    # List tags matching custom pattern`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runListTagsWithFlags(cmd, args, versionPattern, verbose)
+		},
+	}
+
+	// Setup git-diff command flags
+	gitDiffCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file (default: stdout)")
+	gitDiffCmd.Flags().StringVar(&outputFormat, "format", "markdown", "Output format: json, markdown, text")
+	gitDiffCmd.Flags().BoolVar(&ignorePositions, "ignore-positions", true, "Ignore source position changes")
+	gitDiffCmd.Flags().BoolVar(&ignoreComments, "ignore-comments", false, "Ignore documentation comment changes")
+	gitDiffCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	gitDiffCmd.Flags().StringVar(&baseline, "baseline", "", "Baseline reference (if only one ref is provided, compares with working directory)")
+	gitDiffCmd.Flags().StringVar(&versionPattern, "version-pattern", `^v\d+\.\d+\.\d+.*$`, "Pattern for identifying version tags")
+
+	// Setup tags command flags
+	tagsCmd.Flags().StringVar(&versionPattern, "pattern", `^v\d+\.\d+\.\d+.*$`, "Pattern for matching version tags")
+	tagsCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+
 	contractCmd.AddCommand(extractCmd)
 	contractCmd.AddCommand(compareCmd)
+	contractCmd.AddCommand(gitDiffCmd)
+	contractCmd.AddCommand(tagsCmd)
 	return contractCmd
 }
 
@@ -318,54 +369,244 @@ func formatDiffAsMarkdown(diff *contract.ContractDiff) (string, error) {
 func formatDiffAsText(diff *contract.ContractDiff) (string, error) {
 	var txt strings.Builder
 
-	txt.WriteString(fmt.Sprintf("API Contract Diff: %s\n", diff.PackageName))
-	txt.WriteString(strings.Repeat("=", 50) + "\n\n")
-
-	// Summary
-	txt.WriteString("Summary:\n")
-	txt.WriteString(fmt.Sprintf("  Breaking Changes: %d\n", diff.Summary.TotalBreakingChanges))
-	txt.WriteString(fmt.Sprintf("  Additions: %d\n", diff.Summary.TotalAdditions))
-	txt.WriteString(fmt.Sprintf("  Modifications: %d\n", diff.Summary.TotalModifications))
-
 	if diff.Summary.HasBreakingChanges {
-		txt.WriteString("\n*** WARNING: Breaking changes detected! ***\n")
+		txt.WriteString("⚠️ WARNING: Breaking changes detected!\n\n")
 	}
+
+	txt.WriteString(fmt.Sprintf("=== API Contract Diff ===\n"))
+	txt.WriteString(fmt.Sprintf("Package: %s\n", diff.PackageName))
+	txt.WriteString(fmt.Sprintf("Breaking changes: %d\n", len(diff.BreakingChanges)))
+	txt.WriteString(fmt.Sprintf("Added items: %d\n", len(diff.AddedItems)))
+	txt.WriteString(fmt.Sprintf("Modified items: %d\n", len(diff.ModifiedItems)))
 	txt.WriteString("\n")
 
-	// Breaking changes
 	if len(diff.BreakingChanges) > 0 {
 		txt.WriteString("BREAKING CHANGES:\n")
-		txt.WriteString(strings.Repeat("-", 20) + "\n")
 		for _, change := range diff.BreakingChanges {
-			txt.WriteString(fmt.Sprintf("- %s: %s\n", change.Type, change.Item))
-			txt.WriteString(fmt.Sprintf("  %s\n", change.Description))
-			if change.OldValue != "" && change.NewValue != "" {
-				txt.WriteString(fmt.Sprintf("  Old: %s\n", change.OldValue))
-				txt.WriteString(fmt.Sprintf("  New: %s\n", change.NewValue))
-			}
-			txt.WriteString("\n")
-		}
-	}
-
-	// Additions
-	if len(diff.AddedItems) > 0 {
-		txt.WriteString("ADDITIONS:\n")
-		txt.WriteString(strings.Repeat("-", 20) + "\n")
-		for _, item := range diff.AddedItems {
-			txt.WriteString(fmt.Sprintf("+ %s: %s\n", item.Type, item.Item))
+			txt.WriteString(fmt.Sprintf("- %s: %s - %s\n", change.Type, change.Item, change.Description))
 		}
 		txt.WriteString("\n")
 	}
 
-	// Modifications
+	if len(diff.AddedItems) > 0 {
+		txt.WriteString("ADDITIONS:\n")
+		for _, item := range diff.AddedItems {
+			txt.WriteString(fmt.Sprintf("- %s: %s - %s\n", item.Type, item.Item, item.Description))
+		}
+		txt.WriteString("\n")
+	}
+
 	if len(diff.ModifiedItems) > 0 {
 		txt.WriteString("MODIFICATIONS:\n")
-		txt.WriteString(strings.Repeat("-", 20) + "\n")
 		for _, item := range diff.ModifiedItems {
-			txt.WriteString(fmt.Sprintf("~ %s: %s\n", item.Type, item.Item))
+			txt.WriteString(fmt.Sprintf("- %s: %s - %s\n", item.Type, item.Item, item.Description))
 		}
 		txt.WriteString("\n")
 	}
 
 	return txt.String(), nil
 }
+
+func runGitDiffContractWithFlags(cmd *cobra.Command, args []string, outputFile, outputFormat string, ignorePositions, ignoreComments, verbose bool, baseline, versionPattern string) error {
+	// Import git helper
+	gitHelper := git.NewGitHelper(".")
+	
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Using git diff for contract comparison\n")
+	}
+
+	var oldRef, newRef, packagePath string
+	
+	// Parse arguments based on how many were provided
+	switch len(args) {
+	case 0:
+		// Compare latest version tag with current working directory
+		if baseline != "" {
+			oldRef = baseline
+		} else {
+			var err error
+			oldRef, err = gitHelper.FindLatestVersionTag(versionPattern)
+			if err != nil {
+				return fmt.Errorf("failed to find latest version tag: %w", err)
+			}
+		}
+		newRef = ""
+		packagePath = "."
+	case 1:
+		// Argument could be package path or new ref
+		if strings.HasPrefix(args[0], ".") || strings.HasPrefix(args[0], "/") {
+			// It's a package path
+			if baseline != "" {
+				oldRef = baseline
+			} else {
+				var err error
+				oldRef, err = gitHelper.FindLatestVersionTag(versionPattern)
+				if err != nil {
+					return fmt.Errorf("failed to find latest version tag: %w", err)
+				}
+			}
+			newRef = ""
+			packagePath = args[0]
+		} else {
+			// It's a ref
+			if baseline != "" {
+				oldRef = baseline
+				newRef = args[0]
+			} else {
+				oldRef = args[0]
+				newRef = ""
+			}
+			packagePath = "."
+		}
+	case 2:
+		oldRef = args[0]
+		newRef = args[1]
+		packagePath = "."
+	case 3:
+		oldRef = args[0]
+		newRef = args[1]
+		packagePath = args[2]
+	default:
+		return fmt.Errorf("too many arguments")
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Comparing: %s -> %s (package: %s)\n", oldRef, newRef, packagePath)
+	}
+
+	// Create extractor
+	extractor := contract.NewExtractor()
+
+	var diff *contract.ContractDiff
+	var err error
+
+	if newRef == "" {
+		// Compare ref with current working directory
+		oldContract, err := gitHelper.ExtractContractFromRef(oldRef, packagePath, extractor)
+		if err != nil {
+			return fmt.Errorf("failed to extract contract from %s: %w", oldRef, err)
+		}
+
+		// Extract from current working directory
+		var targetPath string
+		if packagePath == "." || packagePath == "" {
+			targetPath = "."
+		} else {
+			targetPath = packagePath
+		}
+
+		var newContract *contract.Contract
+		// Check if it's a local directory
+		if strings.HasPrefix(targetPath, ".") || strings.HasPrefix(targetPath, "/") {
+			newContract, err = extractor.ExtractFromDirectory(targetPath)
+		} else {
+			newContract, err = extractor.ExtractFromPackage(targetPath)
+		}
+		
+		if err != nil {
+			return fmt.Errorf("failed to extract contract from working directory: %w", err)
+		}
+
+		// Compare contracts
+		differ := contract.NewDiffer()
+		differ.IgnorePositions = ignorePositions
+		differ.IgnoreComments = ignoreComments
+
+		diff, err = differ.Compare(oldContract, newContract)
+		if err != nil {
+			return fmt.Errorf("failed to compare contracts: %w", err)
+		}
+	} else {
+		// Compare two refs
+		diff, err = gitHelper.CompareRefs(oldRef, newRef, packagePath, extractor)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Format and output the diff
+	var output string
+	switch strings.ToLower(outputFormat) {
+	case "json":
+		output, err = formatDiffAsJSON(diff)
+	case "markdown", "md":
+		output, err = formatDiffAsMarkdown(diff)
+	case "text":
+		output, err = formatDiffAsText(diff)
+	default:
+		return ErrUnsupportedFormat
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to format diff: %w", err)
+	}
+
+	// Output the diff
+	if outputFile != "" {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Saving diff to: %s\n", outputFile)
+		}
+
+		if err := os.WriteFile(outputFile, []byte(output), 0644); err != nil {
+			return fmt.Errorf("failed to write output file: %w", err)
+		}
+
+		fmt.Printf("Contract diff saved to %s\n", outputFile)
+	} else {
+		fmt.Print(output)
+	}
+
+	// Exit with error code if breaking changes detected
+	if diff.Summary.HasBreakingChanges {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Breaking changes detected!\n")
+		}
+		os.Exit(1)
+	}
+
+	return nil
+}
+
+func runListTagsWithFlags(cmd *cobra.Command, args []string, versionPattern string, verbose bool) error {
+	packagePath := "."
+	if len(args) > 0 {
+		packagePath = args[0]
+	}
+
+	gitHelper := git.NewGitHelper(packagePath)
+	
+	if !gitHelper.IsGitRepository() {
+		return fmt.Errorf("not a git repository: %s", packagePath)
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Listing version tags matching pattern: %s\n", versionPattern)
+	}
+
+	tags, err := gitHelper.ListVersionTags(versionPattern)
+	if err != nil {
+		return fmt.Errorf("failed to list version tags: %w", err)
+	}
+
+	if len(tags) == 0 {
+		fmt.Printf("No version tags found matching pattern: %s\n", versionPattern)
+		return nil
+	}
+
+	fmt.Printf("Available version tags (%d found):\n\n", len(tags))
+	for _, tag := range tags {
+		if verbose {
+			fmt.Printf("  %s (%s) - %s\n    %s\n", tag.Name, tag.Date.Format("2006-01-02"), tag.Commit[:8], tag.Message)
+		} else {
+			fmt.Printf("  %s\n", tag.Name)
+		}
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "\nUse these tags with 'modcli contract git-diff <old-tag> <new-tag>'\n")
+	}
+
+	return nil
+}
+
+

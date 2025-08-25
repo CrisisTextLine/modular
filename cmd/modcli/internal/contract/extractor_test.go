@@ -82,10 +82,9 @@ func privateFunc() {}
 	for _, iface := range contract.Interfaces {
 		if iface.Name == "TestInterface" {
 			foundInterface = true
+			// With the complete implementation, we should extract methods
 			if len(iface.Methods) == 0 {
-				// Note: The AST-based extraction may not capture methods correctly
-				// This is a limitation of the simplified implementation
-				t.Log("Warning: Methods not extracted from interface (AST-based limitation)")
+				t.Log("Interface methods should be extracted with the full implementation")
 			}
 		}
 	}
@@ -109,10 +108,9 @@ func privateFunc() {}
 		t.Error("Expected to find TestInterface")
 	}
 
-	// Note: The AST-based extraction may not differentiate between interfaces and structs correctly
-	// This is a known limitation of the current implementation
-	if !foundStruct && !foundInterface {
-		t.Error("Expected to find TestStruct or it was classified as interface")
+	// With the complete implementation, we should properly differentiate types
+	if !foundStruct {
+		t.Error("Expected to find TestStruct with complete implementation")
 	}
 
 	if !foundFunction {

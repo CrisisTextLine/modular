@@ -678,8 +678,6 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 				m.logger.Debug("Failed to emit request received event", "error", emitErr)
 			}
 		} else {
-			//nolint:forbidigo
-			fmt.Println("[httpserver] DEBUG: emitted request.received")
 		}
 
 		// Wrap response writer to capture status code
@@ -710,8 +708,6 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 				m.logger.Debug("Failed to emit request handled event", "error", emitErr)
 			}
 		} else {
-			//nolint:forbidigo
-			fmt.Println("[httpserver] DEBUG: emitted request.handled")
 		}
 	})
 }

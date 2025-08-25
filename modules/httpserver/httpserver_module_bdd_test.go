@@ -54,10 +54,6 @@ func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.events = append(t.events, event.Clone())
-	// Temporary diagnostic to trace event capture during request handling
-	if len(event.Type()) >= len("com.modular.httpserver.request.") && event.Type()[:len("com.modular.httpserver.request.")] == "com.modular.httpserver.request." {
-		fmt.Printf("[test-observer] captured: %s total: %d ptr:%p\n", event.Type(), len(t.events), t)
-	}
 	// set flags for request events to make Then steps robust
 	switch event.Type() {
 	case EventTypeRequestReceived:
@@ -75,13 +71,7 @@ func (t *testEventObserver) ObserverID() string {
 func (t *testEventObserver) GetEvents() []cloudevents.Event {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	// Temporary diagnostics to understand observed length at read time
-	if len(t.events) > 0 {
-		last := t.events[len(t.events)-1]
-		fmt.Printf("[test-observer] GetEvents len: %d last: %s ptr:%p\n", len(t.events), last.Type(), t)
-	} else {
-		fmt.Printf("[test-observer] GetEvents len: 0 ptr:%p\n", t)
-	}
+	// Diagnostics removed; return a copy of events
 	events := make([]cloudevents.Event, len(t.events))
 	copy(events, t.events)
 	return events

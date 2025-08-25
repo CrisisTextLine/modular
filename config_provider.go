@@ -428,7 +428,9 @@ func loadAppConfig(app *StdApplication) error {
 
 	// Start capacity estimation (base + either per-app or global)
 	baseCount := 0
-	if IsBaseConfigEnabled() && GetBaseConfigFeeder() != nil { baseCount = 1 }
+	if IsBaseConfigEnabled() && GetBaseConfigFeeder() != nil {
+		baseCount = 1
+	}
 	if app.configFeeders != nil {
 		effectiveFeeders = make([]Feeder, 0, baseCount+len(app.configFeeders))
 	} else {

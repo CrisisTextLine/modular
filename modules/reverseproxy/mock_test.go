@@ -313,28 +313,32 @@ func (m *MockLogger) Error(msg string, args ...interface{}) {
 
 // Snapshot methods (currently unused but safe for concurrent access in future assertions)
 func (m *MockLogger) GetDebugMessages() []string {
-	m.mu.RLock(); defer m.mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	out := make([]string, len(m.DebugMessages))
 	copy(out, m.DebugMessages)
 	return out
 }
 
 func (m *MockLogger) GetInfoMessages() []string {
-	m.mu.RLock(); defer m.mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	out := make([]string, len(m.InfoMessages))
 	copy(out, m.InfoMessages)
 	return out
 }
 
 func (m *MockLogger) GetWarnMessages() []string {
-	m.mu.RLock(); defer m.mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	out := make([]string, len(m.WarnMessages))
 	copy(out, m.WarnMessages)
 	return out
 }
 
 func (m *MockLogger) GetErrorMessages() []string {
-	m.mu.RLock(); defer m.mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	out := make([]string, len(m.ErrorMessages))
 	copy(out, m.ErrorMessages)
 	return out

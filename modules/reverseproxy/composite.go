@@ -227,7 +227,7 @@ func (h *CompositeHandler) executeSequential(ctx context.Context, w http.Respons
 		}
 
 		// Execute the request.
-	resp, err := h.executeBackendRequest(ctx, backend, r, bodyBytes) //nolint:bodyclose // Response body is closed in mergeResponses cleanup
+		resp, err := h.executeBackendRequest(ctx, backend, r, bodyBytes) //nolint:bodyclose // Response body is closed in mergeResponses cleanup
 		if err != nil {
 			if circuitBreaker != nil {
 				circuitBreaker.RecordFailure()

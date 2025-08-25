@@ -3,9 +3,9 @@ package auth
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
-	"sync"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -36,6 +36,7 @@ func (o *testObserver) OnEvent(ctx context.Context, event cloudevents.Event) err
 	o.mu.Unlock()
 	return nil
 }
+
 // snapshot returns a copy of captured events for safe concurrent iteration
 func (o *testObserver) snapshot() []cloudevents.Event {
 	o.mu.RLock()

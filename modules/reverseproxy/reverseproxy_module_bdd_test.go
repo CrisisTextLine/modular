@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +45,7 @@ type ReverseProxyBDDTestContext struct {
 
 // testEventObserver captures CloudEvents during testing
 type testEventObserver struct {
+	mu     sync.RWMutex
 	events []cloudevents.Event
 }
 
@@ -54,7 +56,9 @@ func newTestEventObserver() *testEventObserver {
 }
 
 func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	t.mu.Lock()
 	t.events = append(t.events, event.Clone())
+	t.mu.Unlock()
 	return nil
 }
 
@@ -63,13 +67,17 @@ func (t *testEventObserver) ObserverID() string {
 }
 
 func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	t.mu.RLock()
 	events := make([]cloudevents.Event, len(t.events))
 	copy(events, t.events)
+	t.mu.RUnlock()
 	return events
 }
 
 func (t *testEventObserver) ClearEvents() {
+	t.mu.Lock()
 	t.events = make([]cloudevents.Event, 0)
+	t.mu.Unlock()
 }
 
 func (ctx *ReverseProxyBDDTestContext) resetContext() {
@@ -845,7 +853,13 @@ func (ctx *ReverseProxyBDDTestContext) routeTrafficOnlyToHealthyBackends() error
 		"unhealthy-backend": "/health",
 	}
 
-	// Give health checker time to detect backend states
+	// Propagate changes to health checker with defensive copies to avoid data races
+	if ctx.service.healthChecker != nil {
+		ctx.service.healthChecker.UpdateBackends(context.Background(), ctx.service.config.BackendServices)
+		ctx.service.healthChecker.UpdateHealthConfig(context.Background(), &ctx.service.config.HealthCheck)
+	}
+
+	// Give health checker time to detect backend states (initial immediate check + periodic)
 	time.Sleep(3 * time.Second)
 
 	// Make requests and verify they only go to healthy backends

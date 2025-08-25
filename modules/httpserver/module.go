@@ -40,8 +40,8 @@ import (
 	"net/http"
 	"os"
 	"reflect"
-	"time"
 	"sync"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"

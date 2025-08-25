@@ -123,8 +123,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strings"
-	"time"
 	"sync"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -160,8 +160,8 @@ type HTTPClientModule struct {
 	namedModifiers map[string]func(*http.Request) error // For named modifier management
 	// subject can be set during observer registration while background event goroutines read it.
 	// Use RWMutex to avoid data race (pattern aligned with cache module fix).
-	subject        modular.Subject
-	subjectMu      sync.RWMutex
+	subject   modular.Subject
+	subjectMu sync.RWMutex
 }
 
 // Make sure HTTPClientModule implements necessary interfaces
@@ -483,9 +483,9 @@ func (m *HTTPClientModule) RemoveRequestModifier(name string) {
 // RegisterObservers implements the ObservableModule interface.
 // This allows the httpclient module to register as an observer for events it's interested in.
 func (m *HTTPClientModule) RegisterObservers(subject modular.Subject) error {
- m.subjectMu.Lock()
- m.subject = subject
- m.subjectMu.Unlock()
+	m.subjectMu.Lock()
+	m.subject = subject
+	m.subjectMu.Unlock()
 	// The httpclient module currently does not need to observe other events,
 	// but this method stores the subject for event emission.
 	return nil

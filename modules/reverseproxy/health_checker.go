@@ -102,16 +102,16 @@ func NewHealthChecker(config *HealthCheckConfig, backends map[string]string, htt
 	copy(expectedCodesCopy, config.ExpectedStatusCodes)
 
 	return &HealthChecker{
-		config:                  config,
-		httpClient:              httpClient,
-		logger:                  logger,
-		backends:                backendsCopy,
-		healthStatus:            make(map[string]*HealthStatus),
-		requestTimes:            make(map[string]time.Time),
-		stopChan:                make(chan struct{}),
-		healthEndpoints:         healthEndpointsCopy,
+		config:                   config,
+		httpClient:               httpClient,
+		logger:                   logger,
+		backends:                 backendsCopy,
+		healthStatus:             make(map[string]*HealthStatus),
+		requestTimes:             make(map[string]time.Time),
+		stopChan:                 make(chan struct{}),
+		healthEndpoints:          healthEndpointsCopy,
 		backendHealthCheckConfig: backendHealthCfgCopy,
-		expectedStatusCodes:     expectedCodesCopy,
+		expectedStatusCodes:      expectedCodesCopy,
 	}
 }
 
@@ -606,7 +606,9 @@ func (hc *HealthChecker) isBackendHealthCheckEnabled(backendID string) bool {
 func (hc *HealthChecker) UpdateBackends(ctx context.Context, backends map[string]string) {
 	// Clone incoming map first
 	cloned := make(map[string]string, len(backends))
-	for k, v := range backends { cloned[k] = v }
+	for k, v := range backends {
+		cloned[k] = v
+	}
 
 	hc.statusMutex.Lock()
 	// Remove health status for backends that no longer exist

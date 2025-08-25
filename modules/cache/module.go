@@ -66,8 +66,8 @@ package cache
 import (
 	"context"
 	"fmt"
-	"time"
 	"sync"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -108,8 +108,8 @@ type CacheModule struct {
 	// concurrently with reads during startup because events are emitted from goroutines.
 	// Guard with RWMutex to avoid data races between RegisterObservers (write) and
 	// EmitEvent (read) when asynchronous emissions occur before observer registration completes.
-	subject     modular.Subject
-	subjectMu   sync.RWMutex
+	subject   modular.Subject
+	subjectMu sync.RWMutex
 }
 
 // NewModule creates a new instance of the cache module.

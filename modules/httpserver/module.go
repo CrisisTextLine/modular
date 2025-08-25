@@ -467,6 +467,10 @@ func (m *HTTPServerModule) Stop(ctx context.Context) error {
 	m.started = false
 	m.logger.Info("HTTP server stopped successfully")
 
+	// Removed synthetic request event emission: tests no longer rely on placeholder
+	// events when no real traffic occurred. If needed in the future, reintroduce
+	// behind a test-only build tag or explicit configuration flag.
+
 	// Emit server stopped event synchronously
 	event := modular.NewCloudEvent(EventTypeServerStopped, "httpserver-service", map[string]interface{}{
 		"host": m.config.Host,
@@ -657,6 +661,7 @@ func (m *HTTPServerModule) EmitEvent(ctx context.Context, event cloudevents.Even
 // wrapHandlerWithRequestEvents wraps the HTTP handler to emit request events
 func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Request lifecycle events are emitted for each real request
 		// Emit request received event SYNCHRONOUSLY to ensure immediate emission
 		requestReceivedEvent := modular.NewCloudEvent(EventTypeRequestReceived, "httpserver-service", map[string]interface{}{
 			"method":      r.Method,

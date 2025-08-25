@@ -11,6 +11,25 @@ Modular Go
 [![Go Report Card](https://goreportcard.com/badge/github.com/CrisisTextLine/modular)](https://goreportcard.com/report/github.com/CrisisTextLine/modular)
 [![codecov](https://codecov.io/gh/CrisisTextLine/modular/graph/badge.svg?token=2HCVC9RTN8)](https://codecov.io/gh/CrisisTextLine/modular)
 
+## Testing
+
+Run all tests:
+
+```bash
+go test ./... -v
+```
+
+### Parallel Module BDD Suites
+
+To speed up BDD feedback locally you can execute module BDD suites in parallel:
+
+```bash
+chmod +x scripts/run-module-bdd-parallel.sh
+scripts/run-module-bdd-parallel.sh 6   # 6 workers; omit number to auto-detect CPUs
+```
+
+The script prefers GNU `parallel` and falls back to `xargs -P`.
+
 ## Overview
 Modular is a package that provides a structured way to create modular applications in Go. It allows you to build applications as collections of modules that can be easily added, removed, or replaced. Key features include:
 

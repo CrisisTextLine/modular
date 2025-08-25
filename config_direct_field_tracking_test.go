@@ -12,6 +12,7 @@ import (
 
 // TestDirectFeederFieldTracking tests field tracking when calling feeder.Feed() directly
 func TestDirectFeederFieldTracking(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		envVars map[string]string
@@ -80,6 +81,7 @@ func TestDirectFeederFieldTracking(t *testing.T) {
 
 // TestInstanceAwareDirectFieldTracking tests instance-aware field tracking with direct feeding
 func TestInstanceAwareDirectFieldTracking(t *testing.T) {
+	t.Parallel()
 	// Set up environment variables for instance-aware tracking
 	envVars := map[string]string{
 		"DB_PRIMARY_DRIVER":   "postgres",

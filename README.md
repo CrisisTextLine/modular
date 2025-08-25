@@ -582,6 +582,7 @@ func (m *MultiTenantModule) OnTenantRemoved(tenantID modular.TenantID) {
 configLoader := modular.NewFileBasedTenantConfigLoader(modular.TenantConfigParams{
     ConfigNameRegex: regexp.MustCompile("^tenant-[\\w-]+\\.(json|yaml)$"),
     ConfigDir:       "./configs/tenants",
+    // Prefer per-app feeders (via app.SetConfigFeeders) over global when testing; examples use explicit slice for clarity
     ConfigFeeders:   []modular.Feeder{},
 })
 
@@ -655,6 +656,44 @@ type ConfigValidator interface {
 ## CLI Tool
 
 Modular comes with a command-line tool (`modcli`) to help you create new modules and configurations.
+
+## Test Isolation and Configuration Feeders
+
+Historically tests mutated the package-level `modular.ConfigFeeders` slice directly to control configuration sources. This created hidden coupling and prevented safe use of `t.Parallel()`. The framework now supports per-application feeders via:
+
+```
+app.(*modular.StdApplication).SetConfigFeeders([]modular.Feeder{feeders.NewYamlFeeder("config.yaml"), feeders.NewEnvFeeder()})
+```
+
+Guidelines:
+
+1. In tests, prefer `app.SetConfigFeeders(...)` immediately after creating the application (before `Init()`).
+2. Pass `nil` to revert an app back to using global feeders (rare in tests now).
+3. Avoid mutating `modular.ConfigFeeders` in tests; example applications may still set the global slice once at startup for simplicity.
+4. The legacy isolation helper no longer snapshots feeders; only environment variables are isolated.
+
+Benefit: tests become self-contained and can run in parallel without feeder race conditions.
+
+### Parallel Testing Guidelines
+
+Short rules for adding `t.Parallel()` safely:
+
+DO:
+- Pre-create apps and call `app.SetConfigFeeders(...)` instead of mutating global `ConfigFeeders`.
+- Set all required environment variables up-front in the parent test (one `t.Setenv` per variable) and then parallelize independent subtests that do NOT call `t.Setenv` themselves.
+- Keep tests idempotent: no shared global mutation, no time-dependent ordering.
+- Use isolated temp dirs (`t.TempDir()`) and unique filenames.
+
+DO NOT:
+- Call `t.Parallel()` on a test that itself calls `t.Setenv` or `t.Chdir` (Go 1.25 restriction: mixing causes a panic: "test using t.Setenv or t.Chdir can not use t.Parallel").
+- Rely on mutation of package-level singletons (e.g. modifying global slices) across parallel tests.
+- Write to the same file or network port from multiple parallel tests.
+
+Patterns:
+- Serial parent + parallel children: parent sets env vars; each child `t.Parallel()` if it doesn't modify env/working dir.
+- Fully serial tests: keep serial when per-case env mutation is unavoidable.
+
+If in doubt, leave the test serial and add a brief comment explaining why (`// NOTE: cannot parallelize because ...`).
 
 ### Installation
 

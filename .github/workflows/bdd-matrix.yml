@@ -61,6 +61,7 @@ jobs:
           set -e
           echo '=== Core Framework BDD Tests ==='
           export CGO_ENABLED=1
+          export GORACE=halt_on_error=1
           go test -race -v -coverprofile=core-bdd-coverage.txt -covermode=atomic -run 'TestApplicationLifecycle|TestConfigurationManagement|TestBaseConfigBDDFeatures|TestLoggerDecorator' .
       - name: Upload core BDD coverage
         uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0 pinned
@@ -98,6 +99,7 @@ jobs:
           echo "=== BDD for ${{ matrix.module }} ==="
           # Run BDD-focused Go tests (naming convention: *BDD*)
           export CGO_ENABLED=1
+          export GORACE=halt_on_error=1
           go test -race -v -coverprofile=bdd-${{ matrix.module }}-coverage.txt -covermode=atomic -run '.*BDD|.*Module' . || echo "No BDD tests found"
       - name: Upload module BDD coverage
         if: always()

@@ -122,6 +122,7 @@ jobs:
         continue-on-error: true
         run: |
           export CGO_ENABLED=1
+          export GORACE=halt_on_error=1
           if go test -race -v ./... -coverprofile=${{ matrix.module }}-coverage.txt -covermode=atomic; then
             echo "result=success" >> $GITHUB_OUTPUT
             echo "::notice title=Test Result for ${{ matrix.module }}::Tests passed"

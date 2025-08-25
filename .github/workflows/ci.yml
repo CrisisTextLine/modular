@@ -36,6 +36,7 @@ jobs:
       - name: Run tests with coverage (race)
         run: |
           export CGO_ENABLED=1
+          export GORACE=halt_on_error=1
           go test -race ./... -v
           go test -race -v -coverprofile=coverage.txt -covermode=atomic -json ./... >> report.json
       - name: Upload coverage reports to Codecov (unit)

@@ -124,12 +124,18 @@ Guideline: Start with a mutex. Escalate to atomics only with benchmark evidence.
 - Forgetting to close or recreate `r.Body` after a pre-read when handlers downstream still need it.
 
 ## Race Detector Integration
-Run locally:
+All primary CI test jobs (core/unit, modules, BDD, CLI) already run with `-race` and `CGO_ENABLED=1`.
+
+To get immediate local feedback (mirroring CI):
 ```
-./scripts/test_race.sh
+GORACE=halt_on_error=1 go test -race ./...
 ```
-CI workflow: `.github/workflows/race-tests.yml` runs core, modules, CLI (examples are built as a smoke check).
-Failing CI due to race is expected; fix before merging.
+Or for a specific module:
+```
+GORACE=halt_on_error=1 (cd modules/<module> && go test -race ./...)
+```
+Set `GORACE=halt_on_error=1` to force an immediate test failure on the first detected race (CI sets this automatically in race-enabled steps).
+Any race failure must be resolved prior to merging.
 
 ## Extending Modules Safely
 When adding a new module:

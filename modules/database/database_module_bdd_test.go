@@ -23,7 +23,6 @@ type DatabaseBDDTestContext struct {
 	lastError       error
 	transaction     *sql.Tx
 	healthStatus    bool
-	originalFeeders []modular.Feeder
 	eventObserver   *TestEventObserver
 	connectionError error
 }
@@ -58,12 +57,6 @@ func (o *TestEventObserver) Reset() {
 }
 
 func (ctx *DatabaseBDDTestContext) resetContext() {
-	// Restore original feeders if they were saved
-	if ctx.originalFeeders != nil {
-		modular.ConfigFeeders = ctx.originalFeeders
-		ctx.originalFeeders = nil
-	}
-
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
@@ -79,11 +72,6 @@ func (ctx *DatabaseBDDTestContext) resetContext() {
 
 func (ctx *DatabaseBDDTestContext) iHaveAModularApplicationWithDatabaseModuleConfigured() error {
 	ctx.resetContext()
-
-	// Save original feeders and disable env feeder for BDD tests
-	// This ensures BDD tests have full control over configuration
-	ctx.originalFeeders = modular.ConfigFeeders
-	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
 
 	// Create application with database config
 	logger := &testLogger{}
@@ -107,6 +95,9 @@ func (ctx *DatabaseBDDTestContext) iHaveAModularApplicationWithDatabaseModuleCon
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+	if cfSetter, ok := ctx.app.(interface{ SetConfigFeeders([]modular.Feeder) }); ok {
+		cfSetter.SetConfigFeeders([]modular.Feeder{})
+	}
 
 	// Create and configure database module
 	ctx.module = NewModule()
@@ -415,10 +406,7 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseModuleConfigured() error {
 func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnabled() error {
 	ctx.resetContext()
 
-	// Save original feeders and disable env feeder for BDD tests
-	// This ensures BDD tests have full control over configuration
-	ctx.originalFeeders = modular.ConfigFeeders
-	modular.ConfigFeeders = []modular.Feeder{} // No feeders for controlled testing
+	// Apply per-app empty feeders instead of mutating global modular.ConfigFeeders
 
 	// Create application with database config
 	logger := &testLogger{}
@@ -442,6 +430,9 @@ func (ctx *DatabaseBDDTestContext) iHaveADatabaseServiceWithEventObservationEnab
 	// Create app with empty main config - USE OBSERVABLE for events
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+	if cfSetter, ok := ctx.app.(interface{ SetConfigFeeders([]modular.Feeder) }); ok {
+		cfSetter.SetConfigFeeders([]modular.Feeder{})
+	}
 
 	// Create and configure database module
 	ctx.module = NewModule()
@@ -727,7 +718,7 @@ func (ctx *DatabaseBDDTestContext) aDatabaseConnectionFailsWithInvalidCredential
 	// Try to connect - this should fail and emit connection error through the module
 	if connectErr := badService.Connect(); connectErr != nil {
 		ctx.connectionError = connectErr
-		
+
 		// Manually emit the connection error event since the service doesn't do it
 		// This is the real connection error that would be emitted by the module
 		event := modular.NewCloudEvent(EventTypeConnectionError, "database-service", map[string]interface{}{
@@ -735,7 +726,7 @@ func (ctx *DatabaseBDDTestContext) aDatabaseConnectionFailsWithInvalidCredential
 			"driver":          badConfig.Driver,
 			"error":           connectErr.Error(),
 		}, nil)
-		
+
 		if emitErr := ctx.module.EmitEvent(context.Background(), event); emitErr != nil {
 			fmt.Printf("Failed to emit connection error event: %v\n", emitErr)
 		}
@@ -1190,6 +1181,7 @@ func TestDatabaseModule(t *testing.T) {
 			Format:   "pretty",
 			Paths:    []string{"features/database_module.feature"},
 			TestingT: t,
+			Strict:   true,
 		},
 	}
 

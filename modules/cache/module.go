@@ -324,6 +324,18 @@ func (m *CacheModule) Constructor() modular.ModuleConstructor {
 func (m *CacheModule) Get(ctx context.Context, key string) (interface{}, bool) {
 	value, found := m.cacheEngine.Get(ctx, key)
 
+	// Emit cache get event (independent of hit/miss) for observability of read attempts
+	getEvent := modular.NewCloudEvent(EventTypeCacheGet, "cache-service", map[string]interface{}{
+		"cache_key": key,
+		"engine":    m.config.Engine,
+	}, nil)
+
+	go func() {
+		if err := m.EmitEvent(ctx, getEvent); err != nil {
+			m.logger.Debug("Failed to emit cache event", "error", err, "event_type", EventTypeCacheGet)
+		}
+	}()
+
 	// Emit cache hit/miss events
 	eventType := EventTypeCacheMiss
 	if found {
@@ -461,6 +473,20 @@ func (m *CacheModule) GetMulti(ctx context.Context, keys []string) (map[string]i
 	result, err := m.cacheEngine.GetMulti(ctx, keys)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get multiple cache items: %w", err)
+	}
+
+	// Emit a cache get event for each requested key (best-effort; non-blocking)
+	for _, key := range keys {
+		getEvent := modular.NewCloudEvent(EventTypeCacheGet, "cache-service", map[string]interface{}{
+			"cache_key": key,
+			"engine":    m.config.Engine,
+			"batch":     true,
+		}, nil)
+		go func(ev cloudevents.Event) {
+			if err := m.EmitEvent(ctx, ev); err != nil {
+				m.logger.Debug("Failed to emit cache event", "error", err, "event_type", EventTypeCacheGet)
+			}
+		}(getEvent)
 	}
 	return result, nil
 }

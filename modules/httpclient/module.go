@@ -326,13 +326,18 @@ func (m *HTTPClientModule) Start(ctx context.Context) error {
 	})
 
 	// Emit client started event
-	m.emitEvent(ctx, EventTypeClientStarted, map[string]interface{}{
+	// Emit client started event synchronously to avoid any potential race where
+	// the asynchronous goroutine might not execute before the test inspects
+	// collected events (observed flake where only this event was missing).
+	m.emitEventSync(ctx, EventTypeClientStarted, map[string]interface{}{
 		"request_timeout_seconds": m.config.RequestTimeout.Seconds(),
 		"max_idle_conns":          m.config.MaxIdleConns,
 	})
 
-	// Emit module started event
-	m.emitEvent(ctx, EventTypeModuleStarted, map[string]interface{}{
+	// Emit module started event synchronously as well for consistent lifecycle
+	// ordering (tests/observers may assert both appear without races). Keeping
+	// these synchronous is low cost (single event) and improves determinism.
+	m.emitEventSync(ctx, EventTypeModuleStarted, map[string]interface{}{
 		"request_timeout_seconds": m.config.RequestTimeout.Seconds(),
 		"max_idle_conns":          m.config.MaxIdleConns,
 	})
@@ -507,6 +512,19 @@ func (m *HTTPClientModule) emitEvent(ctx context.Context, eventType string, data
 			m.logger.Debug("Failed to emit HTTP client event", "error", err, "event_type", eventType)
 		}
 	}()
+}
+
+// emitEventSync emits an event synchronously (used for critical lifecycle
+// events needed immediately by tests to confirm completeness).
+func (m *HTTPClientModule) emitEventSync(ctx context.Context, eventType string, data map[string]interface{}) {
+	if m.subject == nil {
+		return
+	}
+
+	event := modular.NewCloudEvent(eventType, "httpclient-module", data, nil)
+	if err := m.EmitEvent(ctx, event); err != nil {
+		m.logger.Debug("Failed to emit HTTP client event (sync)", "error", err, "event_type", eventType)
+	}
 }
 
 // loggingTransport provides verbose logging of HTTP requests and responses.

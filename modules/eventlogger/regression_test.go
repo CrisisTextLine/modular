@@ -143,7 +143,10 @@ func TestEventLogger_EarlyLifecycleEventsDoNotError(t *testing.T) {
 		t.Fatalf("benign early lifecycle events produced 'event logger not started' error")
 	}
 
-	// Start then Stop to clean up.
+	// Initialize application (ensures module.Init runs so Start won't panic) then start/stop.
+	if err := app.Init(); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
 	_ = app.Start()
 	_ = app.Stop()
 }

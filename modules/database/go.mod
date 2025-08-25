@@ -1,6 +1,6 @@
 module github.com/CrisisTextLine/modular/modules/database
 
-go 1.24.2
+go 1.25
 
 require (
 	github.com/CrisisTextLine/modular v1.6.0
@@ -12,6 +12,8 @@ require (
 	github.com/stretchr/testify v1.10.0
 	modernc.org/sqlite v1.37.1
 )
+
+replace github.com/CrisisTextLine/modular => ../..
 
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect

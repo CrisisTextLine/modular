@@ -375,26 +375,37 @@ func TestRedisMultiOperationsEmptyInputs(t *testing.T) {
 // TestRedisConnectWithPassword tests connection configuration with password
 func TestRedisConnectWithPassword(t *testing.T) {
 	t.Parallel()
+	// Use an in-memory Redis (miniredis) with password + DB selection to make the test deterministic.
+	s := miniredis.RunT(t)
+	// Require auth so our password path is exercised.
+	s.RequireAuth("test-password")
+
 	config := &CacheConfig{
 		Engine:           "redis",
 		DefaultTTL:       300 * time.Second,
 		CleanupInterval:  60 * time.Second,
 		MaxItems:         10000,
-		RedisURL:         "redis://localhost:6379",
+		RedisURL:         "redis://" + s.Addr(),
 		RedisPassword:    "test-password",
-		RedisDB:          1,
+		RedisDB:          1, // exercise non-default DB selection
 		ConnectionMaxAge: 120 * time.Second,
 	}
 
 	cache := NewRedisCache(config)
 	ctx := context.Background()
 
-	// Test connection with password and different DB - this will fail since no Redis server
-	// but will exercise the connection configuration code paths
+	// Should connect successfully now that a test server exists and requires auth.
 	err := cache.Connect(ctx)
-	assert.Error(t, err) // Expected to fail without Redis server
+	require.NoError(t, err, "expected successful Redis connection to miniredis with auth")
 
-	// Test Close when client is nil initially
+	// Basic sanity write to ensure selected DB works (miniredis supports SELECT)
+	err = cache.Set(ctx, "pw-key", "pw-value", time.Minute)
+	assert.NoError(t, err)
+	v, ok := cache.Get(ctx, "pw-key")
+	assert.True(t, ok)
+	assert.Equal(t, "pw-value", v)
+
+	// Close should succeed
 	err = cache.Close(ctx)
 	assert.NoError(t, err)
 }

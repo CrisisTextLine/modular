@@ -1,5 +1,8 @@
 name: Modules CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ main ]
@@ -92,6 +95,8 @@ jobs:
       fail-fast: false
       matrix: ${{fromJson(needs.detect-modules.outputs.matrix)}}
     continue-on-error: true
+    permissions:
+      contents: read
     
     name: Test ${{ matrix.module }}
     steps:
@@ -129,6 +134,7 @@ jobs:
   # BDD tests moved to dedicated module-bdd matrix job
 
       - name: Upload coverage for ${{ matrix.module }}
+        # TODO: Pin to specific commit SHA after confirming digest
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

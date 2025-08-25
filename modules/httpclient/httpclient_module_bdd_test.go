@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"sync"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -30,6 +31,7 @@ type HTTPClientBDDTestContext struct {
 
 // testEventObserver captures CloudEvents during testing
 type testEventObserver struct {
+	mu     sync.RWMutex
 	events []cloudevents.Event
 }
 
@@ -40,7 +42,10 @@ func newTestEventObserver() *testEventObserver {
 }
 
 func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
-	t.events = append(t.events, event.Clone())
+	clone := event.Clone()
+	t.mu.Lock()
+	t.events = append(t.events, clone)
+	t.mu.Unlock()
 	return nil
 }
 
@@ -49,6 +54,8 @@ func (t *testEventObserver) ObserverID() string {
 }
 
 func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	events := make([]cloudevents.Event, len(t.events))
 	copy(events, t.events)
 	return events

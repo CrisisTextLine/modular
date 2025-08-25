@@ -67,6 +67,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"sync"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -103,7 +104,12 @@ type CacheModule struct {
 	config      *CacheConfig
 	logger      modular.Logger
 	cacheEngine CacheEngine
+	// subject is the observable subject used for event emission. It can be written
+	// concurrently with reads during startup because events are emitted from goroutines.
+	// Guard with RWMutex to avoid data races between RegisterObservers (write) and
+	// EmitEvent (read) when asynchronous emissions occur before observer registration completes.
 	subject     modular.Subject
+	subjectMu   sync.RWMutex
 }
 
 // NewModule creates a new instance of the cache module.
@@ -534,7 +540,9 @@ func (m *CacheModule) DeleteMulti(ctx context.Context, keys []string) error {
 // RegisterObservers implements the ObservableModule interface.
 // This allows the cache module to register as an observer for events it's interested in.
 func (m *CacheModule) RegisterObservers(subject modular.Subject) error {
+	m.subjectMu.Lock()
 	m.subject = subject
+	m.subjectMu.Unlock()
 	// The cache module currently does not need to observe other events,
 	// but this method stores the subject for event emission.
 	return nil
@@ -543,10 +551,13 @@ func (m *CacheModule) RegisterObservers(subject modular.Subject) error {
 // EmitEvent implements the ObservableModule interface.
 // This allows the cache module to emit events to registered observers.
 func (m *CacheModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
-	if m.subject == nil {
+	m.subjectMu.RLock()
+	subj := m.subject
+	m.subjectMu.RUnlock()
+	if subj == nil {
 		return ErrNoSubjectForEventEmission
 	}
-	if err := m.subject.NotifyObservers(ctx, event); err != nil {
+	if err := subj.NotifyObservers(ctx, event); err != nil {
 		return fmt.Errorf("failed to notify observers: %w", err)
 	}
 	return nil

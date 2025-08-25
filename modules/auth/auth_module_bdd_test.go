@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"sync"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -24,13 +25,24 @@ func (l *testLogger) Debug(msg string, args ...any) {}
 // testObserver captures emitted CloudEvents for assertions
 type testObserver struct {
 	id     string
+	mu     sync.RWMutex
 	events []cloudevents.Event
 }
 
 func (o *testObserver) ObserverID() string { return o.id }
 func (o *testObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	o.mu.Lock()
 	o.events = append(o.events, event)
+	o.mu.Unlock()
 	return nil
+}
+// snapshot returns a copy of captured events for safe concurrent iteration
+func (o *testObserver) snapshot() []cloudevents.Event {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	out := make([]cloudevents.Event, len(o.events))
+	copy(out, o.events)
+	return out
 }
 
 // AuthBDDTestContext holds shared state across steps
@@ -1135,31 +1147,30 @@ func (ctx *AuthBDDTestContext) anOAuth2ExchangeEventShouldBeEmitted() error {
 // Helper methods for event validation
 
 func (ctx *AuthBDDTestContext) checkEventEmitted(eventType string) error {
-	// Give a little time for event processing, but since we made it synchronous, this should be quick
-	time.Sleep(10 * time.Millisecond)
-
-	for _, event := range ctx.testObserver.events {
+	// Small wait to allow emission in asynchronous paths (kept minimal)
+	time.Sleep(5 * time.Millisecond)
+	for _, event := range ctx.testObserver.snapshot() {
 		if event.Type() == eventType {
 			return nil
 		}
 	}
-
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v",
-		eventType, ctx.getEmittedEventTypes())
+	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", eventType, ctx.getEmittedEventTypes())
 }
 
 func (ctx *AuthBDDTestContext) findLatestEvent(eventType string) *cloudevents.Event {
-	for i := len(ctx.testObserver.events) - 1; i >= 0; i-- {
-		if ctx.testObserver.events[i].Type() == eventType {
-			return &ctx.testObserver.events[i]
+	events := ctx.testObserver.snapshot()
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type() == eventType {
+			return &events[i]
 		}
 	}
 	return nil
 }
 
 func (ctx *AuthBDDTestContext) getEmittedEventTypes() []string {
-	var types []string
-	for _, event := range ctx.testObserver.events {
+	snapshot := ctx.testObserver.snapshot()
+	types := make([]string, 0, len(snapshot))
+	for _, event := range snapshot {
 		types = append(types, event.Type())
 	}
 	return types

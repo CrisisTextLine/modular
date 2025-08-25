@@ -124,6 +124,7 @@ import (
 	"net/http/httputil"
 	"strings"
 	"time"
+	"sync"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -157,7 +158,10 @@ type HTTPClientModule struct {
 	transport      *http.Transport
 	modifier       RequestModifierFunc
 	namedModifiers map[string]func(*http.Request) error // For named modifier management
+	// subject can be set during observer registration while background event goroutines read it.
+	// Use RWMutex to avoid data race (pattern aligned with cache module fix).
 	subject        modular.Subject
+	subjectMu      sync.RWMutex
 }
 
 // Make sure HTTPClientModule implements necessary interfaces
@@ -479,7 +483,9 @@ func (m *HTTPClientModule) RemoveRequestModifier(name string) {
 // RegisterObservers implements the ObservableModule interface.
 // This allows the httpclient module to register as an observer for events it's interested in.
 func (m *HTTPClientModule) RegisterObservers(subject modular.Subject) error {
-	m.subject = subject
+ m.subjectMu.Lock()
+ m.subject = subject
+ m.subjectMu.Unlock()
 	// The httpclient module currently does not need to observe other events,
 	// but this method stores the subject for event emission.
 	return nil
@@ -488,10 +494,13 @@ func (m *HTTPClientModule) RegisterObservers(subject modular.Subject) error {
 // EmitEvent implements the ObservableModule interface.
 // This allows the httpclient module to emit events to registered observers.
 func (m *HTTPClientModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
-	if m.subject == nil {
+	m.subjectMu.RLock()
+	subj := m.subject
+	m.subjectMu.RUnlock()
+	if subj == nil {
 		return ErrNoSubjectForEventEmission
 	}
-	if err := m.subject.NotifyObservers(ctx, event); err != nil {
+	if err := subj.NotifyObservers(ctx, event); err != nil {
 		return fmt.Errorf("failed to notify observers: %w", err)
 	}
 	return nil
@@ -499,7 +508,10 @@ func (m *HTTPClientModule) EmitEvent(ctx context.Context, event cloudevents.Even
 
 // emitEvent emits an event through the event emitter if available
 func (m *HTTPClientModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
-	if m.subject == nil {
+	m.subjectMu.RLock()
+	subj := m.subject
+	m.subjectMu.RUnlock()
+	if subj == nil {
 		return // No subject available, skip event emission
 	}
 
@@ -517,7 +529,10 @@ func (m *HTTPClientModule) emitEvent(ctx context.Context, eventType string, data
 // emitEventSync emits an event synchronously (used for critical lifecycle
 // events needed immediately by tests to confirm completeness).
 func (m *HTTPClientModule) emitEventSync(ctx context.Context, eventType string, data map[string]interface{}) {
-	if m.subject == nil {
+	m.subjectMu.RLock()
+	subj := m.subject
+	m.subjectMu.RUnlock()
+	if subj == nil {
 		return
 	}
 

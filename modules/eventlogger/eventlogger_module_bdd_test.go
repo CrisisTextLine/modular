@@ -188,6 +188,7 @@ func (ctx *EventLoggerBDDTestContext) createApplicationWithConfig(config *EventL
 
 // Test event observer for capturing emitted events
 type testEventObserver struct {
+	mu     sync.Mutex
 	events []cloudevents.Event
 }
 
@@ -198,6 +199,8 @@ func newTestEventObserver() *testEventObserver {
 }
 
 func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.events = append(t.events, event.Clone())
 	return nil
 }
@@ -207,12 +210,16 @@ func (t *testEventObserver) ObserverID() string {
 }
 
 func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	events := make([]cloudevents.Event, len(t.events))
 	copy(events, t.events)
 	return events
 }
 
 func (t *testEventObserver) ClearEvents() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.events = make([]cloudevents.Event, 0)
 }
 
@@ -1348,8 +1355,9 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithFaultyOutputTargetAn
 	if eventloggerService, ok := service.(*EventLoggerModule); ok {
 		ctx.service = eventloggerService
 		// Replace the console output with a faulty one to trigger output errors
+		// Use the test-only setter to avoid data races with concurrent processing.
 		faultyOutput := &faultyOutputTarget{}
-		ctx.service.outputs = []OutputTarget{faultyOutput}
+		ctx.service.setOutputsForTesting([]OutputTarget{faultyOutput})
 	} else {
 		return fmt.Errorf("service is not an EventLoggerModule")
 	}

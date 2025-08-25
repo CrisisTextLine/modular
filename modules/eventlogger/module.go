@@ -115,6 +115,7 @@ package eventlogger
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -146,6 +147,16 @@ type EventLoggerModule struct {
 	subject      modular.Subject
 	// observerRegistered ensures we only register with the subject once
 	observerRegistered bool
+}
+
+// setOutputsForTesting replaces the output targets. This is intended ONLY for
+// test scenarios that need to inject faulty outputs after initialization. It
+// acquires the module mutex to avoid data races with concurrent readers.
+// NOTE: Mutating outputs at runtime is not supported in production usage.
+func (m *EventLoggerModule) setOutputsForTesting(outputs []OutputTarget) {
+	m.mutex.Lock()
+	m.outputs = outputs
+	m.mutex.Unlock()
 }
 
 // NewModule creates a new instance of the event logger module.
@@ -319,22 +330,27 @@ func (m *EventLoggerModule) emitStartupOperationalEvents(ctx context.Context, sy
 // Stop stops the event logger processing.
 func (m *EventLoggerModule) Stop(ctx context.Context) error {
 	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	if !m.started {
+	if !m.started { // nothing to do
+		m.mutex.Unlock()
 		return nil
 	}
 
-	// Mark shutting down to suppress emission side-effects
+	// Mark shutting down to suppress side-effects during drain
 	m.shuttingDown = true
+
+	// Capture config-driven behaviors before releasing lock
+	drainTimeout := m.config.ShutdownDrainTimeout
+	emitStopped := m.config.ShutdownEmitStopped
 
 	// Signal stop (idempotent safety)
 	select {
 	case <-m.stopChan:
-		// already closed
 	default:
 		close(m.stopChan)
 	}
+
+	// We keep the lock until we've closed stopChan so no new starts etc. Release before waiting (wg Wait doesn't need lock).
+	m.mutex.Unlock()
 
 	// Wait for processing with optional timeout
 	done := make(chan struct{})
@@ -342,32 +358,42 @@ func (m *EventLoggerModule) Stop(ctx context.Context) error {
 		m.wg.Wait()
 		close(done)
 	}()
-	if m.config.ShutdownDrainTimeout > 0 {
+	if drainTimeout > 0 {
 		select {
 		case <-done:
-		case <-time.After(m.config.ShutdownDrainTimeout):
-			m.logger.Warn("Event logger drain timeout reached; proceeding with shutdown")
+		case <-time.After(drainTimeout):
+			if m.logger != nil {
+				m.logger.Warn("Event logger drain timeout reached; proceeding with shutdown")
+			}
 		}
 	} else {
 		<-done
 	}
 
-	// Stop output targets
+	// Stop outputs (independent of mutex)
 	for _, output := range m.outputs {
-		if err := output.Stop(ctx); err != nil {
+		if err := output.Stop(ctx); err != nil && m.logger != nil {
 			m.logger.Error("Failed to stop output target", "error", err)
 		}
 	}
 
+	// Update state under lock again
+	m.mutex.Lock()
 	m.started = false
-	m.logger.Info("Event logger stopped")
+	if m.logger != nil {
+		m.logger.Info("Event logger stopped")
+	}
+	m.mutex.Unlock()
 
-	if m.config.ShutdownEmitStopped {
-		// Emit logger stopped event BEFORE releasing shuttingDown (suppressed OnEvent still checks started)
+	// Emit stopped operational event AFTER releasing write lock to avoid deadlock with RLock inside emitOperationalEvent
+	if emitStopped {
 		m.emitOperationalEvent(ctx, EventTypeLoggerStopped, map[string]interface{}{})
 	}
 
+	// Clear shuttingDown flag (not strictly necessary but keeps state consistent for any post-stop checks)
+	m.mutex.Lock()
 	m.shuttingDown = false
+	m.mutex.Unlock()
 
 	return nil
 }
@@ -403,33 +429,34 @@ func (m *EventLoggerModule) Constructor() modular.ModuleConstructor {
 // RegisterObservers implements the ObservableModule interface to auto-register
 // with the application as an observer.
 func (m *EventLoggerModule) RegisterObservers(subject modular.Subject) error {
+	m.mutex.Lock()
 	// Set subject reference for emitting operational events later
 	m.subject = subject
 
 	// Avoid duplicate registrations
 	if m.observerRegistered {
+		m.mutex.Unlock()
 		if m.logger != nil {
 			m.logger.Debug("RegisterObservers called - already registered, skipping")
 		}
 		return nil
 	}
 
-	// If config isn't initialized yet (RegisterObservers can be called before Init),
-	// register for all events now; filtering will be applied during processing.
-	// Also guard logger usage when it's not available yet.
+	// If config present but disabled, mark as handled and exit
 	if m.config != nil && !m.config.Enabled {
 		if m.logger != nil {
 			m.logger.Info("Event logger is disabled, skipping observer registration")
 		}
-		m.observerRegistered = true // Consider as handled to avoid repeated attempts
+		m.observerRegistered = true
+		m.mutex.Unlock()
 		return nil
 	}
 
-	// Register for all events or filtered events
 	var err error
 	if m.config != nil && len(m.config.EventTypeFilters) > 0 {
 		err = subject.RegisterObserver(m, m.config.EventTypeFilters...)
 		if err != nil {
+			m.mutex.Unlock()
 			return fmt.Errorf("failed to register event logger as observer: %w", err)
 		}
 		if m.logger != nil {
@@ -438,6 +465,7 @@ func (m *EventLoggerModule) RegisterObservers(subject modular.Subject) error {
 	} else {
 		err = subject.RegisterObserver(m)
 		if err != nil {
+			m.mutex.Unlock()
 			return fmt.Errorf("failed to register event logger as observer: %w", err)
 		}
 		if m.logger != nil {
@@ -446,16 +474,19 @@ func (m *EventLoggerModule) RegisterObservers(subject modular.Subject) error {
 	}
 
 	m.observerRegistered = true
-
+	m.mutex.Unlock()
 	return nil
 }
 
 // EmitEvent allows the module to emit its own operational events.
 func (m *EventLoggerModule) EmitEvent(ctx context.Context, event cloudevents.Event) error {
-	if m.subject == nil {
+	m.mutex.RLock()
+	subject := m.subject
+	m.mutex.RUnlock()
+	if subject == nil {
 		return ErrNoSubjectForEventEmission
 	}
-	if err := m.subject.NotifyObservers(ctx, event); err != nil {
+	if err := subject.NotifyObservers(ctx, event); err != nil {
 		return fmt.Errorf("failed to notify observers: %w", err)
 	}
 	return nil
@@ -463,9 +494,12 @@ func (m *EventLoggerModule) EmitEvent(ctx context.Context, event cloudevents.Eve
 
 // emitOperationalEvent emits an event about the eventlogger's own operations
 func (m *EventLoggerModule) emitOperationalEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+	m.mutex.RLock()
 	if m.subject == nil {
+		m.mutex.RUnlock()
 		return // No subject available, skip event emission
 	}
+	m.mutex.RUnlock()
 
 	event := modular.NewCloudEvent(eventType, "eventlogger-module", data, nil)
 
@@ -489,10 +523,16 @@ func (m *EventLoggerModule) emitOperationalEvent(ctx context.Context, eventType 
 
 // isOwnEvent checks if an event is emitted by this eventlogger module to avoid infinite loops
 func (m *EventLoggerModule) isOwnEvent(event cloudevents.Event) bool {
-	// Treat events originating from this module as "own events" to avoid generating
-	// recursive log/output-success events that can cause unbounded amplification
-	// and buffer overflows during processing.
-	return event.Source() == "eventlogger-module"
+	// Treat events originating from this module OR having the eventlogger type prefix
+	// as "own events" to avoid generating recursive operational events that amplify.
+	if event.Source() == "eventlogger-module" {
+		return true
+	}
+	// Defensive: if types are rewritten or forwarded and source lost, rely on type prefix.
+	if strings.HasPrefix(event.Type(), "com.modular.eventlogger.") {
+		return true
+	}
+	return false
 }
 
 // OnEvent implements the Observer interface to receive and log CloudEvents.
@@ -668,11 +708,17 @@ func (m *EventLoggerModule) logEvent(ctx context.Context, event cloudevents.Even
 		entry.Metadata["cloudevent_subject"] = event.Subject()
 	}
 
+	// Snapshot outputs under read lock to avoid races with test mutations.
+	m.mutex.RLock()
+	outputs := make([]OutputTarget, len(m.outputs))
+	copy(outputs, m.outputs)
+	m.mutex.RUnlock()
+
 	// Send to all output targets
 	successCount := 0
 	errorCount := 0
 
-	for _, output := range m.outputs {
+	for _, output := range outputs {
 		if err := output.WriteEvent(entry); err != nil {
 			m.logger.Error("Failed to write event to output target", "error", err, "eventType", event.Type())
 			errorCount++
@@ -757,7 +803,11 @@ func (m *EventLoggerModule) shouldLogLevel(eventLevel, minLevel string) bool {
 
 // flushOutputs flushes all output targets.
 func (m *EventLoggerModule) flushOutputs() {
-	for _, output := range m.outputs {
+	m.mutex.RLock()
+	outputs := make([]OutputTarget, len(m.outputs))
+	copy(outputs, m.outputs)
+	m.mutex.RUnlock()
+	for _, output := range outputs {
 		if err := output.Flush(); err != nil {
 			m.logger.Error("Failed to flush output target", "error", err)
 		}

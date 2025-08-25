@@ -561,24 +561,24 @@ func (ctx *CacheBDDTestContext) iHaveACacheServiceWithEventObservationEnabled() 
 	// Register the module
 	ctx.app.RegisterModule(ctx.module)
 
-	// Initialize
+	// Initialize (module.Init runs, setting up cache engine)
 	if err := ctx.app.Init(); err != nil {
 		return err
 	}
 
-	// Start the application to enable cache functionality
-	if err := ctx.app.Start(); err != nil {
-		return fmt.Errorf("failed to start application: %w", err)
-	}
-
-	// Register the event observer with the cache module
+	// Register module observers BEFORE starting so lifecycle events (connected) are captured
 	if err := ctx.service.RegisterObservers(ctx.app.(modular.Subject)); err != nil {
 		return fmt.Errorf("failed to register observers: %w", err)
 	}
 
-	// Register our test observer to capture events
+	// Register test observer prior to Start to observe startup events
 	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
 		return fmt.Errorf("failed to register test observer: %w", err)
+	}
+
+	// Now start the application (connected event will be emitted asynchronously and captured)
+	if err := ctx.app.Start(); err != nil {
+		return fmt.Errorf("failed to start application: %w", err)
 	}
 
 	return nil

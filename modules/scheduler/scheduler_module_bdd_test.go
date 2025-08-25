@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ type SchedulerBDDTestContext struct {
 // testEventObserver captures CloudEvents during testing
 type testEventObserver struct {
 	events []cloudevents.Event
+	mu     sync.RWMutex
 }
 
 func newTestEventObserver() *testEventObserver {
@@ -42,7 +44,11 @@ func newTestEventObserver() *testEventObserver {
 }
 
 func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
-	t.events = append(t.events, event.Clone())
+	// Clone before locking to minimize time under write lock; clone is cheap
+	cloned := event.Clone()
+	t.mu.Lock()
+	t.events = append(t.events, cloned)
+	t.mu.Unlock()
 	return nil
 }
 
@@ -51,13 +57,17 @@ func (t *testEventObserver) ObserverID() string {
 }
 
 func (t *testEventObserver) GetEvents() []cloudevents.Event {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	events := make([]cloudevents.Event, len(t.events))
 	copy(events, t.events)
 	return events
 }
 
 func (t *testEventObserver) ClearEvents() {
+	t.mu.Lock()
 	t.events = make([]cloudevents.Event, 0)
+	t.mu.Unlock()
 }
 
 func (ctx *SchedulerBDDTestContext) resetContext() {
@@ -1474,6 +1484,7 @@ func (ctx *SchedulerBDDTestContext) workerIdleEventsShouldBeEmitted() error {
 // unless explicitly whitelisted (expected for a negative scenario like an intentional
 // job failure or shutdown timeout). This helps ensure new warnings/errors are surfaced.
 type testLogger struct {
+	mu    sync.RWMutex
 	debug []string
 	info  []string
 	warn  []string
@@ -1493,7 +1504,9 @@ func (l *testLogger) record(dst *[]string, msg string, kv []interface{}) {
 			}
 		}
 	}
+	l.mu.Lock()
 	*dst = append(*dst, strings.TrimSpace(b.String()))
+	l.mu.Unlock()
 }
 
 func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) {
@@ -1512,6 +1525,8 @@ func (l *testLogger) With(keysAndValues ...interface{}) modular.Logger { return 
 
 // unexpectedWarningsOrErrors returns unexpected warn/error logs (excluding allowlist substrings)
 func (l *testLogger) unexpectedWarningsOrErrors(allowlist []string) []string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	var out []string
 	isAllowed := func(entry string) bool {
 		for _, allow := range allowlist {

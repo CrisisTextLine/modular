@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"sync"
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -29,6 +30,7 @@ type DatabaseBDDTestContext struct {
 
 // TestEventObserver captures events for BDD testing
 type TestEventObserver struct {
+	mu     sync.RWMutex
 	events []cloudevents.Event
 	id     string
 }
@@ -40,7 +42,10 @@ func newTestEventObserver() *TestEventObserver {
 }
 
 func (o *TestEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
-	o.events = append(o.events, event)
+	clone := event.Clone()
+	o.mu.Lock()
+	o.events = append(o.events, clone)
+	o.mu.Unlock()
 	return nil
 }
 
@@ -49,11 +54,17 @@ func (o *TestEventObserver) ObserverID() string {
 }
 
 func (o *TestEventObserver) GetEvents() []cloudevents.Event {
-	return o.events
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	events := make([]cloudevents.Event, len(o.events))
+	copy(events, o.events)
+	return events
 }
 
 func (o *TestEventObserver) Reset() {
+	o.mu.Lock()
 	o.events = nil
+	o.mu.Unlock()
 }
 
 func (ctx *DatabaseBDDTestContext) resetContext() {

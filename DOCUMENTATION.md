@@ -6,6 +6,7 @@
   - [Table of Contents](#table-of-contents)
   - [Introduction](#introduction)
   - [Application Builder API](#application-builder-api)
+    - [Concurrency & Race Guidelines](#concurrency--race-guidelines)
     - [Builder Pattern](#builder-pattern)
       - [Basic Usage](#basic-usage)
     - [Functional Options](#functional-options)
@@ -101,6 +102,10 @@
 The Modular framework provides a structured approach to building modular Go applications. This document offers in-depth explanations of the framework's features and capabilities, providing developers with the knowledge they need to build robust, maintainable applications.
 
 ## Application Builder API
+## Concurrency & Race Guidelines
+
+For official guidance on synchronization patterns, avoiding data races, safe observer usage, defensive config copying, and request body handling for parallel fan-out, see the dedicated document: [Concurrency & Race Guidelines](CONCURRENCY_GUIDELINES.md). All new modules must adhere to these standards and pass `go test -race`.
+
 
 ### Builder Pattern
 

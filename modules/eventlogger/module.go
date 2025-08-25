@@ -243,58 +243,77 @@ func (m *EventLoggerModule) Start(ctx context.Context) error {
 		return nil
 	}
 
-	if !m.config.Enabled {
-		m.logger.Info("Event logger is disabled, skipping start")
+	// Guard against Start being called before Init (regression safety)
+	if m.config == nil {
+		if m.logger != nil {
+			m.logger.Warn("Event logger Start called before Init; skipping")
+		}
 		return nil
 	}
 
-	// Start output targets
-	for _, output := range m.outputs {
+	if !m.config.Enabled {
+		if m.logger != nil {
+			m.logger.Info("Event logger is disabled, skipping start")
+		}
+		return nil
+	}
+
+	for _, output := range m.outputs { // start outputs
 		if err := output.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start output target: %w", err)
 		}
 	}
 
-	// Start event processing goroutine
 	m.wg.Add(1)
-	go m.processEvents(ctx)
+	go m.processEvents(ctx) // processEvents manages Done
 
 	m.started = true
-	m.logger.Info("Event logger started")
+	if m.logger != nil {
+		m.logger.Info("Event logger started")
+	}
 
-	emit := func(sync bool) {
-		baseCtx := ctx
-		if sync {
-			baseCtx = modular.WithSynchronousNotification(baseCtx)
-		}
+	// Capture data needed for emission outside the lock
+	startupSync := m.config.StartupSync
+	outputsLen := len(m.outputs)
+	bufferLen := len(m.eventChan)
+	outputConfigs := make([]OutputTargetConfig, len(m.config.OutputTargets))
+	copy(outputConfigs, m.config.OutputTargets)
+
+	// Defer emission outside lock
+	go m.emitStartupOperationalEvents(ctx, startupSync, outputsLen, bufferLen, outputConfigs)
+	return nil
+}
+
+// emitStartupOperationalEvents performs the operational event emission without holding the Start mutex.
+func (m *EventLoggerModule) emitStartupOperationalEvents(ctx context.Context, sync bool, outputsLen, bufferLen int, targetConfigs []OutputTargetConfig) {
+	if m.logger == nil || m.config == nil || !m.started {
+		/* nothing to emit or already stopped */
+		return
+	}
+	emit := func(baseCtx context.Context) {
 		m.emitOperationalEvent(baseCtx, EventTypeConfigLoaded, map[string]interface{}{
 			"enabled":              m.config.Enabled,
 			"buffer_size":          m.config.BufferSize,
-			"output_targets_count": len(m.config.OutputTargets),
+			"output_targets_count": len(targetConfigs),
 			"log_level":            m.config.LogLevel,
 		})
-		for i, targetConfig := range m.config.OutputTargets {
+		for i, tc := range targetConfigs {
 			m.emitOperationalEvent(baseCtx, EventTypeOutputRegistered, map[string]interface{}{
 				"output_index": i,
-				"output_type":  targetConfig.Type,
-				"output_level": targetConfig.Level,
+				"output_type":  tc.Type,
+				"output_level": tc.Level,
 			})
 		}
 		m.emitOperationalEvent(baseCtx, EventTypeLoggerStarted, map[string]interface{}{
-			"output_count": len(m.outputs),
-			"buffer_size":  len(m.eventChan),
+			"output_count": outputsLen,
+			"buffer_size":  bufferLen,
 		})
 	}
-
-	if m.config.StartupSync {
-		// Emit synchronously within Start() (tests can rely on immediate availability)
-		emit(true)
+	if sync {
+		emit(modular.WithSynchronousNotification(ctx))
 	} else {
-		// Preserve previous async behavior without fixed sleep (still asynchronous, faster)
-		go emit(false)
+		emit(ctx)
 	}
-
-	return nil
 }
 
 // Stop stops the event logger processing.
@@ -491,10 +510,10 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 		return ErrLoggerNotStarted
 	}
 
-	// Try to send event to processing channel
+	// Attempt non-blocking enqueue first. If it fails, channel is full and we must drop oldest.
 	select {
 	case m.eventChan <- event:
-		// Emit event received event (avoid emitting for our own events to prevent loops)
+		// Enqueued successfully; record received (avoid loops for our own events)
 		if !m.isOwnEvent(event) {
 			m.emitOperationalEvent(ctx, EventTypeEventReceived, map[string]interface{}{
 				"event_type":   event.Type(),
@@ -503,23 +522,58 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 		}
 		return nil
 	default:
-		// Buffer is full, drop event and log warning
-		m.logger.Warn("Event buffer full, dropping event", "eventType", event.Type())
+		// Full — drop oldest (non-blocking) then try again.
+		var dropped *cloudevents.Event
+		select {
+		case old := <-m.eventChan:
+			// Record the dropped event (we'll decide which operational events to emit below)
+			dropped = &old
+		default:
+			// Nothing to drop (capacity might be 0); we'll treat as dropping the new event below if second send fails.
+		}
 
-		// Emit buffer full and event dropped events (synchronous for reliable test capture)
-		if !m.isOwnEvent(event) {
+		// Emit buffer full event even if the dropped event was our own (observability of pressure)
+		if dropped != nil {
 			syncCtx := modular.WithSynchronousNotification(ctx)
 			m.emitOperationalEvent(syncCtx, EventTypeBufferFull, map[string]interface{}{
 				"buffer_size": cap(m.eventChan),
 			})
-			m.emitOperationalEvent(syncCtx, EventTypeEventDropped, map[string]interface{}{
-				"event_type":   event.Type(),
-				"event_source": event.Source(),
-				"reason":       "buffer_full",
-			})
+			// Only emit event dropped if the dropped event wasn't emitted by us to avoid recursive amplification
+			if !m.isOwnEvent(*dropped) {
+				m.emitOperationalEvent(syncCtx, EventTypeEventDropped, map[string]interface{}{
+					"event_type":   dropped.Type(),
+					"event_source": dropped.Source(),
+					"reason":       "buffer_full_oldest_dropped",
+				})
+			}
 		}
 
-		return ErrEventBufferFull
+		// Retry enqueue of current event.
+		select {
+		case m.eventChan <- event:
+			if !m.isOwnEvent(event) {
+				m.emitOperationalEvent(ctx, EventTypeEventReceived, map[string]interface{}{
+					"event_type":   event.Type(),
+					"event_source": event.Source(),
+				})
+			}
+			return nil
+		default:
+			// Still full (or capacity 0) — drop incoming event.
+			m.logger.Warn("Event buffer full, dropping incoming event", "eventType", event.Type())
+			syncCtx := modular.WithSynchronousNotification(ctx)
+			m.emitOperationalEvent(syncCtx, EventTypeBufferFull, map[string]interface{}{
+				"buffer_size": cap(m.eventChan),
+			})
+			if !m.isOwnEvent(event) {
+				m.emitOperationalEvent(syncCtx, EventTypeEventDropped, map[string]interface{}{
+					"event_type":   event.Type(),
+					"event_source": event.Source(),
+					"reason":       "buffer_full_incoming_dropped",
+				})
+			}
+			return ErrEventBufferFull
+		}
 	}
 }
 

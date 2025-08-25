@@ -55,6 +55,10 @@ type HealthCircuitBreakerInfo struct {
 // CircuitBreakerProvider defines a function to get circuit breaker information for a backend.
 type CircuitBreakerProvider func(backendID string) *HealthCircuitBreakerInfo
 
+// HealthEventEmitter is a callback used to emit backend health events.
+// Accepts event type and a data map for the event payload.
+type HealthEventEmitter func(eventType string, data map[string]interface{})
+
 // HealthChecker manages health checking for backend services.
 type HealthChecker struct {
 	config                 *HealthCheckConfig
@@ -70,6 +74,7 @@ type HealthChecker struct {
 	running                bool
 	runningMutex           sync.RWMutex
 	circuitBreakerProvider CircuitBreakerProvider
+	eventEmitter           HealthEventEmitter // optional emitter for backend health events
 }
 
 // NewHealthChecker creates a new health checker with the given configuration.
@@ -88,6 +93,11 @@ func NewHealthChecker(config *HealthCheckConfig, backends map[string]string, htt
 // SetCircuitBreakerProvider sets the circuit breaker provider function.
 func (hc *HealthChecker) SetCircuitBreakerProvider(provider CircuitBreakerProvider) {
 	hc.circuitBreakerProvider = provider
+}
+
+// SetEventEmitter sets the callback used to emit health events.
+func (hc *HealthChecker) SetEventEmitter(emitter HealthEventEmitter) {
+	hc.eventEmitter = emitter
 }
 
 // Start begins the health checking process.
@@ -401,13 +411,14 @@ func (hc *HealthChecker) updateHealthStatus(backendID string, healthy bool, resp
 	hc.statusMutex.Lock()
 	defer hc.statusMutex.Unlock()
 
+	// INSERTED: capture previous healthy state
 	status, exists := hc.healthStatus[backendID]
 	if !exists {
 		return
 	}
+	prevHealthy := status.Healthy
 
-	now := time.Now()
-	status.LastCheck = now
+	status.LastCheck = time.Now()
 	status.ResponseTime = responseTime
 	status.DNSResolved = dnsResolved
 	status.ResolvedIPs = resolvedIPs
@@ -429,7 +440,7 @@ func (hc *HealthChecker) updateHealthStatus(backendID string, healthy bool, resp
 	status.Healthy = healthCheckPassing && !status.CircuitBreakerOpen
 
 	if healthCheckPassing {
-		status.LastSuccess = now
+		status.LastSuccess = time.Now()
 		status.LastError = ""
 		status.SuccessfulChecks++
 	} else {
@@ -438,6 +449,15 @@ func (hc *HealthChecker) updateHealthStatus(backendID string, healthy bool, resp
 			status.LastError = dnsErr.Error()
 		} else if httpErr != nil {
 			status.LastError = httpErr.Error()
+		}
+	}
+
+	// After computing status.Healthy, emit events on transitions
+	if hc.eventEmitter != nil && prevHealthy != status.Healthy {
+		if status.Healthy {
+			hc.eventEmitter(EventTypeBackendHealthy, map[string]interface{}{"backend": backendID})
+		} else {
+			hc.eventEmitter(EventTypeBackendUnhealthy, map[string]interface{}{"backend": backendID, "error": status.LastError})
 		}
 	}
 }

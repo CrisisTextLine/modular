@@ -154,12 +154,8 @@ func (h *CompositeHandler) executeParallel(ctx context.Context, w http.ResponseW
 
 	// Create a wait group to track each backend request.
 	for _, backend := range h.backends {
-		wg.Add(1)
-
-		// Execute each request in a separate goroutine.
-		go func(b *Backend) {
-			defer wg.Done()
-
+		b := backend // capture loop variable
+		wg.Go(func() {
 			// Check the circuit breaker before making the request.
 			circuitBreaker := h.circuitBreakers[b.ID]
 			if circuitBreaker != nil && circuitBreaker.IsOpen() {
@@ -185,7 +181,7 @@ func (h *CompositeHandler) executeParallel(ctx context.Context, w http.ResponseW
 			mu.Lock()
 			responses[b.ID] = resp
 			mu.Unlock()
-		}(backend)
+		})
 	}
 
 	// Wait for all requests to complete.

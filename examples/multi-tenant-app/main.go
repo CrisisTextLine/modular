@@ -10,7 +10,6 @@ import (
 	"github.com/CrisisTextLine/modular/feeders"
 )
 
-
 func main() {
 	// Create application with debug logging
 	logger := slog.New(slog.NewTextHandler(

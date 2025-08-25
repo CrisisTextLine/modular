@@ -63,8 +63,7 @@ jobs:
           export CGO_ENABLED=1
           go test -race -v -coverprofile=core-bdd-coverage.txt -covermode=atomic -run 'TestApplicationLifecycle|TestConfigurationManagement|TestBaseConfigBDDFeatures|TestLoggerDecorator' .
       - name: Upload core BDD coverage
-        # TODO: Pin to specific commit SHA after confirming digest
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular
@@ -102,8 +101,7 @@ jobs:
           go test -race -v -coverprofile=bdd-${{ matrix.module }}-coverage.txt -covermode=atomic -run '.*BDD|.*Module' . || echo "No BDD tests found"
       - name: Upload module BDD coverage
         if: always()
-        # TODO: Pin to specific commit SHA after confirming digest
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular
@@ -148,8 +146,7 @@ jobs:
           echo "Merged files: ${FILES[*]}"
       - name: Upload merged BDD coverage
         if: always()
-        # TODO: Pin to specific commit SHA after confirming digest
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular

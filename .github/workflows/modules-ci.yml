@@ -134,8 +134,7 @@ jobs:
   # BDD tests moved to dedicated module-bdd matrix job
 
       - name: Upload coverage for ${{ matrix.module }}
-        # TODO: Pin to specific commit SHA after confirming digest
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular

@@ -85,7 +85,6 @@ database:
 	}
 }
 
-
 type YourModule struct {
 	t         *testing.T
 	app       modular.Application
@@ -134,7 +133,6 @@ func (y *YourModule) Start(_ context.Context) error {
 
 	return nil
 }
-
 
 func (y *YourModule) Stop(_ context.Context) error {
 	return nil

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"testing/synctest"
+
 	"github.com/CrisisTextLine/modular"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -358,6 +360,45 @@ func TestSchedulerOperations(t *testing.T) {
 	// Stop the module
 	err = module.Stop(ctx)
 	require.NoError(t, err)
+}
+
+// TestSchedulerImmediateJobSynctest demonstrates deterministic timing using synctest.
+// It schedules a job 1s in the future and advances virtual time instantly.
+func TestSchedulerImmediateJobSynctest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// Use standard module setup
+		module := NewModule().(*SchedulerModule)
+		app := newMockApp()
+		module.RegisterConfig(app)
+		module.Init(app)
+		ctx := context.Background()
+		executed := make(chan struct{}, 1)
+		// Schedule job BEFORE starting so Start's initial due-job dispatch sees it.
+		job := Job{
+			Name:  "synctest-job",
+			RunAt: time.Now(), // due immediately
+			JobFunc: func(ctx context.Context) error {
+				executed <- struct{}{}
+				return nil
+			},
+		}
+		if _, err := module.ScheduleJob(job); err != nil {
+			t.Fatalf("schedule: %v", err)
+		}
+		if err := module.Start(ctx); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		// Wait until goroutines settle.
+		synctest.Wait()
+		select {
+		case <-executed:
+		default:
+			t.Fatalf("job did not execute in virtual time")
+		}
+		if err := module.Stop(ctx); err != nil {
+			t.Fatalf("stop: %v", err)
+		}
+	})
 }
 
 func TestSchedulerConfiguration(t *testing.T) {

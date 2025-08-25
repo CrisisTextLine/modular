@@ -104,15 +104,12 @@ func (ctx *SchedulerBDDTestContext) iHaveAModularApplicationWithSchedulerModuleC
 	// Create application
 	logger := &testLogger{}
 
-	// Save and clear ConfigFeeders to prevent environment interference during tests
-	originalFeeders := modular.ConfigFeeders
-	modular.ConfigFeeders = []modular.Feeder{}
-	defer func() {
-		modular.ConfigFeeders = originalFeeders
-	}()
-
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+	// Ensure per-app feeder isolation without mutating global feeders.
+	if cfSetter, ok := ctx.app.(interface{ SetConfigFeeders([]modular.Feeder) }); ok {
+		cfSetter.SetConfigFeeders([]modular.Feeder{})
+	}
 
 	// Create and register scheduler module
 	module := NewModule()
@@ -130,16 +127,11 @@ func (ctx *SchedulerBDDTestContext) iHaveAModularApplicationWithSchedulerModuleC
 
 func (ctx *SchedulerBDDTestContext) setupSchedulerModule() error {
 	logger := &testLogger{}
-
-	// Save and clear ConfigFeeders to prevent environment interference during tests
-	originalFeeders := modular.ConfigFeeders
-	modular.ConfigFeeders = []modular.Feeder{}
-	defer func() {
-		modular.ConfigFeeders = originalFeeders
-	}()
-
 	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 	ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+	if cfSetter, ok := ctx.app.(interface{ SetConfigFeeders([]modular.Feeder) }); ok {
+		cfSetter.SetConfigFeeders([]modular.Feeder{})
+	}
 
 	// Create and register scheduler module
 	module := NewModule()
@@ -163,11 +155,6 @@ func (ctx *SchedulerBDDTestContext) setupSchedulerModule() error {
 }
 
 func (ctx *SchedulerBDDTestContext) theSchedulerModuleIsInitialized() error {
-	// Temporarily disable ConfigFeeders during Init to avoid env overriding test config
-	originalFeeders := modular.ConfigFeeders
-	modular.ConfigFeeders = []modular.Feeder{}
-	defer func() { modular.ConfigFeeders = originalFeeders }()
-
 	err := ctx.app.Init()
 	if err != nil {
 		ctx.lastError = err
@@ -447,6 +434,9 @@ func (ctx *SchedulerBDDTestContext) theSchedulerIsRestarted() error {
 		logger := &testLogger{}
 		mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
 		ctx.app = modular.NewStdApplication(mainConfigProvider, logger)
+		if cfSetter, ok := ctx.app.(interface{ SetConfigFeeders([]modular.Feeder) }); ok {
+			cfSetter.SetConfigFeeders([]modular.Feeder{})
+		}
 
 		// New module instance
 		ctx.module = NewModule().(*SchedulerModule)
@@ -457,14 +447,10 @@ func (ctx *SchedulerBDDTestContext) theSchedulerIsRestarted() error {
 		schedulerConfigProvider := modular.NewStdConfigProvider(ctx.config)
 		ctx.app.RegisterConfigSection("scheduler", schedulerConfigProvider)
 
-		// Initialize with feeders disabled to avoid env overrides
-		originalFeeders := modular.ConfigFeeders
-		modular.ConfigFeeders = []modular.Feeder{}
+		// Initialize application (per-app feeders already isolated)
 		if err := ctx.app.Init(); err != nil {
-			modular.ConfigFeeders = originalFeeders
 			return err
 		}
-		modular.ConfigFeeders = originalFeeders
 		ctx.started = false
 		if err := ctx.ensureAppStarted(); err != nil {
 			return err
@@ -1070,16 +1056,19 @@ func (ctx *SchedulerBDDTestContext) iScheduleANewJob() error {
 		return fmt.Errorf("failed to start scheduler module: %w", err)
 	}
 
-	// Clear previous events to focus on this job
+	// Briefly wait to ensure any late startup events are flushed before clearing
+	time.Sleep(25 * time.Millisecond)
+	// Clear previous events to focus on this job's lifecycle (scheduled -> started -> completed)
 	ctx.eventObserver.ClearEvents()
 
 	// Schedule a simple job with good timing for the 50ms check interval
 	job := Job{
 		Name:  "test-job",
-		RunAt: time.Now().Add(100 * time.Millisecond), // Allow for check interval timing
+		RunAt: time.Now().Add(150 * time.Millisecond), // Slightly longer lead time to ensure dispatch loop sees it
 		JobFunc: func(ctx context.Context) error {
-			time.Sleep(10 * time.Millisecond) // Brief execution time
-			return nil                        // Simple successful job
+			// Add a tiny pre-work delay so started event window widens for test polling
+			time.Sleep(5 * time.Millisecond)
+			return nil
 		},
 	}
 
@@ -1104,7 +1093,16 @@ func (ctx *SchedulerBDDTestContext) iScheduleANewJob() error {
 }
 
 func (ctx *SchedulerBDDTestContext) aJobScheduledEventShouldBeEmitted() error {
-	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
+	// Poll for scheduled event (avoid single fixed sleep which can race on slower CI)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		for _, event := range ctx.eventObserver.GetEvents() {
+			if event.Type() == EventTypeJobScheduled {
+				return nil
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -1148,57 +1146,41 @@ func (ctx *SchedulerBDDTestContext) theEventShouldContainJobDetails() error {
 }
 
 func (ctx *SchedulerBDDTestContext) theJobStartsExecution() error {
-	// Wait for the job to start execution - give more time and check job status
-	maxWait := 2 * time.Second
-	checkInterval := 100 * time.Millisecond
-
-	for waited := time.Duration(0); waited < maxWait; waited += checkInterval {
-		time.Sleep(checkInterval)
-
-		// Check events to see if job started
-		events := ctx.eventObserver.GetEvents()
-		for _, event := range events {
-			if event.Type() == EventTypeJobStarted {
-				return nil // Job has started executing
-			}
-		}
-
-		// Also check job status if we have a job ID
-		if ctx.jobID != "" {
-			if job, err := ctx.service.GetJob(ctx.jobID); err == nil {
-				if job.Status == JobStatusRunning || job.Status == JobStatusCompleted {
-					return nil // Job is running or completed
-				}
-			}
-		}
-	}
-
-	// If we get here, we didn't detect job execution within the timeout
-	return fmt.Errorf("job did not start execution within timeout")
-}
-
-func (ctx *SchedulerBDDTestContext) aJobStartedEventShouldBeEmitted() error {
-	// Poll for events with timeout
-	timeout := 2 * time.Second
-	start := time.Now()
-
-	for time.Since(start) < timeout {
-		events := ctx.eventObserver.GetEvents()
-		for _, event := range events {
+	// Wait for the job to start execution with frequent polling to reduce flakiness
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, event := range ctx.eventObserver.GetEvents() {
 			if event.Type() == EventTypeJobStarted {
 				return nil
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		if ctx.jobID != "" {
+			if job, err := ctx.service.GetJob(ctx.jobID); err == nil {
+				if job.Status == JobStatusRunning || job.Status == JobStatusCompleted {
+					return nil
+				}
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
+	return fmt.Errorf("job did not start execution within timeout")
+}
 
-	// Final check and error reporting
+func (ctx *SchedulerBDDTestContext) aJobStartedEventShouldBeEmitted() error {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, event := range ctx.eventObserver.GetEvents() {
+			if event.Type() == EventTypeJobStarted {
+				return nil
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	events := ctx.eventObserver.GetEvents()
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
 	}
-
 	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeJobStarted, eventTypes)
 }
 
@@ -1514,10 +1496,18 @@ func (l *testLogger) record(dst *[]string, msg string, kv []interface{}) {
 	*dst = append(*dst, strings.TrimSpace(b.String()))
 }
 
-func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) { l.record(&l.debug, msg, keysAndValues) }
-func (l *testLogger) Info(msg string, keysAndValues ...interface{})  { l.record(&l.info, msg, keysAndValues) }
-func (l *testLogger) Warn(msg string, keysAndValues ...interface{})  { l.record(&l.warn, msg, keysAndValues) }
-func (l *testLogger) Error(msg string, keysAndValues ...interface{}) { l.record(&l.error, msg, keysAndValues) }
+func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) {
+	l.record(&l.debug, msg, keysAndValues)
+}
+func (l *testLogger) Info(msg string, keysAndValues ...interface{}) {
+	l.record(&l.info, msg, keysAndValues)
+}
+func (l *testLogger) Warn(msg string, keysAndValues ...interface{}) {
+	l.record(&l.warn, msg, keysAndValues)
+}
+func (l *testLogger) Error(msg string, keysAndValues ...interface{}) {
+	l.record(&l.error, msg, keysAndValues)
+}
 func (l *testLogger) With(keysAndValues ...interface{}) modular.Logger { return l }
 
 // unexpectedWarningsOrErrors returns unexpected warn/error logs (excluding allowlist substrings)
@@ -1525,12 +1515,22 @@ func (l *testLogger) unexpectedWarningsOrErrors(allowlist []string) []string {
 	var out []string
 	isAllowed := func(entry string) bool {
 		for _, allow := range allowlist {
-			if strings.Contains(entry, allow) { return true }
+			if strings.Contains(entry, allow) {
+				return true
+			}
 		}
 		return false
 	}
-	for _, w := range l.warn { if !isAllowed(w) { out = append(out, "WARN: "+w) } }
-	for _, e := range l.error { if !isAllowed(e) { out = append(out, "ERROR: "+e) } }
+	for _, w := range l.warn {
+		if !isAllowed(w) {
+			out = append(out, "WARN: "+w)
+		}
+	}
+	for _, e := range l.error {
+		if !isAllowed(e) {
+			out = append(out, "ERROR: "+e)
+		}
+	}
 	return out
 }
 
@@ -1543,12 +1543,12 @@ func runSchedulerSuite(t *testing.T) {
 			// Per-scenario allowlist for known/intentional warnings or errors.
 			// We include substrings rather than full messages for resiliency.
 			baseAllow := []string{
-				"shutdown timed out",        // graceful stop timeouts tolerated
-				"intentional failure",       // deliberate failing job
-				"failed to pre-save jobs",   // persistence race conditions tolerated in tests
+				"shutdown timed out",             // graceful stop timeouts tolerated
+				"intentional failure",            // deliberate failing job
+				"failed to pre-save jobs",        // persistence race conditions tolerated in tests
 				"Failed to emit scheduler event", // allowed until tests register observer earlier in all scenarios
-				"Unknown storage type",      // scenario may intentionally force fallback
-				"Job execution failed",      // expected in failure scenario
+				"Unknown storage type",           // scenario may intentionally force fallback
+				"Job execution failed",           // expected in failure scenario
 			}
 
 			// After each scenario, verify no unexpected warnings/errors were logged; mark success only for target.
@@ -1561,7 +1561,6 @@ func runSchedulerSuite(t *testing.T) {
 				}
 				return stdCtx, scenarioErr
 			})
-
 
 			// Background
 			s.Given(`^I have a modular application with scheduler module configured$`, ctx.iHaveAModularApplicationWithSchedulerModuleConfigured)
@@ -1670,7 +1669,9 @@ func runSchedulerSuite(t *testing.T) {
 		},
 	}
 
-	if suite.Run() != 0 { t.Fatal("non-zero status returned, failed to run feature tests") }
+	if suite.Run() != 0 {
+		t.Fatal("non-zero status returned, failed to run feature tests")
+	}
 }
 
 // TestSchedulerModuleBDD orchestrates each feature scenario as an isolated parallel subtest.
@@ -1681,31 +1682,31 @@ func TestSchedulerModuleBDD(t *testing.T) { runSchedulerSuite(t) }
 func (ctx *SchedulerBDDTestContext) allRegisteredEventsShouldBeEmittedDuringTesting() error {
 	// Get all registered event types from the module
 	registeredEvents := ctx.module.GetRegisteredEventTypes()
-	
+
 	// Create event validation observer
 	validator := modular.NewEventValidationObserver("event-validator", registeredEvents)
 	_ = validator // Use validator to avoid unused variable error
-	
+
 	// Check which events were emitted during testing
 	emittedEvents := make(map[string]bool)
 	for _, event := range ctx.eventObserver.GetEvents() {
-			emittedEvents[event.Type()] = true
-		}
-		
-		// Check for missing events (skip nondeterministic generic events)
-		var missingEvents []string
-		for _, eventType := range registeredEvents {
-			if eventType == EventTypeError || eventType == EventTypeWarning {
-				continue
-			}
-			if !emittedEvents[eventType] {
-				missingEvents = append(missingEvents, eventType)
-			}
-		}
-		
-		if len(missingEvents) > 0 {
-			return fmt.Errorf("the following registered events were not emitted during testing: %v", missingEvents)
-		}
-		
-		return nil
+		emittedEvents[event.Type()] = true
 	}
+
+	// Check for missing events (skip nondeterministic generic events)
+	var missingEvents []string
+	for _, eventType := range registeredEvents {
+		if eventType == EventTypeError || eventType == EventTypeWarning {
+			continue
+		}
+		if !emittedEvents[eventType] {
+			missingEvents = append(missingEvents, eventType)
+		}
+	}
+
+	if len(missingEvents) > 0 {
+		return fmt.Errorf("the following registered events were not emitted during testing: %v", missingEvents)
+	}
+
+	return nil
+}

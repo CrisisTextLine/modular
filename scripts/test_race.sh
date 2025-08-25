@@ -6,12 +6,12 @@ set -euo pipefail
 export GORACE="halt_on_error=1"
 export GOTOOLCHAIN=auto
 
-# Allow callers to opt-in to CGO during race runs (some modules may use cgo in future)
-# Usage: RACE_CGO=1 ./scripts/test_race.sh
-: "${RACE_CGO:=0}"
+# CGO must be enabled for -race; default to 1. Callers can explicitly disable with RACE_CGO=0
+# Usage: RACE_CGO=0 ./scripts/test_race.sh
+: "${RACE_CGO:=1}"
 export CGO_ENABLED="${RACE_CGO}"
 
-echo "CGO_ENABLED=${CGO_ENABLED} (override with RACE_CGO=1)"
+echo "CGO_ENABLED=${CGO_ENABLED} (override with RACE_CGO=0 to force disable – not recommended)"
 
 echo "==> Running core tests with race detector"
 go test -race ./...

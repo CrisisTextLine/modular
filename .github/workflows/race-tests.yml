@@ -39,7 +39,6 @@ jobs:
       - name: Run race tests
         env:
           GORACE: halt_on_error=1
-          CGO_ENABLED: 0
         run: ./scripts/test_race.sh
 
       - name: Build examples (smoke)

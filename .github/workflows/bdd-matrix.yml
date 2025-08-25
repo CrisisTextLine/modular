@@ -120,6 +120,8 @@ jobs:
     needs: [core-bdd, module-bdd, discover]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository (for merge script)
+        uses: actions/checkout@v5
       - name: Summarize
         run: |
           echo '# BDD Matrix Summary' >> $GITHUB_STEP_SUMMARY
@@ -139,6 +141,10 @@ jobs:
           FILES=(bdd-coverage/**/*.txt)
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "No coverage files found to merge" >&2
+            exit 0
+          fi
+          if [ ! -f scripts/merge-coverprofiles.sh ]; then
+            echo "merge-coverprofiles.sh not found; skipping merge" >&2
             exit 0
           fi
           chmod +x scripts/merge-coverprofiles.sh

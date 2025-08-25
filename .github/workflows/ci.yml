@@ -46,6 +46,14 @@ jobs:
           slug: CrisisTextLine/modular
           files: coverage.txt
           flags: unit
+      - name: Upload unit coverage artifact
+        # Make the raw Go coverage profile available for the merge job
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: coverage.txt
+          if-no-files-found: error
+          retention-days: 1
       - name: CTRF Test Output
         run: |
           go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@latest
@@ -90,6 +98,13 @@ jobs:
           directory: cmd/modcli/
           files: cli-coverage.txt
           flags: cli
+      - name: Upload CLI coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-coverage
+          path: cmd/modcli/cli-coverage.txt
+          if-no-files-found: error
+          retention-days: 1
           
       - name: CTRF Test Output for CLI
         run: |
@@ -133,9 +148,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-      - name: Download unit & cli coverage artifacts (if any)
+      - name: Download unit coverage artifact
         uses: actions/download-artifact@v4
         with:
+          name: unit-coverage
+          path: cov-artifacts
+        continue-on-error: true
+      - name: Download cli coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-coverage
           path: cov-artifacts
         continue-on-error: true
       - name: Download merged BDD coverage artifact
@@ -149,15 +171,24 @@ jobs:
           set -e
           ls -R cov-artifacts || true
           FILES=()
-          [ -f cov-artifacts/coverage.txt ] && FILES+=(cov-artifacts/coverage.txt)
-          [ -f cov-artifacts/cli-coverage.txt ] && FILES+=(cov-artifacts/cli-coverage.txt)
+          [ -f cov-artifacts/coverage.txt ] && FILES+=(cov-artifacts/coverage.txt) # unit
+          [ -f cov-artifacts/cli-coverage.txt ] && FILES+=(cov-artifacts/cli-coverage.txt) # cli
           [ -f cov-artifacts/merged-bdd-coverage.txt ] && FILES+=(cov-artifacts/merged-bdd-coverage.txt)
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "No coverage files found to merge"; exit 0; fi
           chmod +x scripts/merge-coverprofiles.sh
           ./scripts/merge-coverprofiles.sh total-coverage.txt "${FILES[@]}"
           echo "Merged: ${FILES[*]}"
+      - name: Upload merged total coverage artifact
+        if: success() && hashFiles('total-coverage.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: total-coverage
+          path: total-coverage.txt
+          if-no-files-found: error
+          retention-days: 1
       - name: Upload merged total coverage
+        # Fail the job if Codecov can't find or upload the merged coverage
         if: always()
         uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0 pinned
         with:
@@ -165,3 +196,4 @@ jobs:
           slug: CrisisTextLine/modular
           files: total-coverage.txt
           flags: total
+          fail_ci_if_error: true

@@ -78,7 +78,7 @@ func (m *MockApplication) GetService(name string, target interface{}) error {
 		return modular.ErrServiceNotFound
 	}
 
-	// Handle chi.Router specifically for our tests
+	// Handle different service types specifically for our tests
 	switch ptr := target.(type) {
 	case *chi.Router:
 		if router, ok := service.(chi.Router); ok {
@@ -88,6 +88,11 @@ func (m *MockApplication) GetService(name string, target interface{}) error {
 	case *modular.TenantService:
 		if tenantService, ok := service.(modular.TenantService); ok {
 			*ptr = tenantService
+			return nil
+		}
+	case *FeatureFlagEvaluator:
+		if evaluator, ok := service.(FeatureFlagEvaluator); ok {
+			*ptr = evaluator
 			return nil
 		}
 	case *interface{}:

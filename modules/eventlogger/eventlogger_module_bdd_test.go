@@ -45,7 +45,7 @@ func (ctx *EventLoggerBDDTestContext) createConsoleConfig(bufferSize int) *Event
 		// Enable synchronous startup emission so tests reliably observe
 		// config.loaded, output.registered, and started events without
 		// relying on timing of goroutines.
-		StartupSync:       true,
+		StartupSync: true,
 		OutputTargets: []OutputTargetConfig{
 			{
 				Type:   "console",

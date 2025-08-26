@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
 // capturingLogger implements modular.Logger and stores entries for assertions.
@@ -170,6 +171,132 @@ func TestEventLogger_SynchronousStartupConfigFlag(t *testing.T) {
 		t.Fatalf("OnEvent failed unexpectedly: %v", err)
 	}
 	_ = app.Stop()
+}
+
+// TestEventLogger_NoiseReductionForModuleSpecificEarlyEvents verifies that module-specific
+// early lifecycle events (like chimux.router.created, httpserver.cors.configured) do not
+// produce observer error logs from eventlogger when it has not yet started.
+// This test reproduces the issue described in #80.
+func TestEventLogger_NoiseReductionForModuleSpecificEarlyEvents(t *testing.T) {
+	logger := &capturingLogger{}
+
+	// Create a simple eventlogger module without full application init
+	mod := NewModule().(*EventLoggerModule)
+
+	// Set up minimal config to initialize the module
+	cfg := &EventLoggerConfig{
+		Enabled:       true,
+		LogLevel:      "INFO",
+		Format:        "structured",
+		BufferSize:    5,
+		FlushInterval: 100 * time.Millisecond,
+		OutputTargets: []OutputTargetConfig{{
+			Type:    "console",
+			Level:   "INFO",
+			Format:  "structured",
+			Console: &ConsoleTargetConfig{UseColor: false, Timestamps: false},
+		}},
+	}
+	mod.config = cfg
+	mod.logger = logger
+
+	// Initialize channels like the Init() method would, but don't start
+	mod.eventChan = make(chan cloudevents.Event, mod.config.BufferSize)
+	mod.stopChan = make(chan struct{})
+
+	// At this point, the eventlogger is initialized but NOT started (mod.started is still false).
+
+	// Clear any existing log entries before the test to get clean results
+	logger.mu.Lock()
+	logger.entries = nil
+	logger.mu.Unlock()
+
+	// Emit the specific noisy event types mentioned in the issue directly to the module
+	noisyEarlyEvents := []string{
+		"com.modular.chimux.config.loaded",       // module-specific config event
+		"com.modular.chimux.config.validated",    // module-specific config event
+		"com.modular.chimux.router.created",      // specific example from issue
+		"com.modular.httpserver.cors.configured", // specific example from issue
+		"com.modular.reverseproxy.config.loaded", // another module-specific config
+		"com.modular.scheduler.config.validated", // another module-specific config
+	}
+
+	errorCount := 0
+	for _, et := range noisyEarlyEvents {
+		evt := modular.NewCloudEvent(et, "test-module", nil, nil)
+		err := mod.OnEvent(context.Background(), evt)
+		if err != nil {
+			errorCount++
+			t.Logf("Event %s returned error: %v", et, err)
+		} else {
+			t.Logf("Event %s was silently dropped (no error)", et)
+		}
+	}
+
+	// Before fix: we expect ErrLoggerNotStarted for module-specific early lifecycle events
+	// After fix: no errors for module-specific early lifecycle events that follow common patterns
+	if errorCount > 0 {
+		t.Fatalf("module-specific early lifecycle events should not produce 'ErrLoggerNotStarted' errors after fix, but got %d errors", errorCount)
+	}
+	
+	t.Logf("✓ All %d module-specific early lifecycle events were silently dropped without errors", len(noisyEarlyEvents))
+}
+
+// TestEventLogger_NonBenignEventsStillReturnErrors verifies that non-benign events 
+// still return ErrLoggerNotStarted to ensure the fix doesn't drop ALL events.
+func TestEventLogger_NonBenignEventsStillReturnErrors(t *testing.T) {
+	logger := &capturingLogger{}
+	
+	// Create a simple eventlogger module without full application init
+	mod := NewModule().(*EventLoggerModule)
+	
+	// Set up minimal config to initialize the module
+	cfg := &EventLoggerConfig{
+		Enabled:     true, 
+		LogLevel:    "INFO", 
+		Format:      "structured", 
+		BufferSize:  5, 
+		FlushInterval: 100 * time.Millisecond, 
+		OutputTargets: []OutputTargetConfig{{
+			Type: "console", 
+			Level: "INFO", 
+			Format: "structured", 
+			Console: &ConsoleTargetConfig{UseColor: false, Timestamps: false},
+		}},
+	}
+	mod.config = cfg
+	mod.logger = logger
+	
+	// Initialize channels like the Init() method would, but don't start
+	mod.eventChan = make(chan cloudevents.Event, mod.config.BufferSize)
+	mod.stopChan = make(chan struct{})
+	
+	// Test events that should NOT be treated as benign
+	nonBenignEvents := []string{
+		"com.mycompany.custom.event",           // Random custom event
+		"user.created",                         // Business logic event
+		"payment.processed",                    // Business logic event  
+		"com.modular.chimux.request.received",  // Runtime operational event (not early lifecycle)
+	}
+
+	errorCount := 0
+	for _, et := range nonBenignEvents {
+		evt := modular.NewCloudEvent(et, "test-module", nil, nil)
+		err := mod.OnEvent(context.Background(), evt)
+		if err != nil {
+			errorCount++
+			t.Logf("Event %s correctly returned error: %v", et, err)
+		} else {
+			t.Errorf("Event %s should have returned error but was silently dropped", et)
+		}
+	}
+
+	// After fix: we still expect errors for non-benign events
+	if errorCount != len(nonBenignEvents) {
+		t.Fatalf("expected %d non-benign events to return errors, but got %d", len(nonBenignEvents), errorCount)
+	}
+	
+	t.Logf("✓ All %d non-benign events correctly returned ErrLoggerNotStarted", len(nonBenignEvents))
 }
 
 // Helper to simulate an external lifecycle event arrival before Start (if needed in future tests).

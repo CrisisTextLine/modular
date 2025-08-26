@@ -844,13 +844,23 @@ func (m *EventLoggerModule) GetRegisteredEventTypes() []string {
 // isBenignEarlyLifecycleEvent returns true for framework lifecycle events that may occur
 // before the eventlogger starts and should not generate noise if dropped.
 func isBenignEarlyLifecycleEvent(eventType string) bool {
+	// Check exact matches for core framework events
 	switch eventType {
 	case modular.EventTypeConfigLoaded,
 		modular.EventTypeConfigValidated,
 		modular.EventTypeModuleRegistered,
 		modular.EventTypeServiceRegistered:
 		return true
-	default:
-		return false
 	}
+
+	// Check suffix patterns for common module-specific lifecycle events
+	// This addresses the noise issue described in issue #80
+	if strings.HasSuffix(eventType, ".config.loaded") ||
+		strings.HasSuffix(eventType, ".config.validated") ||
+		strings.HasSuffix(eventType, ".router.created") ||
+		strings.HasSuffix(eventType, ".cors.configured") {
+		return true
+	}
+
+	return false
 }

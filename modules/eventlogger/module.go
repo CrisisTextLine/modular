@@ -855,11 +855,16 @@ func isBenignEarlyLifecycleEvent(eventType string) bool {
 
 	// Check suffix patterns for common module-specific lifecycle events
 	// This addresses the noise issue described in issue #80
-	if strings.HasSuffix(eventType, ".config.loaded") ||
-		strings.HasSuffix(eventType, ".config.validated") ||
-		strings.HasSuffix(eventType, ".router.created") ||
-		strings.HasSuffix(eventType, ".cors.configured") {
-		return true
+	suffixPatterns := []string{
+		".config.loaded",
+		".config.validated",
+		".router.created",
+		".cors.configured",
+	}
+	for _, pattern := range suffixPatterns {
+		if strings.HasSuffix(eventType, pattern) {
+			return true
+		}
 	}
 
 	return false

@@ -1098,7 +1098,7 @@ func (app *StdApplication) findDependencyEdge(from, to string, edges []Dependenc
 			case EdgeTypeInterfaceService:
 				interfaceName := "unknown"
 				if edge.InterfaceType != nil {
-					interfaceName = edge.InterfaceType.Name()
+					interfaceName = edge.InterfaceType.String() // Use String() for fully qualified name
 				}
 				return fmt.Sprintf("(interface:%s)", interfaceName)
 			}
@@ -1247,11 +1247,14 @@ func (app *StdApplication) findModuleInterfaceMatches(
 			for _, requirement := range requirements {
 				svcType := reflect.TypeOf(svcProvider.Instance)
 				if app.typeImplementsInterface(svcType, requirement.interfaceType) {
-					// Skip self-dependencies
-					if moduleName == requirement.moduleName {
+					// Allow self-dependencies only when the service names match (intentional self-dependency)
+					// Skip self-dependencies when only interfaces match but service names differ (accidental)
+					if moduleName == requirement.moduleName && svcProvider.Name != requirement.serviceName {
 						continue
 					}
-
+					
+					// Create match for all other dependencies - including intentional self-dependencies 
+					// Self-dependencies will be detected as cycles during topological sort
 					matches = append(matches, InterfaceMatch{
 						Consumer:      requirement.moduleName,
 						Provider:      moduleName,
@@ -1372,11 +1375,6 @@ func (app *StdApplication) addInterfaceBasedDependenciesWithTypeInfo(graph map[s
 
 // addInterfaceBasedDependencyWithTypeInfo adds a single interface-based dependency with type information
 func (app *StdApplication) addInterfaceBasedDependencyWithTypeInfo(match InterfaceMatch, graph map[string][]string) *DependencyEdge {
-	// Skip self-dependencies
-	if match.Consumer == match.Provider {
-		return nil
-	}
-
 	// Check if this dependency already exists
 	for _, existingDep := range graph[match.Consumer] {
 		if existingDep == match.Provider {
@@ -1384,7 +1382,7 @@ func (app *StdApplication) addInterfaceBasedDependencyWithTypeInfo(match Interfa
 		}
 	}
 
-	// Add the dependency
+	// Add the dependency (including self-dependencies for cycle detection)
 	if graph[match.Consumer] == nil {
 		graph[match.Consumer] = make([]string, 0)
 	}

@@ -900,6 +900,3 @@ func (m *EventLoggerModule) GetRegisteredEventTypes() []string {
 		EventTypeOutputRegistered,
 	}
 }
-
-// Note: isBenignEarlyLifecycleEvent function removed in favor of queueing approach
-// which provides a generic solution for all pre-start events.

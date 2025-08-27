@@ -34,12 +34,12 @@ type CycleModuleA struct {
 	name string
 }
 
-func (m *CycleModuleA) Name() string { return m.name }
+func (m *CycleModuleA) Name() string               { return m.name }
 func (m *CycleModuleA) Init(app Application) error { return nil }
 
 func (m *CycleModuleA) ProvidesServices() []ServiceProvider {
 	return []ServiceProvider{{
-		Name: "serviceA",
+		Name:     "serviceA",
 		Instance: &struct{ TestInterfaceA }{},
 	}}
 }
@@ -58,12 +58,12 @@ type CycleModuleB struct {
 	name string
 }
 
-func (m *CycleModuleB) Name() string { return m.name }
+func (m *CycleModuleB) Name() string               { return m.name }
 func (m *CycleModuleB) Init(app Application) error { return nil }
 
 func (m *CycleModuleB) ProvidesServices() []ServiceProvider {
 	return []ServiceProvider{{
-		Name: "serviceB", 
+		Name:     "serviceB",
 		Instance: &struct{ TestInterfaceB }{},
 	}}
 }
@@ -82,12 +82,12 @@ type LinearModuleA struct {
 	name string
 }
 
-func (m *LinearModuleA) Name() string { return m.name }
+func (m *LinearModuleA) Name() string               { return m.name }
 func (m *LinearModuleA) Init(app Application) error { return nil }
 
 func (m *LinearModuleA) ProvidesServices() []ServiceProvider {
 	return []ServiceProvider{{
-		Name: "linearServiceA",
+		Name:     "linearServiceA",
 		Instance: &struct{ TestInterfaceA }{},
 	}}
 }
@@ -97,7 +97,7 @@ type LinearModuleB struct {
 	name string
 }
 
-func (m *LinearModuleB) Name() string { return m.name }
+func (m *LinearModuleB) Name() string               { return m.name }
 func (m *LinearModuleB) Init(app Application) error { return nil }
 
 func (m *LinearModuleB) RequiresServices() []ServiceDependency {
@@ -114,12 +114,12 @@ type SelfDependentModule struct {
 	name string
 }
 
-func (m *SelfDependentModule) Name() string { return m.name }
+func (m *SelfDependentModule) Name() string               { return m.name }
 func (m *SelfDependentModule) Init(app Application) error { return nil }
 
 func (m *SelfDependentModule) ProvidesServices() []ServiceProvider {
 	return []ServiceProvider{{
-		Name: "selfService",
+		Name:     "selfService",
 		Instance: &struct{ TestInterfaceA }{},
 	}}
 }
@@ -150,13 +150,13 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) iHaveAModularApplication() erro
 func (ctx *EnhancedCycleDetectionBDDTestContext) iHaveTwoModulesWithCircularInterfaceDependencies() error {
 	moduleA := &CycleModuleA{name: "moduleA"}
 	moduleB := &CycleModuleB{name: "moduleB"}
-	
+
 	ctx.modules["moduleA"] = moduleA
 	ctx.modules["moduleB"] = moduleB
-	
+
 	ctx.app.RegisterModule(moduleA)
 	ctx.app.RegisterModule(moduleB)
-	
+
 	return nil
 }
 
@@ -169,11 +169,11 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) theInitializationShouldFailWith
 	if ctx.initializeResult == nil {
 		return fmt.Errorf("expected initialization to fail with circular dependency error, but it succeeded")
 	}
-	
+
 	if !IsErrCircularDependency(ctx.initializeResult) {
 		return fmt.Errorf("expected ErrCircularDependency, got %T: %v", ctx.initializeResult, ctx.initializeResult)
 	}
-	
+
 	ctx.cycleDetected = true
 	return nil
 }
@@ -182,12 +182,12 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) theErrorMessageShouldIncludeBot
 	if ctx.initializeResult == nil {
 		return fmt.Errorf("no error to check")
 	}
-	
+
 	errorMsg := ctx.initializeResult.Error()
 	if !strings.Contains(errorMsg, "moduleA") || !strings.Contains(errorMsg, "moduleB") {
 		return fmt.Errorf("error message should contain both module names, got: %s", errorMsg)
 	}
-	
+
 	return nil
 }
 
@@ -195,12 +195,12 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) theErrorMessageShouldIndicateIn
 	if ctx.initializeResult == nil {
 		return fmt.Errorf("no error to check")
 	}
-	
+
 	errorMsg := ctx.initializeResult.Error()
 	if !strings.Contains(errorMsg, "interface:") {
 		return fmt.Errorf("error message should indicate interface-based dependencies, got: %s", errorMsg)
 	}
-	
+
 	return nil
 }
 
@@ -208,17 +208,17 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) theErrorMessageShouldShowTheCom
 	if ctx.initializeResult == nil {
 		return fmt.Errorf("no error to check")
 	}
-	
+
 	errorMsg := ctx.initializeResult.Error()
 	if !strings.Contains(errorMsg, "cycle:") {
 		return fmt.Errorf("error message should show complete cycle, got: %s", errorMsg)
 	}
-	
+
 	// Check for arrow notation indicating dependency flow
 	if !strings.Contains(errorMsg, "→") {
 		return fmt.Errorf("error message should use arrow notation for dependency flow, got: %s", errorMsg)
 	}
-	
+
 	return nil
 }
 
@@ -236,9 +236,9 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) theErrorMessageShouldContain(ex
 	if ctx.initializeResult == nil {
 		return fmt.Errorf("no error to check")
 	}
-	
+
 	errorMsg := ctx.initializeResult.Error()
-	
+
 	// The exact format might vary, so let's check for key components
 	requiredComponents := []string{"cycle:", "moduleA", "moduleB", "interface:", "TestInterface"}
 	for _, component := range requiredComponents {
@@ -246,7 +246,7 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) theErrorMessageShouldContain(ex
 			return fmt.Errorf("error message should contain '%s', got: %s", component, errorMsg)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -254,26 +254,26 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) theErrorMessageShouldClearlySho
 	if ctx.initializeResult == nil {
 		return fmt.Errorf("no error to check")
 	}
-	
+
 	errorMsg := ctx.initializeResult.Error()
 	// Look for interface specification in the error message
 	if !strings.Contains(errorMsg, "TestInterface") {
 		return fmt.Errorf("error message should clearly show TestInterface causing the cycle, got: %s", errorMsg)
 	}
-	
+
 	return nil
 }
 
 func (ctx *EnhancedCycleDetectionBDDTestContext) iHaveModulesWithValidLinearDependencies() error {
 	moduleA := &LinearModuleA{name: "linearA"}
 	moduleB := &LinearModuleB{name: "linearB"}
-	
+
 	ctx.modules["linearA"] = moduleA
 	ctx.modules["linearB"] = moduleB
-	
+
 	ctx.app.RegisterModule(moduleA)
 	ctx.app.RegisterModule(moduleB)
-	
+
 	return nil
 }
 
@@ -298,10 +298,10 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) noCircularDependencyErrorShould
 
 func (ctx *EnhancedCycleDetectionBDDTestContext) iHaveAModuleThatDependsOnAServiceItAlsoProvides() error {
 	module := &SelfDependentModule{name: "selfModule"}
-	
+
 	ctx.modules["selfModule"] = module
 	ctx.app.RegisterModule(module)
-	
+
 	return nil
 }
 
@@ -309,11 +309,11 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) aSelfDependencyCycleShouldBeDet
 	if ctx.initializeResult == nil {
 		return fmt.Errorf("expected self-dependency cycle to be detected")
 	}
-	
+
 	if !IsErrCircularDependency(ctx.initializeResult) {
 		return fmt.Errorf("expected circular dependency error for self-dependency, got %v", ctx.initializeResult)
 	}
-	
+
 	return nil
 }
 
@@ -321,13 +321,13 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) theErrorMessageShouldClearlyInd
 	if ctx.initializeResult == nil {
 		return fmt.Errorf("no error to check")
 	}
-	
+
 	errorMsg := ctx.initializeResult.Error()
 	// Should mention the module name and self-reference
 	if !strings.Contains(errorMsg, "selfModule") {
 		return fmt.Errorf("error message should mention the self-dependent module, got: %s", errorMsg)
 	}
-	
+
 	return nil
 }
 
@@ -336,10 +336,10 @@ func TestEnhancedCycleDetectionBDD(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
 			testContext := &EnhancedCycleDetectionBDDTestContext{}
-			
+
 			// Background
 			ctx.Step(`^I have a modular application$`, testContext.iHaveAModularApplication)
-			
+
 			// Cycle detection scenarios
 			ctx.Step(`^I have two modules with circular interface dependencies$`, testContext.iHaveTwoModulesWithCircularInterfaceDependencies)
 			ctx.Step(`^I try to initialize the application$`, testContext.iTryToInitializeTheApplication)
@@ -347,26 +347,26 @@ func TestEnhancedCycleDetectionBDD(t *testing.T) {
 			ctx.Step(`^the error message should include both module names$`, testContext.theErrorMessageShouldIncludeBothModuleNames)
 			ctx.Step(`^the error message should indicate interface-based dependencies$`, testContext.theErrorMessageShouldIndicateInterfaceBasedDependencies)
 			ctx.Step(`^the error message should show the complete dependency cycle$`, testContext.theErrorMessageShouldShowTheCompleteDependencyCycle)
-			
+
 			// Enhanced error message format
 			ctx.Step(`^I have modules A and B where A requires interface TestInterface and B provides TestInterface$`, testContext.iHaveModulesAAndBWhereARequiresInterfaceTestInterfaceAndBProvidesTestInterface)
 			ctx.Step(`^module B also requires interface TestInterface creating a cycle$`, testContext.moduleBAlsoRequiresInterfaceTestInterfaceCreatingACycle)
 			ctx.Step(`^the error message should contain "([^"]*)"$`, testContext.theErrorMessageShouldContain)
 			ctx.Step(`^the error message should clearly show the interface causing the cycle$`, testContext.theErrorMessageShouldClearlyShowTheInterfaceCausingTheCycle)
-			
+
 			// Linear dependencies (no cycles)
 			ctx.Step(`^I have modules with valid linear dependencies$`, testContext.iHaveModulesWithValidLinearDependencies)
 			ctx.Step(`^I initialize the application$`, testContext.iInitializeTheApplication)
 			ctx.Step(`^the initialization should succeed$`, testContext.theInitializationShouldSucceed)
 			ctx.Step(`^no circular dependency error should be reported$`, testContext.noCircularDependencyErrorShouldBeReported)
-			
+
 			// Self-dependency
 			ctx.Step(`^I have a module that depends on a service it also provides$`, testContext.iHaveAModuleThatDependsOnAServiceItAlsoProvides)
 			ctx.Step(`^a self-dependency cycle should be detected$`, testContext.aSelfDependencyCycleShouldBeDetected)
 			ctx.Step(`^the error message should clearly indicate the self-dependency$`, testContext.theErrorMessageShouldClearlyIndicateTheSelfDependency)
 		},
 		Options: &godog.Options{
-			Format:   "pretty", 
+			Format:   "pretty",
 			Paths:    []string{"features/enhanced_cycle_detection.feature"},
 			TestingT: t,
 		},

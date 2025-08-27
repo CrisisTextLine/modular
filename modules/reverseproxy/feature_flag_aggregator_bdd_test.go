@@ -15,14 +15,14 @@ type testCfg struct {
 	Str string `yaml:"str"`
 }
 
-// MockRouter implements the routerService interface for testing
-type MockRouter struct{}
+// MockBDDRouter implements the routerService interface for BDD testing
+type MockBDDRouter struct{}
 
-func (m *MockRouter) Handle(pattern string, handler http.Handler) {}
-func (m *MockRouter) HandleFunc(pattern string, handler http.HandlerFunc) {}
-func (m *MockRouter) Mount(pattern string, h http.Handler) {}
-func (m *MockRouter) Use(middlewares ...func(http.Handler) http.Handler) {}
-func (m *MockRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {}
+func (m *MockBDDRouter) Handle(pattern string, handler http.Handler) {}
+func (m *MockBDDRouter) HandleFunc(pattern string, handler http.HandlerFunc) {}
+func (m *MockBDDRouter) Mount(pattern string, h http.Handler) {}
+func (m *MockBDDRouter) Use(middlewares ...func(http.Handler) http.Handler) {}
+func (m *MockBDDRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {}
 
 // FeatureFlagAggregatorBDDTestContext holds the test context for feature flag aggregator BDD scenarios
 type FeatureFlagAggregatorBDDTestContext struct {
@@ -72,7 +72,7 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveAModularApplicationWithReve
 	ctx.app = modular.NewStdApplication(modular.NewStdConfigProvider(testCfg{Str: "test"}), &testLogger{})
 
 	// Register a mock router service that the reverse proxy module requires
-	mockRouter := &MockRouter{}
+	mockRouter := &MockBDDRouter{}
 	ctx.app.RegisterService("router", mockRouter)
 
 	// Create reverse proxy module

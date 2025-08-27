@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
@@ -148,6 +149,24 @@ func (m *MockApplication) SetVerboseConfig(verbose bool) {
 // Context returns a context for the mock application
 func (m *MockApplication) Context() context.Context {
 	return context.Background()
+}
+
+// GetServicesByModule returns all services provided by a specific module (mock implementation)
+func (m *MockApplication) GetServicesByModule(moduleName string) []string {
+	// Mock implementation returns empty list
+	return []string{}
+}
+
+// GetServiceEntry retrieves detailed information about a registered service (mock implementation)
+func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
+	// Mock implementation returns nil
+	return nil, false
+}
+
+// GetServicesByInterface returns all services that implement the given interface (mock implementation)
+func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
+	// Mock implementation returns empty list
+	return []*modular.ServiceRegistryEntry{}
 }
 
 // NewStdConfigProvider is a simple mock implementation of modular.ConfigProvider

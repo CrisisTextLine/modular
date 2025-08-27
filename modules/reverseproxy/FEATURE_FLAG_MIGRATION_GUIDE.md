@@ -213,6 +213,32 @@ With these evaluators registered:
 
 **Evaluation order**: rules → remote → cache → file
 
+## Core Framework Enhancements
+
+The interface-based discovery system is powered by enhancements to the core Modular framework:
+
+### Enhanced Service Registry
+
+The framework now tracks:
+- **Module associations**: Which module registered which service
+- **Service metadata**: Original names, actual names, module types
+- **Interface discovery**: Find all services implementing a specific interface
+
+### Automatic Conflict Resolution
+
+When service name conflicts occur, the framework automatically:
+1. **Preserves original name** for the first service
+2. **Appends module name** for subsequent services from different modules
+3. **Uses type information** when module names conflict  
+4. **Falls back to counters** when all else fails
+
+Example with services named `"evaluator"`:
+- Module A: `"evaluator"` (first one keeps original name)
+- Module B: `"evaluator.moduleB"` (gets module suffix)
+- Module C: `"evaluator.moduleC"` (gets different module suffix)
+
+This ensures all services remain accessible while maintaining intuitive naming.
+
 ## Backwards Compatibility
 
 The new system maintains backwards compatibility:

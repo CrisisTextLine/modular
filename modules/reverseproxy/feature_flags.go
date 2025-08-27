@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"sort"
-	"strings"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -184,33 +184,32 @@ func (a *FeatureFlagAggregator) discoverEvaluators() []weightedEvaluatorInstance
 	var evaluators []weightedEvaluatorInstance
 	nameCounters := make(map[string]int) // Track name usage for uniqueness
 	
-	// Get service registry and discover evaluator services
-	registry := a.app.SvcRegistry()
-	for serviceName, serviceInstance := range registry {
+	// Use interface-based discovery to find all FeatureFlagEvaluator services
+	evaluatorType := reflect.TypeOf((*FeatureFlagEvaluator)(nil)).Elem()
+	entries := a.app.GetServicesByInterface(evaluatorType)
+	
+	for _, entry := range entries {
 		// Check if it's the same instance as ourselves (prevent self-ingestion)
-		if serviceInstance == a {
+		if entry.Service == a {
 			continue
 		}
 		
 		// Skip the aggregator itself to prevent recursion
-		if serviceName == "featureFlagEvaluator" {
+		if entry.ActualName == "featureFlagEvaluator" {
 			continue
 		}
 		
 		// Skip the internal file evaluator to prevent double evaluation 
 		// (it will be included via separate discovery)
-		if serviceName == "featureFlagEvaluator.file" {
+		if entry.ActualName == "featureFlagEvaluator.file" {
 			continue
 		}
 		
-		// Match by interface implementation instead of name pattern
-		evaluator, ok := serviceInstance.(FeatureFlagEvaluator)
-		if !ok {
-			continue // Not a FeatureFlagEvaluator, skip silently
-		}
+		// Already confirmed to be FeatureFlagEvaluator by interface discovery
+		evaluator := entry.Service.(FeatureFlagEvaluator)
 		
-		// Generate unique name for this evaluator
-		uniqueName := a.generateUniqueName(serviceName, nameCounters)
+		// Generate unique name using enhanced service registry information
+		uniqueName := a.generateUniqueNameWithModuleInfo(entry, nameCounters)
 		
 		// Determine weight
 		weight := 100 // default weight
@@ -225,7 +224,8 @@ func (a *FeatureFlagAggregator) discoverEvaluators() []weightedEvaluatorInstance
 		})
 		
 		a.logger.Debug("Discovered feature flag evaluator",
-			"originalName", serviceName, "uniqueName", uniqueName, 
+			"originalName", entry.OriginalName, "actualName", entry.ActualName, 
+			"uniqueName", uniqueName, "moduleName", entry.ModuleName,
 			"weight", weight, "type", fmt.Sprintf("%T", evaluator))
 	}
 	
@@ -249,36 +249,44 @@ func (a *FeatureFlagAggregator) discoverEvaluators() []weightedEvaluatorInstance
 	return evaluators
 }
 
-// generateUniqueName creates a unique name for a feature flag evaluator service.
-// If the service name is unique, it uses the original name.
-// If the name conflicts, it attempts to append the module name.
-// If there are still conflicts, it appends an incrementing number.
-func (a *FeatureFlagAggregator) generateUniqueName(serviceName string, nameCounters map[string]int) string {
+// generateUniqueNameWithModuleInfo creates a unique name for a feature flag evaluator service
+// using the enhanced service registry information that tracks module associations.
+// This replaces the previous heuristic-based approach with precise module information.
+func (a *FeatureFlagAggregator) generateUniqueNameWithModuleInfo(entry *modular.ServiceRegistryEntry, nameCounters map[string]int) string {
 	// Try original name first
-	if nameCounters[serviceName] == 0 {
-		nameCounters[serviceName] = 1
-		return serviceName
+	originalName := entry.OriginalName
+	if nameCounters[originalName] == 0 {
+		nameCounters[originalName] = 1
+		return originalName
 	}
 	
-	// Name is taken, try to extract module information and append module name
-	// This is a best-effort approach - we don't have direct access to which module
-	// registered the service, so we'll use heuristics based on service patterns
-	
-	// Check if the service name suggests a module name (e.g., "database.evaluator" -> "database")
-	parts := strings.Split(serviceName, ".")
-	if len(parts) >= 2 {
-		potentialModuleName := parts[0]
-		moduleName := fmt.Sprintf("%s.%s", serviceName, potentialModuleName)
-		if nameCounters[moduleName] == 0 {
-			nameCounters[moduleName] = 1
-			return moduleName
+	// Name conflicts exist - use module information for disambiguation
+	if entry.ModuleName != "" {
+		// Try with module name
+		moduleBasedName := fmt.Sprintf("%s.%s", originalName, entry.ModuleName)
+		if nameCounters[moduleBasedName] == 0 {
+			nameCounters[moduleBasedName] = 1
+			return moduleBasedName
 		}
 	}
 	
-	// Fallback: append incrementing counter
-	counter := nameCounters[serviceName]
-	nameCounters[serviceName] = counter + 1
-	return fmt.Sprintf("%s.%d", serviceName, counter)
+	// Try with module type name if available
+	if entry.ModuleType != nil {
+		typeName := entry.ModuleType.Elem().Name()
+		if typeName == "" {
+			typeName = entry.ModuleType.String()
+		}
+		typeBasedName := fmt.Sprintf("%s.%s", originalName, typeName)
+		if nameCounters[typeBasedName] == 0 {
+			nameCounters[typeBasedName] = 1
+			return typeBasedName
+		}
+	}
+	
+	// Final fallback: append incrementing counter
+	counter := nameCounters[originalName]
+	nameCounters[originalName] = counter + 1
+	return fmt.Sprintf("%s.%d", originalName, counter)
 }
 
 // EvaluateFlag implements FeatureFlagEvaluator by calling discovered evaluators 

@@ -161,6 +161,20 @@ type Application interface {
 
 	// IsVerboseConfig returns whether verbose configuration debugging is enabled.
 	IsVerboseConfig() bool
+
+	// GetServicesByModule returns all services provided by a specific module.
+	// This method provides access to the enhanced service registry information
+	// that tracks module-to-service associations.
+	GetServicesByModule(moduleName string) []string
+
+	// GetServiceEntry retrieves detailed information about a registered service,
+	// including which module provided it and naming information.
+	GetServiceEntry(serviceName string) (*ServiceRegistryEntry, bool)
+
+	// GetServicesByInterface returns all services that implement the given interface.
+	// This enables interface-based service discovery for modules that need to
+	// aggregate services by capability rather than name.
+	GetServicesByInterface(interfaceType reflect.Type) []*ServiceRegistryEntry
 }
 
 // TenantApplication extends Application with multi-tenant functionality.
@@ -231,17 +245,18 @@ type TenantApplication interface {
 
 // StdApplication represents the core StdApplication container
 type StdApplication struct {
-	cfgProvider    ConfigProvider
-	cfgSections    map[string]ConfigProvider
-	svcRegistry    ServiceRegistry
-	moduleRegistry ModuleRegistry
-	logger         Logger
-	ctx            context.Context
-	cancel         context.CancelFunc
-	tenantService  TenantService // Added tenant service reference
-	verboseConfig  bool          // Flag for verbose configuration debugging
-	initialized    bool          // Tracks whether Init has already been successfully executed
-	configFeeders  []Feeder      // Optional per-application feeders (override global ConfigFeeders if non-nil)
+	cfgProvider         ConfigProvider
+	cfgSections         map[string]ConfigProvider
+	svcRegistry         ServiceRegistry          // Backwards compatible view
+	enhancedSvcRegistry *EnhancedServiceRegistry // Enhanced registry with module tracking
+	moduleRegistry      ModuleRegistry
+	logger              Logger
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	tenantService       TenantService // Added tenant service reference
+	verboseConfig       bool          // Flag for verbose configuration debugging
+	initialized         bool          // Tracks whether Init has already been successfully executed
+	configFeeders       []Feeder      // Optional per-application feeders (override global ConfigFeeders if non-nil)
 }
 
 // NewStdApplication creates a new application instance with the provided configuration and logger.
@@ -276,17 +291,21 @@ type StdApplication struct {
 //	    log.Fatal(err)
 //	}
 func NewStdApplication(cp ConfigProvider, logger Logger) Application {
+	enhancedRegistry := NewEnhancedServiceRegistry()
+
 	app := &StdApplication{
-		cfgProvider:    cp,
-		cfgSections:    make(map[string]ConfigProvider),
-		svcRegistry:    make(ServiceRegistry),
-		moduleRegistry: make(ModuleRegistry),
-		logger:         logger,
-		configFeeders:  nil, // default to nil to signal use of package-level ConfigFeeders
+		cfgProvider:         cp,
+		cfgSections:         make(map[string]ConfigProvider),
+		enhancedSvcRegistry: enhancedRegistry,
+		svcRegistry:         enhancedRegistry.AsServiceRegistry(), // Backwards compatible view
+		moduleRegistry:      make(ModuleRegistry),
+		logger:              logger,
+		configFeeders:       nil, // default to nil to signal use of package-level ConfigFeeders
 	}
 
 	// Register the logger as a service so modules can depend on it
-	app.svcRegistry["logger"] = logger
+	_, _ = app.enhancedSvcRegistry.RegisterService("logger", logger) // Ignore error for logger service
+	app.svcRegistry = app.enhancedSvcRegistry.AsServiceRegistry()    // Update backwards compatible view
 
 	return app
 }
@@ -333,14 +352,23 @@ func (app *StdApplication) SetConfigFeeders(feeders []Feeder) {
 
 // RegisterService adds a service with type checking
 func (app *StdApplication) RegisterService(name string, service any) error {
+	// Check for duplicates using the backwards compatible registry
 	if _, exists := app.svcRegistry[name]; exists {
 		// Preserve contract: duplicate registrations are an error
 		app.logger.Debug("Service already registered", "name", name)
 		return ErrServiceAlreadyRegistered
 	}
 
-	app.svcRegistry[name] = service
-	app.logger.Debug("Registered service", "name", name, "type", reflect.TypeOf(service))
+	// Register with enhanced registry (handles automatic conflict resolution)
+	actualName, err := app.enhancedSvcRegistry.RegisterService(name, service)
+	if err != nil {
+		return err
+	}
+
+	// Update backwards compatible view
+	app.svcRegistry = app.enhancedSvcRegistry.AsServiceRegistry()
+
+	app.logger.Debug("Registered service", "name", name, "actualName", actualName, "type", reflect.TypeOf(service))
 	return nil
 }
 
@@ -439,23 +467,29 @@ func (app *StdApplication) InitWithApp(appToPass Application) error {
 
 	// Initialize modules in order
 	for _, moduleName := range moduleOrder {
-		if _, ok := app.moduleRegistry[moduleName].(ServiceAware); ok {
+		module := app.moduleRegistry[moduleName]
+
+		if _, ok := module.(ServiceAware); ok {
 			// Inject required services
-			app.moduleRegistry[moduleName], err = app.injectServices(app.moduleRegistry[moduleName])
+			app.moduleRegistry[moduleName], err = app.injectServices(module)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("failed to inject services for module '%s': %w", moduleName, err))
 				continue
 			}
+			module = app.moduleRegistry[moduleName] // Update reference after injection
 		}
 
-		if err = app.moduleRegistry[moduleName].Init(appToPass); err != nil {
+		// Set current module context for service registration tracking
+		app.enhancedSvcRegistry.SetCurrentModule(module)
+
+		if err = module.Init(appToPass); err != nil {
 			errs = append(errs, fmt.Errorf("module '%s' failed to initialize: %w", moduleName, err))
 			continue
 		}
 
-		if _, ok := app.moduleRegistry[moduleName].(ServiceAware); ok {
+		if _, ok := module.(ServiceAware); ok {
 			// Register services provided by modules
-			for _, svc := range app.moduleRegistry[moduleName].(ServiceAware).ProvidesServices() {
+			for _, svc := range module.(ServiceAware).ProvidesServices() {
 				if err = app.RegisterService(svc.Name, svc.Instance); err != nil {
 					// Collect registration errors (e.g., duplicates) for reporting
 					errs = append(errs, fmt.Errorf("module '%s' failed to register service '%s': %w", moduleName, svc.Name, err))
@@ -463,6 +497,9 @@ func (app *StdApplication) InitWithApp(appToPass Application) error {
 				}
 			}
 		}
+
+		// Clear current module context
+		app.enhancedSvcRegistry.ClearCurrentModule()
 
 		app.logger.Info(fmt.Sprintf("Initialized module %s of type %T", moduleName, app.moduleRegistry[moduleName]))
 	}
@@ -1382,4 +1419,19 @@ func (app *StdApplication) GetTenantConfig(tenantID TenantID, section string) (C
 		return nil, fmt.Errorf("failed to get tenant config: %w", err)
 	}
 	return provider, nil
+}
+
+// GetServicesByModule returns all services provided by a specific module
+func (app *StdApplication) GetServicesByModule(moduleName string) []string {
+	return app.enhancedSvcRegistry.GetServicesByModule(moduleName)
+}
+
+// GetServiceEntry retrieves detailed information about a registered service
+func (app *StdApplication) GetServiceEntry(serviceName string) (*ServiceRegistryEntry, bool) {
+	return app.enhancedSvcRegistry.GetServiceEntry(serviceName)
+}
+
+// GetServicesByInterface returns all services that implement the given interface
+func (app *StdApplication) GetServicesByInterface(interfaceType reflect.Type) []*ServiceRegistryEntry {
+	return app.enhancedSvcRegistry.GetServicesByInterface(interfaceType)
 }

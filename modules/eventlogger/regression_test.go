@@ -175,7 +175,7 @@ func TestEventLogger_SynchronousStartupConfigFlag(t *testing.T) {
 
 // TestEventLogger_NoiseReductionForModuleSpecificEarlyEvents verifies that module-specific
 // early lifecycle events are queued instead of producing errors when the eventlogger
-// has not yet started. This test validates the "queue until ready" approach that 
+// has not yet started. This test validates the "queue until ready" approach that
 // addresses the issue described in #80.
 func TestEventLogger_NoiseReductionForModuleSpecificEarlyEvents(t *testing.T) {
 	logger := &capturingLogger{}
@@ -243,43 +243,43 @@ func TestEventLogger_NoiseReductionForModuleSpecificEarlyEvents(t *testing.T) {
 	t.Logf("✓ All %d module-specific early lifecycle events were silently queued without errors", len(noisyEarlyEvents))
 }
 
-// TestEventLogger_AllEventsQueuedWhenNotStarted verifies that ALL events 
+// TestEventLogger_AllEventsQueuedWhenNotStarted verifies that ALL events
 // are queued when the logger is not started (queue-until-ready approach).
 func TestEventLogger_AllEventsQueuedWhenNotStarted(t *testing.T) {
 	logger := &capturingLogger{}
-	
+
 	// Create a simple eventlogger module without full application init
 	mod := NewModule().(*EventLoggerModule)
-	
+
 	// Set up minimal config to initialize the module
 	cfg := &EventLoggerConfig{
-		Enabled:     true, 
-		LogLevel:    "INFO", 
-		Format:      "structured", 
-		BufferSize:  5, 
-		FlushInterval: 100 * time.Millisecond, 
+		Enabled:       true,
+		LogLevel:      "INFO",
+		Format:        "structured",
+		BufferSize:    5,
+		FlushInterval: 100 * time.Millisecond,
 		OutputTargets: []OutputTargetConfig{{
-			Type: "console", 
-			Level: "INFO", 
-			Format: "structured", 
+			Type:    "console",
+			Level:   "INFO",
+			Format:  "structured",
 			Console: &ConsoleTargetConfig{UseColor: false, Timestamps: false},
 		}},
 	}
 	mod.config = cfg
 	mod.logger = logger
-	
+
 	// Initialize channels like the Init() method would, but don't start
 	mod.eventChan = make(chan cloudevents.Event, mod.config.BufferSize)
 	mod.stopChan = make(chan struct{})
 	mod.eventQueue = make([]cloudevents.Event, 0)
 	mod.queueMaxSize = 1000
-	
+
 	// Test events that should NOT be treated as benign
 	nonBenignEvents := []string{
-		"com.mycompany.custom.event",           // Random custom event
-		"user.created",                         // Business logic event
-		"payment.processed",                    // Business logic event  
-		"com.modular.chimux.request.received",  // Runtime operational event (not early lifecycle)
+		"com.mycompany.custom.event",          // Random custom event
+		"user.created",                        // Business logic event
+		"payment.processed",                   // Business logic event
+		"com.modular.chimux.request.received", // Runtime operational event (not early lifecycle)
 	}
 
 	errorCount := 0
@@ -298,16 +298,16 @@ func TestEventLogger_AllEventsQueuedWhenNotStarted(t *testing.T) {
 	if errorCount != 0 {
 		t.Fatalf("expected all events to be queued (0 errors), but got %d errors", errorCount)
 	}
-	
+
 	// Verify events were actually queued
 	mod.mutex.RLock()
 	queueSize := len(mod.eventQueue)
 	mod.mutex.RUnlock()
-	
+
 	if queueSize != len(nonBenignEvents) {
 		t.Fatalf("Expected %d events in queue, got %d", len(nonBenignEvents), queueSize)
 	}
-	
+
 	t.Logf("✓ All %d events were successfully queued for processing when logger starts", len(nonBenignEvents))
 }
 
@@ -315,20 +315,20 @@ func TestEventLogger_AllEventsQueuedWhenNotStarted(t *testing.T) {
 // Start() are processed when the logger starts up.
 func TestEventLogger_QueuedEventsProcessedOnStart(t *testing.T) {
 	logger := &capturingLogger{}
-	
+
 	// Create a mock application
 	configProvider := modular.NewStdConfigProvider(&struct{}{})
 	app := modular.NewObservableApplication(configProvider, logger)
-	
+
 	// Register and initialize the eventlogger module
 	mod := NewModule()
 	app.RegisterModule(mod)
-	
+
 	// Initialize to set up the module
 	if err := app.Init(); err != nil {
 		t.Fatalf("Failed to initialize application: %v", err)
 	}
-	
+
 	// Get the eventlogger module instance
 	var eventLogger *EventLoggerModule
 	err := app.GetService("eventlogger.observer", &eventLogger)
@@ -337,7 +337,7 @@ func TestEventLogger_QueuedEventsProcessedOnStart(t *testing.T) {
 	}
 
 	// At this point, the eventlogger is initialized but not started
-	
+
 	// Clear logger entries to get clean test results
 	logger.mu.Lock()
 	logger.entries = nil
@@ -346,10 +346,10 @@ func TestEventLogger_QueuedEventsProcessedOnStart(t *testing.T) {
 	// Emit some events before starting - these should be queued
 	preStartEvents := []string{
 		"com.modular.chimux.router.created",
-		"user.registered", 
+		"user.registered",
 		"com.modular.httpserver.cors.configured",
 	}
-	
+
 	for _, et := range preStartEvents {
 		evt := modular.NewCloudEvent(et, "test-source", map[string]interface{}{"test": "data"}, nil)
 		err := eventLogger.OnEvent(context.Background(), evt)
@@ -362,11 +362,11 @@ func TestEventLogger_QueuedEventsProcessedOnStart(t *testing.T) {
 	eventLogger.mutex.RLock()
 	queueSize := len(eventLogger.eventQueue)
 	eventLogger.mutex.RUnlock()
-	
+
 	if queueSize < len(preStartEvents) {
 		t.Fatalf("Expected at least %d events in queue, got %d", len(preStartEvents), queueSize)
 	}
-	
+
 	t.Logf("Queue has %d events (at least %d are ours)", queueSize, len(preStartEvents))
 
 	// Now start the logger - this should process the queued events
@@ -381,7 +381,7 @@ func TestEventLogger_QueuedEventsProcessedOnStart(t *testing.T) {
 	eventLogger.mutex.RLock()
 	queueSizeAfterStart := len(eventLogger.eventQueue)
 	eventLogger.mutex.RUnlock()
-	
+
 	if queueSizeAfterStart != 0 {
 		t.Errorf("Expected queue to be empty after start, but has %d events", queueSizeAfterStart)
 	}

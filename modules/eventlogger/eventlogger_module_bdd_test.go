@@ -1437,11 +1437,84 @@ func (l *testLogger) Error(msg string, keysAndValues ...interface{})   {}
 func (l *testLogger) With(keysAndValues ...interface{}) modular.Logger { return l }
 
 type testConsoleOutput struct {
-	logs []string
+	logs  []string
+	mutex sync.Mutex
+}
+
+func (t *testConsoleOutput) Start(ctx context.Context) error {
+	return nil
+}
+
+func (t *testConsoleOutput) Stop(ctx context.Context) error {
+	return nil
+}
+
+func (t *testConsoleOutput) WriteEvent(entry *LogEntry) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	// Format the entry as it would appear in console output
+	logLine := fmt.Sprintf("[%s] %s %s", entry.Timestamp.Format("2006-01-02 15:04:05"), entry.Level, entry.Type)
+	if entry.Source != "" {
+		logLine += fmt.Sprintf("\n  Source: %s", entry.Source)
+	}
+	if entry.Data != nil {
+		logLine += fmt.Sprintf("\n  Data: %v", entry.Data)
+	}
+	if len(entry.Metadata) > 0 {
+		logLine += "\n  Metadata:"
+		for k, v := range entry.Metadata {
+			logLine += fmt.Sprintf("\n    %s: %s", k, v)
+		}
+	}
+	t.logs = append(t.logs, logLine)
+	return nil
+}
+
+func (t *testConsoleOutput) Flush() error {
+	return nil
+}
+
+func (t *testConsoleOutput) GetLogs() []string {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	result := make([]string, len(t.logs))
+	copy(result, t.logs)
+	return result
 }
 
 type testFileOutput struct {
-	logs []string
+	logs  []string
+	mutex sync.Mutex
+}
+
+func (t *testFileOutput) Start(ctx context.Context) error {
+	return nil
+}
+
+func (t *testFileOutput) Stop(ctx context.Context) error {
+	return nil
+}
+
+func (t *testFileOutput) WriteEvent(entry *LogEntry) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	// Format the entry as JSON for file output
+	logLine := fmt.Sprintf(`{"timestamp":"%s","level":"%s","type":"%s","source":"%s","data":%v}`,
+		entry.Timestamp.Format("2006-01-02T15:04:05Z07:00"), entry.Level, entry.Type, entry.Source, entry.Data)
+	t.logs = append(t.logs, logLine)
+	return nil
+}
+
+func (t *testFileOutput) Flush() error {
+	return nil
+}
+
+func (t *testFileOutput) GetLogs() []string {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	result := make([]string, len(t.logs))
+	copy(result, t.logs)
+	return result
 }
 
 // TestEventLoggerModuleBDD runs the BDD tests for the EventLogger module
@@ -1635,6 +1708,10 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerModuleConfiguredButNotSt
 		return err
 	}
 
+	// Inject test console output for capturing logs
+	ctx.testConsole = &testConsoleOutput{logs: make([]string, 0)}
+	ctx.service.setOutputsForTesting([]OutputTarget{ctx.testConsole})
+
 	// Verify module is not started yet
 	if ctx.service.started {
 		return fmt.Errorf("module should not be started yet")
@@ -1732,9 +1809,91 @@ func (ctx *EventLoggerBDDTestContext) allQueuedEventsShouldBeProcessedAndLogged(
 }
 
 func (ctx *EventLoggerBDDTestContext) theEventsShouldBeProcessedInOrder() error {
-	// For now, we verify that processing completed successfully
-	// In a full implementation, we would capture actual output to verify order
+	// Give processing time to complete
+	time.Sleep(300 * time.Millisecond)
+
+	// Get the captured logs from our test console output
+	if ctx.testConsole == nil {
+		return fmt.Errorf("test console output not configured")
+	}
+
+	logs := ctx.testConsole.GetLogs()
+	if len(logs) == 0 {
+		return fmt.Errorf("no events were logged to test console")
+	}
+
+	// Verify that the test events we emitted are present in order
+	expectedEvents := []string{
+		"pre.start.event1",
+		"pre.start.event2",
+		"pre.start.event3",
+	}
+
+	// Track first occurrence of each event to verify order
+	firstOccurrence := make(map[string]int)
+	for i, log := range logs {
+		for _, expected := range expectedEvents {
+			if containsEventType(log, expected) {
+				if _, found := firstOccurrence[expected]; !found {
+					firstOccurrence[expected] = i
+				}
+				break
+			}
+		}
+	}
+
+	// Verify all expected events were found
+	if len(firstOccurrence) != len(expectedEvents) {
+		missingEvents := make([]string, 0)
+		for _, expected := range expectedEvents {
+			if _, found := firstOccurrence[expected]; !found {
+				missingEvents = append(missingEvents, expected)
+			}
+		}
+		return fmt.Errorf("expected %d events to be processed, but found %d. Missing events: %v",
+			len(expectedEvents), len(firstOccurrence), missingEvents)
+	}
+
+	// Verify the order matches what we expect (events should be processed in emission order)
+	for i := 1; i < len(expectedEvents); i++ {
+		currentEvent := expectedEvents[i]
+		previousEvent := expectedEvents[i-1]
+
+		currentPos, currentFound := firstOccurrence[currentEvent]
+		previousPos, previousFound := firstOccurrence[previousEvent]
+
+		if !currentFound || !previousFound {
+			return fmt.Errorf("missing events in order check")
+		}
+
+		if currentPos <= previousPos {
+			return fmt.Errorf("events not processed in expected order. %s (pos %d) should come after %s (pos %d)",
+				currentEvent, currentPos, previousEvent, previousPos)
+		}
+	}
+
 	return nil
+}
+
+// Helper function to check if a log entry contains a specific event type
+func containsEventType(logEntry, eventType string) bool {
+	// Check if the event type appears in the log entry
+	return containsString(logEntry, eventType)
+}
+
+// Helper function to check if a string contains a substring
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && indexOfString(s, substr) >= 0
+}
+
+// Helper function to find index of substring
+func indexOfString(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }
 
 // Queue overflow scenario implementations
@@ -1768,6 +1927,10 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerModuleConfiguredWithQueu
 	if err != nil {
 		return err
 	}
+
+	// Inject test console output for capturing logs
+	ctx.testConsole = &testConsoleOutput{logs: make([]string, 0)}
+	ctx.service.setOutputsForTesting([]OutputTarget{ctx.testConsole})
 
 	// Artificially reduce queue size for testing overflow
 	ctx.service.mutex.Lock()
@@ -1836,7 +1999,7 @@ func (ctx *EventLoggerBDDTestContext) newerEventsShouldBePreservedInTheQueue() e
 
 func (ctx *EventLoggerBDDTestContext) onlyThePreservedEventsShouldBeProcessed() error {
 	// Wait for events to be processed
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
 	// Verify queue is cleared
 	ctx.service.mutex.Lock()
@@ -1847,7 +2010,47 @@ func (ctx *EventLoggerBDDTestContext) onlyThePreservedEventsShouldBeProcessed() 
 		return fmt.Errorf("expected queue to be cleared after start, but has %d events", queueLen)
 	}
 
-	// The actual verification of which events were processed would require
-	// capturing output, which is complex in this test environment
+	// Get the captured logs from our test console output
+	if ctx.testConsole == nil {
+		return fmt.Errorf("test console output not configured")
+	}
+
+	logs := ctx.testConsole.GetLogs()
+	if len(logs) == 0 {
+		return fmt.Errorf("no events were logged to test console")
+	}
+
+	// In the overflow scenario, we emit events 0-5 to overflow the queue (max 3)
+	// With queue size 3, we expect to see the last 3 events (3, 4, 5) preserved
+	// and the first 3 events (0, 1, 2) should be dropped
+	preservedEvents := []string{"queue.overflow.event3", "queue.overflow.event4", "queue.overflow.event5"}
+	droppedEvents := []string{"queue.overflow.event0", "queue.overflow.event1", "queue.overflow.event2"}
+
+	// Check that preserved events are present
+	foundPreserved := make([]bool, len(preservedEvents))
+	for i, expected := range preservedEvents {
+		for _, log := range logs {
+			if containsEventType(log, expected) {
+				foundPreserved[i] = true
+				break
+			}
+		}
+	}
+
+	for i, expected := range preservedEvents {
+		if !foundPreserved[i] {
+			return fmt.Errorf("expected preserved event %s not found in logs", expected)
+		}
+	}
+
+	// Check that dropped events are NOT present
+	for _, dropped := range droppedEvents {
+		for _, log := range logs {
+			if containsEventType(log, dropped) {
+				return fmt.Errorf("found dropped event %s in logs, but it should have been dropped due to overflow", dropped)
+			}
+		}
+	}
+
 	return nil
 }

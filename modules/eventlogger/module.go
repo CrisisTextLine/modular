@@ -150,8 +150,8 @@ type EventLoggerModule struct {
 	// Event queueing for pre-start events - implements "queue until ready" approach
 	// to handle events that arrive before Start() is called. This eliminates noise
 	// from early lifecycle events while preserving all events for later processing.
-	eventQueue    []cloudevents.Event
-	queueMaxSize  int
+	eventQueue   []cloudevents.Event
+	queueMaxSize int
 }
 
 // setOutputsForTesting replaces the output targets. This is intended ONLY for
@@ -322,7 +322,7 @@ func (m *EventLoggerModule) Start(ctx context.Context) error {
 
 	// Defer emission outside lock (no mutex needed since we released it)
 	go m.emitStartupOperationalEvents(ctx, startupSync, outputsLen, bufferLen, outputConfigs)
-	
+
 	return nil
 }
 
@@ -579,13 +579,13 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 			m.mutex.Unlock()
 			return nil
 		}
-		
+
 		// If not initialized (eventQueue is nil), return error
 		if m.eventQueue == nil {
 			m.mutex.Unlock()
 			return ErrLoggerNotStarted
 		}
-		
+
 		// Queue the event until we're started (unless we're at queue limit)
 		if len(m.eventQueue) < m.queueMaxSize {
 			m.eventQueue = append(m.eventQueue, event)
@@ -599,7 +599,7 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 				m.eventQueue[len(m.eventQueue)-1] = event
 			}
 			if m.logger != nil {
-				m.logger.Debug("Event queue full, dropped oldest event", 
+				m.logger.Debug("Event queue full, dropped oldest event",
 					"queue_size", m.queueMaxSize, "new_event", event.Type())
 			}
 			m.mutex.Unlock()

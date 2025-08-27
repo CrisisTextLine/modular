@@ -304,8 +304,10 @@ func NewStdApplication(cp ConfigProvider, logger Logger) Application {
 	}
 
 	// Register the logger as a service so modules can depend on it
-	_, _ = app.enhancedSvcRegistry.RegisterService("logger", logger) // Ignore error for logger service
-	app.svcRegistry = app.enhancedSvcRegistry.AsServiceRegistry()    // Update backwards compatible view
+	if app.enhancedSvcRegistry != nil {
+		_, _ = app.enhancedSvcRegistry.RegisterService("logger", logger) // Ignore error for logger service
+		app.svcRegistry = app.enhancedSvcRegistry.AsServiceRegistry()    // Update backwards compatible view
+	}
 
 	return app
 }
@@ -359,14 +361,22 @@ func (app *StdApplication) RegisterService(name string, service any) error {
 		return ErrServiceAlreadyRegistered
 	}
 
-	// Register with enhanced registry (handles automatic conflict resolution)
-	actualName, err := app.enhancedSvcRegistry.RegisterService(name, service)
-	if err != nil {
-		return err
+	// Register with enhanced registry if available (handles automatic conflict resolution)
+	var actualName string
+	if app.enhancedSvcRegistry != nil {
+		var err error
+		actualName, err = app.enhancedSvcRegistry.RegisterService(name, service)
+		if err != nil {
+			return err
+		}
+		
+		// Update backwards compatible view
+		app.svcRegistry = app.enhancedSvcRegistry.AsServiceRegistry()
+	} else {
+		// Fallback to direct registration for compatibility
+		app.svcRegistry[name] = service
+		actualName = name
 	}
-
-	// Update backwards compatible view
-	app.svcRegistry = app.enhancedSvcRegistry.AsServiceRegistry()
 
 	app.logger.Debug("Registered service", "name", name, "actualName", actualName, "type", reflect.TypeOf(service))
 	return nil
@@ -480,7 +490,9 @@ func (app *StdApplication) InitWithApp(appToPass Application) error {
 		}
 
 		// Set current module context for service registration tracking
-		app.enhancedSvcRegistry.SetCurrentModule(module)
+		if app.enhancedSvcRegistry != nil {
+			app.enhancedSvcRegistry.SetCurrentModule(module)
+		}
 
 		if err = module.Init(appToPass); err != nil {
 			errs = append(errs, fmt.Errorf("module '%s' failed to initialize: %w", moduleName, err))
@@ -499,7 +511,9 @@ func (app *StdApplication) InitWithApp(appToPass Application) error {
 		}
 
 		// Clear current module context
-		app.enhancedSvcRegistry.ClearCurrentModule()
+		if app.enhancedSvcRegistry != nil {
+			app.enhancedSvcRegistry.ClearCurrentModule()
+		}
 
 		app.logger.Info(fmt.Sprintf("Initialized module %s of type %T", moduleName, app.moduleRegistry[moduleName]))
 	}
@@ -1423,15 +1437,24 @@ func (app *StdApplication) GetTenantConfig(tenantID TenantID, section string) (C
 
 // GetServicesByModule returns all services provided by a specific module
 func (app *StdApplication) GetServicesByModule(moduleName string) []string {
-	return app.enhancedSvcRegistry.GetServicesByModule(moduleName)
+	if app.enhancedSvcRegistry != nil {
+		return app.enhancedSvcRegistry.GetServicesByModule(moduleName)
+	}
+	return nil
 }
 
 // GetServiceEntry retrieves detailed information about a registered service
 func (app *StdApplication) GetServiceEntry(serviceName string) (*ServiceRegistryEntry, bool) {
-	return app.enhancedSvcRegistry.GetServiceEntry(serviceName)
+	if app.enhancedSvcRegistry != nil {
+		return app.enhancedSvcRegistry.GetServiceEntry(serviceName)
+	}
+	return nil, false
 }
 
 // GetServicesByInterface returns all services that implement the given interface
 func (app *StdApplication) GetServicesByInterface(interfaceType reflect.Type) []*ServiceRegistryEntry {
-	return app.enhancedSvcRegistry.GetServicesByInterface(interfaceType)
+	if app.enhancedSvcRegistry != nil {
+		return app.enhancedSvcRegistry.GetServicesByInterface(interfaceType)
+	}
+	return nil
 }

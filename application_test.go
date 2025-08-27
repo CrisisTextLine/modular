@@ -141,12 +141,14 @@ func Test_application_Init_ConfigRegistration(t *testing.T) {
 		testModule: testModule{name: "config-module"},
 	}
 
+	enhancedRegistry := NewEnhancedServiceRegistry()
 	app := &StdApplication{
-		cfgProvider:    stdConfig,
-		cfgSections:    make(map[string]ConfigProvider),
-		svcRegistry:    make(ServiceRegistry),
-		moduleRegistry: make(ModuleRegistry),
-		logger:         stdLogger,
+		cfgProvider:         stdConfig,
+		cfgSections:         make(map[string]ConfigProvider),
+		svcRegistry:         enhancedRegistry.AsServiceRegistry(),
+		enhancedSvcRegistry: enhancedRegistry,
+		moduleRegistry:      make(ModuleRegistry),
+		logger:              stdLogger,
 	}
 
 	// Register modules

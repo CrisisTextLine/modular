@@ -136,12 +136,14 @@ func (m *SelfDependentModule) RequiresServices() []ServiceDependency {
 // BDD Step implementations
 
 func (ctx *EnhancedCycleDetectionBDDTestContext) iHaveAModularApplication() error {
+	enhancedRegistry := NewEnhancedServiceRegistry()
 	ctx.app = &StdApplication{
-		cfgProvider:    NewStdConfigProvider(testCfg{Str: "test"}),
-		cfgSections:    make(map[string]ConfigProvider),
-		svcRegistry:    make(ServiceRegistry),
-		moduleRegistry: make(ModuleRegistry),
-		logger:         &testLogger{},
+		cfgProvider:         NewStdConfigProvider(testCfg{Str: "test"}),
+		cfgSections:         make(map[string]ConfigProvider),
+		svcRegistry:         enhancedRegistry.AsServiceRegistry(),
+		enhancedSvcRegistry: enhancedRegistry,
+		moduleRegistry:      make(ModuleRegistry),
+		logger:              &testLogger{},
 	}
 	ctx.modules = make(map[string]Module)
 	return nil

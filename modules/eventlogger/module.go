@@ -158,6 +158,8 @@ type EventLoggerModule struct {
 // test scenarios that need to inject faulty outputs after initialization. It
 // acquires the module mutex to avoid data races with concurrent readers.
 // NOTE: Mutating outputs at runtime is not supported in production usage.
+//
+//nolint:unused // Used in tests only
 func (m *EventLoggerModule) setOutputsForTesting(outputs []OutputTarget) {
 	m.mutex.Lock()
 	m.outputs = outputs
@@ -568,47 +570,61 @@ func (m *EventLoggerModule) isOwnEvent(event cloudevents.Event) bool {
 
 // OnEvent implements the Observer interface to receive and log CloudEvents.
 func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event) error {
-	m.mutex.Lock()
+	// Check startup state and handle queueing with mutex protection
+	var started bool
+	var queueResult error
+	var needsProcessing bool
 
-	started := m.started
-	shuttingDown := m.shuttingDown
+	func() {
+		m.mutex.Lock()
+		defer m.mutex.Unlock()
 
-	if !started {
-		if shuttingDown {
-			// If we're shutting down, just drop the event silently
-			m.mutex.Unlock()
-			return nil
-		}
+		started = m.started
+		shuttingDown := m.shuttingDown
 
-		// If not initialized (eventQueue is nil), return error
-		if m.eventQueue == nil {
-			m.mutex.Unlock()
-			return ErrLoggerNotStarted
-		}
-
-		// Queue the event until we're started (unless we're at queue limit)
-		if len(m.eventQueue) < m.queueMaxSize {
-			m.eventQueue = append(m.eventQueue, event)
-			m.mutex.Unlock()
-			return nil
-		} else {
-			// Queue is full - drop oldest event and add new one
-			if len(m.eventQueue) > 0 {
-				// Shift slice to remove first element (oldest)
-				copy(m.eventQueue, m.eventQueue[1:])
-				m.eventQueue[len(m.eventQueue)-1] = event
+		if !started {
+			if shuttingDown {
+				// If we're shutting down, just drop the event silently
+				queueResult = nil
+				return
 			}
-			if m.logger != nil {
-				m.logger.Debug("Event queue full, dropped oldest event",
-					"queue_size", m.queueMaxSize, "new_event", event.Type())
+
+			// If not initialized (eventQueue is nil), return error
+			if m.eventQueue == nil {
+				queueResult = ErrLoggerNotStarted
+				return
 			}
-			m.mutex.Unlock()
-			return nil
+
+			// Queue the event until we're started (unless we're at queue limit)
+			if len(m.eventQueue) < m.queueMaxSize {
+				m.eventQueue = append(m.eventQueue, event)
+				queueResult = nil
+				return
+			} else {
+				// Queue is full - drop oldest event and add new one
+				if len(m.eventQueue) > 0 {
+					// Shift slice to remove first element (oldest)
+					copy(m.eventQueue, m.eventQueue[1:])
+					m.eventQueue[len(m.eventQueue)-1] = event
+				}
+				if m.logger != nil {
+					m.logger.Debug("Event queue full, dropped oldest event",
+						"queue_size", m.queueMaxSize, "new_event", event.Type())
+				}
+				queueResult = nil
+				return
+			}
 		}
+
+		needsProcessing = true
+	}()
+
+	// If we handled it during queueing phase, return early
+	if !needsProcessing {
+		return queueResult
 	}
 
-	// We're started - unlock and process normally
-	m.mutex.Unlock()
+	// We're started - process normally
 
 	// Attempt non-blocking enqueue first. If it fails, channel is full and we must drop oldest.
 	select {

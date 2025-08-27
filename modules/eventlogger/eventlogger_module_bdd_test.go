@@ -1436,22 +1436,43 @@ func (l *testLogger) Warn(msg string, keysAndValues ...interface{})    {}
 func (l *testLogger) Error(msg string, keysAndValues ...interface{})   {}
 func (l *testLogger) With(keysAndValues ...interface{}) modular.Logger { return l }
 
-type testConsoleOutput struct {
+// baseTestOutput provides common functionality for test output implementations
+type baseTestOutput struct {
 	logs  []string
 	mutex sync.Mutex
 }
 
-func (t *testConsoleOutput) Start(ctx context.Context) error {
+func (b *baseTestOutput) Start(ctx context.Context) error {
 	return nil
 }
 
-func (t *testConsoleOutput) Stop(ctx context.Context) error {
+func (b *baseTestOutput) Stop(ctx context.Context) error {
 	return nil
+}
+
+func (b *baseTestOutput) Flush() error {
+	return nil
+}
+
+func (b *baseTestOutput) GetLogs() []string {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	result := make([]string, len(b.logs))
+	copy(result, b.logs)
+	return result
+}
+
+func (b *baseTestOutput) appendLog(logLine string) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	b.logs = append(b.logs, logLine)
+}
+
+type testConsoleOutput struct {
+	baseTestOutput
 }
 
 func (t *testConsoleOutput) WriteEvent(entry *LogEntry) error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
 	// Format the entry as it would appear in console output
 	logLine := fmt.Sprintf("[%s] %s %s", entry.Timestamp.Format("2006-01-02 15:04:05"), entry.Level, entry.Type)
 	if entry.Source != "" {
@@ -1466,55 +1487,20 @@ func (t *testConsoleOutput) WriteEvent(entry *LogEntry) error {
 			logLine += fmt.Sprintf("\n    %s: %s", k, v)
 		}
 	}
-	t.logs = append(t.logs, logLine)
+	t.appendLog(logLine)
 	return nil
-}
-
-func (t *testConsoleOutput) Flush() error {
-	return nil
-}
-
-func (t *testConsoleOutput) GetLogs() []string {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	result := make([]string, len(t.logs))
-	copy(result, t.logs)
-	return result
 }
 
 type testFileOutput struct {
-	logs  []string
-	mutex sync.Mutex
-}
-
-func (t *testFileOutput) Start(ctx context.Context) error {
-	return nil
-}
-
-func (t *testFileOutput) Stop(ctx context.Context) error {
-	return nil
+	baseTestOutput
 }
 
 func (t *testFileOutput) WriteEvent(entry *LogEntry) error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
 	// Format the entry as JSON for file output
 	logLine := fmt.Sprintf(`{"timestamp":"%s","level":"%s","type":"%s","source":"%s","data":%v}`,
 		entry.Timestamp.Format("2006-01-02T15:04:05Z07:00"), entry.Level, entry.Type, entry.Source, entry.Data)
-	t.logs = append(t.logs, logLine)
+	t.appendLog(logLine)
 	return nil
-}
-
-func (t *testFileOutput) Flush() error {
-	return nil
-}
-
-func (t *testFileOutput) GetLogs() []string {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	result := make([]string, len(t.logs))
-	copy(result, t.logs)
-	return result
 }
 
 // TestEventLoggerModuleBDD runs the BDD tests for the EventLogger module
@@ -1709,7 +1695,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerModuleConfiguredButNotSt
 	}
 
 	// Inject test console output for capturing logs
-	ctx.testConsole = &testConsoleOutput{logs: make([]string, 0)}
+	ctx.testConsole = &testConsoleOutput{baseTestOutput: baseTestOutput{logs: make([]string, 0)}}
 	ctx.service.setOutputsForTesting([]OutputTarget{ctx.testConsole})
 
 	// Verify module is not started yet
@@ -1929,7 +1915,7 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerModuleConfiguredWithQueu
 	}
 
 	// Inject test console output for capturing logs
-	ctx.testConsole = &testConsoleOutput{logs: make([]string, 0)}
+	ctx.testConsole = &testConsoleOutput{baseTestOutput: baseTestOutput{logs: make([]string, 0)}}
 	ctx.service.setOutputsForTesting([]OutputTarget{ctx.testConsole})
 
 	// Artificially reduce queue size for testing overflow

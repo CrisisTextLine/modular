@@ -209,7 +209,7 @@ The reverse proxy module uses an **aggregator pattern** for feature flag evaluat
 
 **Built-in File Evaluator**: Automatically available using tenant-aware configuration (lowest priority, fallback).
 
-**External Evaluators**: Register additional evaluators using the naming pattern `featureFlagEvaluator.<name>`:
+**External Evaluators**: Register additional evaluators by implementing the `FeatureFlagEvaluator` interface. The service name doesn't matter for discovery - the aggregator finds evaluators by interface matching:
 
 ```go
 // Register a remote feature flag service
@@ -225,13 +225,15 @@ func (r *RemoteEvaluator) EvaluateFlagWithDefault(ctx context.Context, flagID st
     return enabled
 }
 
-// Register with descriptive name
-app.RegisterService("featureFlagEvaluator.remote", &RemoteEvaluator{})
+// Register with any service name (name doesn't matter for discovery)
+app.RegisterService("remoteEvaluator", &RemoteEvaluator{})
+// or  
+app.RegisterService("my-custom-flags", &RemoteEvaluator{})
 ```
 
-The aggregator automatically discovers all evaluators and calls them in priority order (lower weight = higher priority). The built-in file evaluator (weight: 1000) serves as the final fallback.
+The aggregator automatically discovers all services implementing `FeatureFlagEvaluator` interface regardless of their registered name. If multiple evaluators have the same name, unique names are automatically generated. Evaluators are called in priority order (lower weight = higher priority), with the built-in file evaluator (weight: 1000) serving as the final fallback.
 
-**Migration Note**: If you previously registered an evaluator as `"featureFlagEvaluator"`, please update to use the new naming pattern. See the [Feature Flag Migration Guide](FEATURE_FLAG_MIGRATION_GUIDE.md) for detailed migration instructions.
+**Migration Note**: External evaluators are now discovered by interface matching rather than naming patterns. You can use any service name when registering. See the [Feature Flag Migration Guide](FEATURE_FLAG_MIGRATION_GUIDE.md) for detailed migration instructions.
 
 The evaluator interface supports integration with external feature flag services like LaunchDarkly, Split.io, or custom implementations.
 

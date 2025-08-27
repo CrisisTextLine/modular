@@ -1,56 +1,64 @@
-# Feature Flag Migration Guide: Aggregator Pattern
+# Feature Flag Migration Guide: Interface-Based Discovery
 
-This guide helps you migrate your feature flag implementation to use the new aggregator pattern introduced in the reverse proxy module. The new system allows multiple feature flag evaluators to work together with priority-based ordering.
+This guide helps you migrate your feature flag implementation to use the new interface-based discovery system introduced in the reverse proxy module. The new system allows multiple feature flag evaluators to work together with priority-based ordering and automatic discovery.
 
 ## Overview of Changes
 
 The feature flag system has been enhanced with:
 
-1. **Aggregator Pattern**: Multiple feature flag evaluators can now be registered and coordinated
-2. **Weight-Based Priority**: Evaluators are called in order based on their priority weights
-3. **Enhanced Error Handling**: Special sentinel errors control evaluation flow
-4. **Service Naming Convention**: New naming pattern for registering multiple evaluators
+1. **Interface-Based Discovery**: Evaluators are now discovered by interface implementation, not naming patterns
+2. **Flexible Service Names**: You can use any service name when registering evaluators
+3. **Automatic Name Uniqueness**: The system automatically handles name conflicts
+4. **Weight-Based Priority**: Evaluators are called in order based on their priority weights
+5. **Enhanced Error Handling**: Special sentinel errors control evaluation flow
 
 ## What's New
 
-### 1. Multiple Evaluators Support
+### 1. Interface-Based Discovery
 
-**Before**: Only one feature flag evaluator could be active at a time.
+**Before**: Evaluators had to use specific naming patterns like `"featureFlagEvaluator.<name>"`
 
-**After**: Multiple evaluators can be registered and work together, with the aggregator coordinating their evaluation.
+**After**: Evaluators are discovered by implementing the `FeatureFlagEvaluator` interface, regardless of service name:
 
-### 2. Weight-Based Priority System
+```go
+// Any of these registration patterns work:
+app.RegisterService("myFeatureFlags", evaluator)
+app.RegisterService("remoteEvaluator", evaluator)  
+app.RegisterService("custom-flags-service", evaluator)
+```
+
+### 2. Automatic Name Uniqueness
+
+If multiple evaluators are registered with the same name, unique names are automatically generated:
+- First evaluator: Uses original name
+- Subsequent evaluators: Append module name or incrementing numbers
+
+### 3. Weight-Based Priority System
 
 Evaluators now support priority weights:
 - **Lower weight = Higher priority** (evaluated first)
 - **Default weight**: 100 for evaluators that don't specify a weight
 - **Built-in file evaluator**: Weight 1000 (lowest priority, fallback)
 
-### 3. New Service Naming Convention
-
-**Before**: External evaluators registered as `"featureFlagEvaluator"`
-
-**After**: Use the pattern `"featureFlagEvaluator.<name>"` for external evaluators:
-- `"featureFlagEvaluator.file"` - Built-in file-based evaluator (automatically registered)
-- `"featureFlagEvaluator.remote"` - Remote feature flag service
-- `"featureFlagEvaluator.rules"` - Rules-based evaluator
-- `"featureFlagEvaluator"` - The aggregator that coordinates all evaluators
-
 ## Migration Steps
 
-### Step 1: Update External Evaluator Registration
+### Step 1: Simplified Evaluator Registration
 
-If you were registering a custom evaluator as `"featureFlagEvaluator"`, you need to change the service name:
+You can now register evaluators with any service name:
 
 **Before**:
 ```go
-// This will conflict with the new aggregator
-app.RegisterService("featureFlagEvaluator", myCustomEvaluator)
+// Required specific naming pattern
+app.RegisterService("featureFlagEvaluator.remote", myCustomEvaluator)
 ```
 
 **After**:
 ```go
-// Use a descriptive name with the prefix pattern
+// Use any descriptive service name
+app.RegisterService("myCustomEvaluator", myCustomEvaluator)
+// or
+app.RegisterService("remoteFlags", myCustomEvaluator)
+// or maintain your preferred naming style if you wish
 app.RegisterService("featureFlagEvaluator.remote", myCustomEvaluator)
 ```
 

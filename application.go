@@ -369,7 +369,7 @@ func (app *StdApplication) RegisterService(name string, service any) error {
 		if err != nil {
 			return err
 		}
-		
+
 		// Update backwards compatible view
 		app.svcRegistry = app.enhancedSvcRegistry.AsServiceRegistry()
 	} else {

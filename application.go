@@ -1247,13 +1247,12 @@ func (app *StdApplication) findModuleInterfaceMatches(
 			for _, requirement := range requirements {
 				svcType := reflect.TypeOf(svcProvider.Instance)
 				if app.typeImplementsInterface(svcType, requirement.interfaceType) {
-					// Allow self-dependencies only when the service names match (intentional self-dependency)
-					// Skip self-dependencies when only interfaces match but service names differ (accidental)
-					if moduleName == requirement.moduleName && svcProvider.Name != requirement.serviceName {
+					// Skip accidental self-dependencies where service names differ but interfaces match
+					if app.shouldSkipAccidentalSelfDependency(moduleName, requirement.moduleName, svcProvider.Name, requirement.serviceName) {
 						continue
 					}
-					
-					// Create match for all other dependencies - including intentional self-dependencies 
+
+					// Create match for all other dependencies - including intentional self-dependencies
 					// Self-dependencies will be detected as cycles during topological sort
 					matches = append(matches, InterfaceMatch{
 						Consumer:      requirement.moduleName,
@@ -1273,6 +1272,16 @@ func (app *StdApplication) findModuleInterfaceMatches(
 	}
 
 	return matches
+}
+
+// shouldSkipAccidentalSelfDependency determines if a self-dependency should be skipped
+// to prevent accidental self-dependencies where different service names match the same interface.
+// Returns true if this is an accidental self-dependency that should be skipped.
+// Only allows intentional self-dependencies where both module and service names match.
+func (app *StdApplication) shouldSkipAccidentalSelfDependency(providerModule, consumerModule, providerServiceName, consumerServiceName string) bool {
+	// Allow self-dependencies only when the service names match (intentional self-dependency)
+	// Skip self-dependencies when only interfaces match but service names differ (accidental)
+	return providerModule == consumerModule && providerServiceName != consumerServiceName
 }
 
 // typeImplementsInterface checks if a type implements an interface

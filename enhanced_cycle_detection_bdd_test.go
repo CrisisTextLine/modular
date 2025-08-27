@@ -177,7 +177,7 @@ func (t *AnotherEnhancedTestInterfaceImpl) AnotherTestMethod() string {
 
 func (m *SelfDependentModule) ProvidesServices() []ServiceProvider {
 	return []ServiceProvider{{
-		Name:     "selfService", 
+		Name:     "selfService",
 		Instance: &TestInterfaceAImpl{name: "self"},
 	}}
 }
@@ -208,9 +208,9 @@ func (m *MixedDependencyModuleA) ProvidesServices() []ServiceProvider {
 
 func (m *MixedDependencyModuleA) RequiresServices() []ServiceDependency {
 	return []ServiceDependency{{
-		Name:               "namedServiceB", // Named dependency 
-		Required:           true,
-		MatchByInterface:   false,
+		Name:             "namedServiceB", // Named dependency
+		Required:         true,
+		MatchByInterface: false,
 	}}
 }
 
@@ -224,7 +224,7 @@ func (m *MixedDependencyModuleB) Init(app Application) error { return nil }
 
 func (m *MixedDependencyModuleB) ProvidesServices() []ServiceProvider {
 	return []ServiceProvider{{
-		Name:     "namedServiceB", 
+		Name:     "namedServiceB",
 		Instance: &TestInterfaceBImpl{name: "MixedB"},
 	}}
 }
@@ -262,7 +262,7 @@ func (m *ComplexCycleModuleA) RequiresServices() []ServiceDependency {
 	}}
 }
 
-// ComplexCycleModuleB - part of 3-module cycle A->B->C->A  
+// ComplexCycleModuleB - part of 3-module cycle A->B->C->A
 type ComplexCycleModuleB struct {
 	name string
 }
@@ -354,22 +354,21 @@ func (m *DisambiguationModuleB) RequiresServices() []ServiceDependency {
 		Name:               "disambiguationServiceA",
 		Required:           true,
 		MatchByInterface:   true,
-		SatisfiesInterface: reflect.TypeOf((*EnhancedTestInterface)(nil)).Elem(), // Note: different interface 
+		SatisfiesInterface: reflect.TypeOf((*EnhancedTestInterface)(nil)).Elem(), // Note: different interface
 	}}
 }
 
 // BDD Step implementations
 
 func (ctx *EnhancedCycleDetectionBDDTestContext) iHaveAModularApplication() error {
-	enhancedRegistry := NewEnhancedServiceRegistry()
-	ctx.app = &StdApplication{
-		cfgProvider:         NewStdConfigProvider(testCfg{Str: "test"}),
-		cfgSections:         make(map[string]ConfigProvider),
-		svcRegistry:         enhancedRegistry.AsServiceRegistry(),
-		enhancedSvcRegistry: enhancedRegistry,
-		moduleRegistry:      make(ModuleRegistry),
-		logger:              &testLogger{},
+	app, err := NewApplication(
+		WithLogger(&testLogger{}),
+		WithConfigProvider(NewStdConfigProvider(testCfg{Str: "test"})),
+	)
+	if err != nil {
+		return err
 	}
+	ctx.app = app
 	ctx.modules = make(map[string]Module)
 	return nil
 }
@@ -587,7 +586,7 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) theErrorMessageShouldDistinguis
 	// Should contain both service: and interface: markers
 	hasService := strings.Contains(errorMsg, "(service:")
 	hasInterface := strings.Contains(errorMsg, "(interface:")
-	
+
 	if !hasService || !hasInterface {
 		return fmt.Errorf("error message should distinguish between service and interface dependencies, got: %s", errorMsg)
 	}
@@ -650,7 +649,7 @@ func (ctx *EnhancedCycleDetectionBDDTestContext) allThreeModulesShouldBeMentione
 
 	errorMsg := ctx.initializeResult.Error()
 	requiredModules := []string{"complexA", "complexB", "complexC"}
-	
+
 	for _, module := range requiredModules {
 		if !strings.Contains(errorMsg, module) {
 			return fmt.Errorf("error message should mention all three modules (%v), got: %s", requiredModules, errorMsg)
@@ -741,18 +740,18 @@ func TestEnhancedCycleDetectionBDD(t *testing.T) {
 			ctx.Step(`^I have a module that depends on a service it also provides$`, testContext.iHaveAModuleThatDependsOnAServiceItAlsoProvides)
 			ctx.Step(`^a self-dependency cycle should be detected$`, testContext.aSelfDependencyCycleShouldBeDetected)
 			ctx.Step(`^the error message should clearly indicate the self-dependency$`, testContext.theErrorMessageShouldClearlyIndicateTheSelfDependency)
-			
+
 			// Mixed dependency types
 			ctx.Step(`^I have modules with both named service dependencies and interface dependencies$`, testContext.iHaveModulesWithBothNamedServiceDependenciesAndInterfaceDependencies)
 			ctx.Step(`^the dependencies form a circular chain$`, testContext.theDependenciesFormACircularChain)
 			ctx.Step(`^the error message should distinguish between interface and named dependencies$`, testContext.theErrorMessageShouldDistinguishBetweenInterfaceAndNamedDependencies)
 			ctx.Step(`^both dependency types should be included in the cycle description$`, testContext.bothDependencyTypesShouldBeIncludedInTheCycleDescription)
-			
+
 			// Complex multi-module cycles
 			ctx.Step(`^I have modules A, B, and C where A depends on B, B depends on C, and C depends on A$`, testContext.iHaveModulesABAndCWhereADependsOnBBDependsOnCAndCDependsOnA)
 			ctx.Step(`^the complete cycle path should be shown in the error message$`, testContext.theCompleteCyclePathShouldBeShownInTheErrorMessage)
 			ctx.Step(`^all three modules should be mentioned in the cycle description$`, testContext.allThreeModulesShouldBeMentionedInTheCycleDescription)
-			
+
 			// Interface name disambiguation
 			ctx.Step(`^I have multiple interfaces with similar names causing cycles$`, testContext.iHaveMultipleInterfacesWithSimilarNamesCausingCycles)
 			ctx.Step(`^cycle detection runs$`, testContext.cycleDetectionRuns)

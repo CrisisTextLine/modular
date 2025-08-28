@@ -238,7 +238,7 @@ func TestServiceNamingGameAttempt(t *testing.T) {
 				// 1. Be allowed and work correctly (if the system handles them)
 				// 2. Return a specific error (if they're invalid)
 				// For now, let's test that the system doesn't crash and handles them consistently
-				
+
 				// Test multiple times to ensure deterministic behavior even with empty names
 				for attempt := 1; attempt < 3; attempt++ {
 					err2 := runServiceNamingGameTest(tt.serviceName)
@@ -247,7 +247,7 @@ func TestServiceNamingGameAttempt(t *testing.T) {
 						t.Errorf("Inconsistent behavior with empty service name: attempt 1 error=%v, attempt %d error=%v", err, attempt+1, err2)
 					}
 				}
-				
+
 				// The test passes as long as the behavior is consistent and doesn't crash
 				return
 			}

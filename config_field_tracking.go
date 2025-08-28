@@ -73,23 +73,34 @@ func (t *DefaultFieldTracker) SetLogger(logger Logger) {
 }
 
 // GetFieldPopulation returns the population info for a specific field path
-// It returns the last population that actually set a non-nil value
+// It returns the first population found for the given field path
 func (t *DefaultFieldTracker) GetFieldPopulation(fieldPath string) *FieldPopulation {
+	for _, fp := range t.FieldPopulations {
+		if fp.FieldPath == fieldPath {
+			return &fp
+		}
+	}
+	return nil
+}
+
+// GetMostRelevantFieldPopulation returns the population info for a specific field path
+// It returns the last population that actually set a non-nil value
+func (t *DefaultFieldTracker) GetMostRelevantFieldPopulation(fieldPath string) *FieldPopulation {
 	var lastPopulation *FieldPopulation
 	var lastValuedPopulation *FieldPopulation
-	
+
 	for _, fp := range t.FieldPopulations {
 		if fp.FieldPath == fieldPath {
 			fpCopy := fp
 			lastPopulation = &fpCopy
-			
+
 			// If this population actually found and set a value, prefer it
 			if fp.Value != nil && fp.FoundKey != "" {
 				lastValuedPopulation = &fpCopy
 			}
 		}
 	}
-	
+
 	// Prefer populations that actually set values over those that just searched
 	if lastValuedPopulation != nil {
 		return lastValuedPopulation

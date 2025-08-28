@@ -106,7 +106,7 @@ func testEnvVariablePopulationTracking(t *testing.T) {
 	for _, key := range allTestEnvVars {
 		os.Unsetenv(key)
 	}
-	
+
 	// Set up environment variables for this test
 	for key, value := range envVars {
 		os.Setenv(key, value)
@@ -163,29 +163,30 @@ func testEnvVariablePopulationTracking(t *testing.T) {
 	assert.GreaterOrEqual(t, len(populations), 2, "Should track at least 2 field populations")
 
 	// Find specific field populations
-	appNamePop := tracker.GetFieldPopulation("AppName")
+	appNamePop := tracker.GetMostRelevantFieldPopulation("AppName")
 	if assert.NotNil(t, appNamePop, "AppName field should be tracked") {
 		assert.Equal(t, "Test App", appNamePop.Value)
 		assert.Equal(t, "env", appNamePop.SourceType)
 		assert.Equal(t, "APP_NAME", appNamePop.SourceKey)
 	}
 
-	debugPop := tracker.GetFieldPopulation("Debug")
+	debugPop := tracker.GetMostRelevantFieldPopulation("Debug")
 	if assert.NotNil(t, debugPop, "Debug field should be tracked") {
 		assert.Equal(t, true, debugPop.Value)
 		assert.Equal(t, "env", debugPop.SourceType)
 		assert.Equal(t, "APP_DEBUG", debugPop.SourceKey)
 	}
-	
+
 	// Clean up for next test
 	cleanup()
 }
 
 func testMixedYAMLAndEnvironmentPopulationTracking(t *testing.T) {
+	// Use different env var names to avoid conflicts with other tests
 	envVars := map[string]string{
-		"APP_NAME":          "Test App",
-		"DB_PRIMARY_DRIVER": "postgres",
-		"DB_PRIMARY_DSN":    "postgres://localhost/primary",
+		"MIXED_APP_NAME":          "Test App",
+		"MIXED_DB_PRIMARY_DRIVER": "postgres",
+		"MIXED_DB_PRIMARY_DSN":    "postgres://localhost/primary",
 	}
 	yamlData := `
 debug: false
@@ -196,11 +197,11 @@ connections:
 `
 
 	// Clean up any environment variables from previous tests - ensure complete isolation
-	allTestEnvVars := []string{"APP_NAME", "APP_DEBUG", "DB_PRIMARY_DRIVER", "DB_PRIMARY_DSN", "DB_SECONDARY_DRIVER", "DB_SECONDARY_DSN"}
+	allTestEnvVars := []string{"MIXED_APP_NAME", "MIXED_APP_DEBUG", "MIXED_DB_PRIMARY_DRIVER", "MIXED_DB_PRIMARY_DSN", "MIXED_DB_SECONDARY_DRIVER", "MIXED_DB_SECONDARY_DSN"}
 	for _, key := range allTestEnvVars {
 		os.Unsetenv(key)
 	}
-	
+
 	// Set up environment variables for this test
 	for key, value := range envVars {
 		os.Setenv(key, value)
@@ -220,10 +221,10 @@ connections:
 	// Create field tracker
 	_ = NewConfigFieldTracker(mockLogger)
 
-	// Create configuration structures with tracking
+	// Create configuration structures with tracking - use MIXED env var names
 	type TestAppConfig struct {
-		AppName string `env:"APP_NAME" yaml:"app_name"`
-		Debug   bool   `env:"APP_DEBUG" yaml:"debug"`
+		AppName string `env:"MIXED_APP_NAME" yaml:"app_name"`
+		Debug   bool   `env:"MIXED_APP_DEBUG" yaml:"debug"`
 	}
 
 	appConfig := &TestAppConfig{}
@@ -268,20 +269,20 @@ connections:
 	assert.GreaterOrEqual(t, len(populations), 2, "Should track at least 2 field populations")
 
 	// Find specific field populations
-	appNamePop := tracker.GetFieldPopulation("AppName")
+	appNamePop := tracker.GetMostRelevantFieldPopulation("AppName")
 	if assert.NotNil(t, appNamePop, "AppName field should be tracked") {
 		assert.Equal(t, "Test App", appNamePop.Value)
 		assert.Equal(t, "env", appNamePop.SourceType)
-		assert.Equal(t, "APP_NAME", appNamePop.SourceKey)
+		assert.Equal(t, "MIXED_APP_NAME", appNamePop.SourceKey)
 	}
 
-	debugPop := tracker.GetFieldPopulation("Debug")
+	debugPop := tracker.GetMostRelevantFieldPopulation("Debug")
 	if assert.NotNil(t, debugPop, "Debug field should be tracked") {
 		assert.Equal(t, false, debugPop.Value)
 		assert.Equal(t, "yaml", debugPop.SourceType)
 		assert.Equal(t, "debug", debugPop.SourceKey)
 	}
-	
+
 	// Clean up for next test
 	cleanup()
 }
@@ -360,7 +361,7 @@ func TestDetailedInstanceAwareFieldTracking(t *testing.T) {
 	instanceFeeder := feeders.NewInstanceAwareEnvFeeder(func(instanceKey string) string {
 		return "DB_" + strings.ToUpper(instanceKey) + "_"
 	})
-	
+
 	// Set up field tracking bridge
 	bridge := NewFieldTrackingBridge(tracker)
 	instanceFeeder.SetFieldTracker(bridge)
@@ -527,7 +528,7 @@ func TestConfigDiffBasedFieldTracking(t *testing.T) {
 
 			// Verify that the expected field changes were detected
 			for fieldPath, expectedValue := range tt.expectedFieldDiffs {
-				pop := tracker.GetFieldPopulation(fieldPath)
+				pop := tracker.GetMostRelevantFieldPopulation(fieldPath)
 				if assert.NotNil(t, pop, "Field %s should be tracked via diff", fieldPath) {
 					assert.Equal(t, expectedValue, pop.Value, "Field %s should have expected value", fieldPath)
 					assert.Equal(t, "*feeders.EnvFeeder", pop.FeederType, "Field %s should be tracked as EnvFeeder", fieldPath)
@@ -572,10 +573,10 @@ func TestVerboseDebugFieldVisibility(t *testing.T) {
 
 	// Verify that verbose debug logging includes the required information
 	requiredLogMessages := []string{
-		"Processing field",    // Field name being processed
-		"Looking up env",      // Environment variable search
-		"Found env",          // Environment variable found
-		"Successfully set",   // Field population success
+		"Processing field", // Field name being processed
+		"Looking up env",   // Environment variable search
+		"Found env",        // Environment variable found
+		"Successfully set", // Field population success
 	}
 
 	for _, requiredMsg := range requiredLogMessages {

@@ -3,7 +3,7 @@ module github.com/CrisisTextLine/modular/modules/database
 go 1.25
 
 require (
-	github.com/CrisisTextLine/modular v1.6.0
+	github.com/CrisisTextLine/modular v1.9.0
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.14
 	github.com/aws/aws-sdk-go-v2/feature/rds/auth v1.5.11
@@ -12,8 +12,6 @@ require (
 	github.com/stretchr/testify v1.11.0
 	modernc.org/sqlite v1.37.1
 )
-
-replace github.com/CrisisTextLine/modular => ../..
 
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect

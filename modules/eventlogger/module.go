@@ -371,9 +371,16 @@ func (m *EventLoggerModule) Stop(ctx context.Context) error {
 	// Mark shutting down to suppress side-effects during drain
 	m.shuttingDown = true
 
-	// Capture config-driven behaviors before releasing lock
+	// Capture config-driven behaviors then release lock so we can emit (emit acquires RLock)
 	drainTimeout := m.config.ShutdownDrainTimeout
 	emitStopped := m.config.ShutdownEmitStopped
+	m.mutex.Unlock()
+
+	// Emit the 'stopped' operational event BEFORE tearing down the processing goroutine
+	if emitStopped {
+		syncCtx := modular.WithSynchronousNotification(ctx)
+		m.emitOperationalEvent(syncCtx, EventTypeLoggerStopped, map[string]interface{}{})
+	}
 
 	// Signal stop (idempotent safety)
 	select {
@@ -381,9 +388,6 @@ func (m *EventLoggerModule) Stop(ctx context.Context) error {
 	default:
 		close(m.stopChan)
 	}
-
-	// We keep the lock until we've closed stopChan so no new starts etc. Release before waiting (wg Wait doesn't need lock).
-	m.mutex.Unlock()
 
 	// Wait for processing with optional timeout
 	done := make(chan struct{})
@@ -416,15 +420,7 @@ func (m *EventLoggerModule) Stop(ctx context.Context) error {
 	if m.logger != nil {
 		m.logger.Info("Event logger stopped")
 	}
-	m.mutex.Unlock()
-
-	// Emit stopped operational event AFTER releasing write lock to avoid deadlock with RLock inside emitOperationalEvent
-	if emitStopped {
-		m.emitOperationalEvent(ctx, EventTypeLoggerStopped, map[string]interface{}{})
-	}
-
-	// Clear shuttingDown flag (not strictly necessary but keeps state consistent for any post-stop checks)
-	m.mutex.Lock()
+	// Clear shuttingDown flag
 	m.shuttingDown = false
 	m.mutex.Unlock()
 
@@ -639,23 +635,27 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 		return nil
 	default:
 		// Full — drop oldest (non-blocking) then try again.
+		// IMPORTANT: If the current event is an operational (own) event, we must avoid
+		// emitting further BufferFull / EventDropped operational events, because those
+		// themselves are operational events and would recursively trigger this path
+		// while the channel remains saturated, leading to unbounded recursion and
+		// eventual stack overflow (observed in TestEventLogger_SynchronousStartupConfigFlag).
 		var dropped *cloudevents.Event
 		select {
 		case old := <-m.eventChan:
-			// Record the dropped event (we'll decide which operational events to emit below)
 			dropped = &old
 		default:
 			// Nothing to drop (capacity might be 0); we'll treat as dropping the new event below if second send fails.
 		}
 
-		// Emit buffer full event even if the dropped event was our own (observability of pressure)
-		if dropped != nil {
+		isOwn := m.isOwnEvent(event)
+		if !isOwn && dropped != nil {
+			// Only emit pressure events if the triggering event is external.
 			syncCtx := modular.WithSynchronousNotification(ctx)
 			m.emitOperationalEvent(syncCtx, EventTypeBufferFull, map[string]interface{}{
 				"buffer_size": cap(m.eventChan),
 			})
-			// Only emit event dropped if the dropped event wasn't emitted by us to avoid recursive amplification
-			if !m.isOwnEvent(*dropped) {
+			if !m.isOwnEvent(*dropped) { // avoid amplification chains from internal events
 				m.emitOperationalEvent(syncCtx, EventTypeEventDropped, map[string]interface{}{
 					"event_type":   dropped.Type(),
 					"event_source": dropped.Source(),
@@ -667,7 +667,7 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 		// Retry enqueue of current event.
 		select {
 		case m.eventChan <- event:
-			if !m.isOwnEvent(event) {
+			if !isOwn {
 				m.emitOperationalEvent(ctx, EventTypeEventReceived, map[string]interface{}{
 					"event_type":   event.Type(),
 					"event_source": event.Source(),
@@ -676,12 +676,12 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 			return nil
 		default:
 			// Still full (or capacity 0) — drop incoming event.
-			m.logger.Warn("Event buffer full, dropping incoming event", "eventType", event.Type())
-			syncCtx := modular.WithSynchronousNotification(ctx)
-			m.emitOperationalEvent(syncCtx, EventTypeBufferFull, map[string]interface{}{
-				"buffer_size": cap(m.eventChan),
-			})
-			if !m.isOwnEvent(event) {
+			if !isOwn { // only warn & emit for external events
+				m.logger.Warn("Event buffer full, dropping incoming event", "eventType", event.Type())
+				syncCtx := modular.WithSynchronousNotification(ctx)
+				m.emitOperationalEvent(syncCtx, EventTypeBufferFull, map[string]interface{}{
+					"buffer_size": cap(m.eventChan),
+				})
 				m.emitOperationalEvent(syncCtx, EventTypeEventDropped, map[string]interface{}{
 					"event_type":   event.Type(),
 					"event_source": event.Source(),

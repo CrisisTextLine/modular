@@ -3,6 +3,7 @@ package eventlogger
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -398,6 +399,14 @@ func (m *MockApplication) Init() error                              { return nil
 func (m *MockApplication) Start() error                             { return nil }
 func (m *MockApplication) Stop() error                              { return nil }
 func (m *MockApplication) Run() error                               { return nil }
+func (m *MockApplication) Context() context.Context                 { return context.Background() }
+func (m *MockApplication) GetServicesByModule(moduleName string) []string { return []string{} }
+func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
+	return nil, false
+}
+func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
+	return []*modular.ServiceRegistryEntry{}
+}
 
 type MockLogger struct {
 	entries []MockLogEntry

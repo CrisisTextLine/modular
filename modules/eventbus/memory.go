@@ -3,7 +3,9 @@ package eventbus
 import (
 	"context"
 	"log/slog"
+	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -24,6 +26,9 @@ type MemoryEventBus struct {
 	historyMutex   sync.RWMutex
 	retentionTimer *time.Timer
 	module         *EventBusModule // Reference to emit events
+	pubCounter     uint64          // for rotation fairness
+	deliveredCount uint64          // stats
+	droppedCount   uint64          // stats
 }
 
 // memorySubscription represents a subscription in the memory event bus
@@ -202,7 +207,33 @@ func (m *MemoryEventBus) Publish(ctx context.Context, event Event) error {
 		return nil
 	}
 
-	// Publish to all matching subscribers
+	// Optionally rotate order for fairness
+	if m.config.RotateSubscriberOrder && len(allMatchingSubs) > 1 {
+		// Simple rotation based on publish counter. Compute modulo in uint64 space then cast.
+		// Safe cast: result is < len(allMatchingSubs) (an int) so within bounds (satisfies gosec G115 guidance).
+		pc := atomic.AddUint64(&m.pubCounter, 1) - 1
+		// Guard extremely large subscriber slice lengths (practically unreachable) to satisfy gosec G115.
+		ln := len(allMatchingSubs)
+		if ln <= 0 {
+			return nil
+		}
+		// Use uintptr width for modulo then cast; ln is guaranteed < MaxInt per slice constraint.
+		// #nosec G115: safe conversion; modulo result < ln and slice length constraints ensure ln fits in int.
+		start := int(pc % uint64(ln))
+		if start != 0 {
+			rotated := make([]*memorySubscription, 0, len(allMatchingSubs))
+			rotated = append(rotated, allMatchingSubs[start:]...)
+			rotated = append(rotated, allMatchingSubs[:start]...)
+			allMatchingSubs = rotated
+		}
+	} else if len(allMatchingSubs) > 1 && !m.config.RotateSubscriberOrder {
+		// small random shuffle fallback if disabled rotation but still want some distribution (optional)
+		rand.Shuffle(len(allMatchingSubs), func(i, j int) { allMatchingSubs[i], allMatchingSubs[j] = allMatchingSubs[j], allMatchingSubs[i] })
+	}
+
+	mode := m.config.DeliveryMode
+	blockTimeout := m.config.PublishBlockTimeout
+
 	for _, sub := range allMatchingSubs {
 		sub.mutex.RLock()
 		if sub.cancelled {
@@ -211,11 +242,47 @@ func (m *MemoryEventBus) Publish(ctx context.Context, event Event) error {
 		}
 		sub.mutex.RUnlock()
 
-		select {
-		case sub.eventCh <- event:
-			// Event sent to subscriber
-		default:
-			// Channel is full, log or handle as appropriate
+		var sent bool
+		switch mode {
+		case "block":
+			// block until space (respect context)
+			select {
+			case sub.eventCh <- event:
+				sent = true
+			case <-ctx.Done():
+				// treat as drop due to cancellation
+			}
+		case "timeout":
+			if blockTimeout <= 0 {
+				// immediate attempt then drop
+				select {
+				case sub.eventCh <- event:
+					sent = true
+				default:
+				}
+			} else {
+				deadline := time.NewTimer(blockTimeout)
+				select {
+				case sub.eventCh <- event:
+					sent = true
+				case <-deadline.C:
+					// timeout drop
+				case <-ctx.Done():
+				}
+				if !deadline.Stop() {
+					<-deadline.C
+				}
+			}
+		default: // "drop"
+			select {
+			case sub.eventCh <- event:
+				sent = true
+			default:
+			}
+		}
+		// Only count drops at publish time; successful sends accounted when processed.
+		if !sent {
+			atomic.AddUint64(&m.droppedCount, 1)
 		}
 	}
 
@@ -366,35 +433,37 @@ func (m *MemoryEventBus) handleEvents(sub *memorySubscription) {
 			if sub.isAsync {
 				// For async subscriptions, queue the event handler in the worker pool
 				m.queueEventHandler(sub, event)
-			} else {
-				// For sync subscriptions, process the event immediately
-				now := time.Now()
-				event.ProcessingStarted = &now
+				continue
+			}
+			// For sync subscriptions, process the event immediately
+			now := time.Now()
+			event.ProcessingStarted = &now
 
-				// Emit message received event
-				m.emitEvent(m.ctx, EventTypeMessageReceived, "memory-eventbus", map[string]interface{}{
+			// Emit message received event
+			m.emitEvent(m.ctx, EventTypeMessageReceived, "memory-eventbus", map[string]interface{}{
+				"topic":           event.Topic,
+				"subscription_id": sub.id,
+			})
+
+			// Process the event
+			err := sub.handler(m.ctx, event)
+
+			// Record completion
+			completed := time.Now()
+			event.ProcessingCompleted = &completed
+
+			if err != nil {
+				// Emit message failed event for handler errors
+				m.emitEvent(m.ctx, EventTypeMessageFailed, "memory-eventbus", map[string]interface{}{
 					"topic":           event.Topic,
 					"subscription_id": sub.id,
+					"error":           err.Error(),
 				})
-
-				// Process the event
-				err := sub.handler(m.ctx, event)
-
-				// Record completion
-				completed := time.Now()
-				event.ProcessingCompleted = &completed
-
-				if err != nil {
-					// Emit message failed event for handler errors
-					m.emitEvent(m.ctx, EventTypeMessageFailed, "memory-eventbus", map[string]interface{}{
-						"topic":           event.Topic,
-						"subscription_id": sub.id,
-						"error":           err.Error(),
-					})
-					// Log error but continue processing
-					slog.Error("Event handler failed", "error", err, "topic", event.Topic)
-				}
+				// Log error but continue processing
+				slog.Error("Event handler failed", "error", err, "topic", event.Topic)
 			}
+			// Count as delivered for sync subscriptions after processing
+			atomic.AddUint64(&m.deliveredCount, 1)
 		}
 	}
 }
@@ -429,10 +498,13 @@ func (m *MemoryEventBus) queueEventHandler(sub *memorySubscription, event Event)
 			// Log error but continue processing
 			slog.Error("Event handler failed", "error", err, "topic", event.Topic)
 		}
+		// Count as delivered after processing (success or failure)
+		atomic.AddUint64(&m.deliveredCount, 1)
 	}:
-		// Successfully queued
+		// Successfully queued; delivered count increment deferred until post-processing
 	default:
-		// Worker pool is full, handle as appropriate
+		// Worker pool is full, drop async processing (count as dropped)
+		atomic.AddUint64(&m.droppedCount, 1)
 	}
 }
 
@@ -448,6 +520,11 @@ func (m *MemoryEventBus) worker() {
 			task()
 		}
 	}
+}
+
+// Stats returns basic delivery stats for monitoring/testing.
+func (m *MemoryEventBus) Stats() (delivered uint64, dropped uint64) {
+	return atomic.LoadUint64(&m.deliveredCount), atomic.LoadUint64(&m.droppedCount)
 }
 
 // storeEventHistory adds an event to the history

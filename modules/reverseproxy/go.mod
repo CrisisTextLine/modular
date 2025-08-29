@@ -4,10 +4,8 @@ go 1.25
 
 retract v1.0.0
 
-replace github.com/CrisisTextLine/modular => ../../
-
 require (
-	github.com/CrisisTextLine/modular v1.6.0
+	github.com/CrisisTextLine/modular v1.9.0
 	github.com/cloudevents/sdk-go/v2 v2.16.1
 	github.com/cucumber/godog v0.15.1
 	github.com/go-chi/chi/v5 v5.2.2
@@ -36,3 +34,5 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+// go.work provides local workspace resolution during development

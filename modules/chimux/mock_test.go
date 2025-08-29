@@ -163,7 +163,9 @@ func (m *MockApplication) Context() context.Context { return context.Background(
 func (m *MockApplication) GetServicesByModule(moduleName string) []string { return []string{} }
 
 // GetServiceEntry returns a service registry entry (mock returns nil)
-func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) { return nil, false }
+func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
+	return nil, false
+}
 
 // GetServicesByInterface returns services implementing an interface (mock empty slice)
 func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {

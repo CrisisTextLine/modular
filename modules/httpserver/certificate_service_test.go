@@ -127,7 +127,7 @@ func (m *SimpleMockApplication) SetVerboseConfig(verbose bool) {
 }
 
 // Newly added methods to satisfy updated Application interface
-func (m *SimpleMockApplication) Context() context.Context { return context.Background() }
+func (m *SimpleMockApplication) Context() context.Context                       { return context.Background() }
 func (m *SimpleMockApplication) GetServicesByModule(moduleName string) []string { return []string{} }
 func (m *SimpleMockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
 	return nil, false

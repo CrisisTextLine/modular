@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+
 	"github.com/CrisisTextLine/modular"
 )
 
@@ -106,7 +107,9 @@ forLoop:
 	}
 	if len(captured) == 0 {
 		// Attempt second flush after more events
-		for i := 0; i < 3; i++ { _ = mod.Publish(ctx, "foo.bar", map[string]int{"k": i}) }
+		for i := 0; i < 3; i++ {
+			_ = mod.Publish(ctx, "foo.bar", map[string]int{"k": i})
+		}
 		exporter.flush()
 		if f, ok := interface{}(exporter.client).(interface{ Flush() error }); ok {
 			_ = f.Flush()
@@ -117,7 +120,9 @@ forLoop:
 			select {
 			case l := <-linesCh:
 				captured = append(captured, l)
-				if len(captured) > 4 { break }
+				if len(captured) > 4 {
+					break
+				}
 			case <-deadline2:
 				goto afterCollect
 			}

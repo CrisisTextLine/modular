@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
-	"reflect"
 
 	"testing/synctest"
 
@@ -79,7 +79,9 @@ func (a *mockApp) GetServicesByModule(moduleName string) []string { return nil }
 func (a *mockApp) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
 	return nil, false
 }
-func (a *mockApp) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry { return nil }
+func (a *mockApp) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
+	return nil
+}
 
 func (a *mockApp) Init() error {
 	return nil

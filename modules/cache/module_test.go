@@ -106,7 +106,9 @@ func (a *mockApp) Context() context.Context { return context.Background() }
 func (a *mockApp) GetServicesByModule(moduleName string) []string { return []string{} }
 
 // GetServiceEntry mock implementation returns nil
-func (a *mockApp) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) { return nil, false }
+func (a *mockApp) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
+	return nil, false
+}
 
 // GetServicesByInterface mock implementation returns empty slice
 func (a *mockApp) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {

@@ -88,7 +88,7 @@ func (m *MockApplication) Start() error                                        {
 func (m *MockApplication) Stop() error                                         { return nil }
 
 // Newly added methods to satisfy updated modular.Application interface
-func (m *MockApplication) Context() context.Context { return context.Background() }
+func (m *MockApplication) Context() context.Context                       { return context.Background() }
 func (m *MockApplication) GetServicesByModule(moduleName string) []string { return []string{} }
 func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
 	return nil, false

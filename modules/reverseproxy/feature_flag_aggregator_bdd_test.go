@@ -3,10 +3,10 @@ package reverseproxy
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"testing"
-	"log/slog"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/cucumber/godog"
@@ -20,30 +20,30 @@ type testCfg struct {
 // MockBDDRouter implements the routerService interface for BDD testing
 type MockBDDRouter struct{}
 
-func (m *MockBDDRouter) Handle(pattern string, handler http.Handler) {}
+func (m *MockBDDRouter) Handle(pattern string, handler http.Handler)         {}
 func (m *MockBDDRouter) HandleFunc(pattern string, handler http.HandlerFunc) {}
-func (m *MockBDDRouter) Mount(pattern string, h http.Handler) {}
-func (m *MockBDDRouter) Use(middlewares ...func(http.Handler) http.Handler) {}
-func (m *MockBDDRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {}
+func (m *MockBDDRouter) Mount(pattern string, h http.Handler)                {}
+func (m *MockBDDRouter) Use(middlewares ...func(http.Handler) http.Handler)  {}
+func (m *MockBDDRouter) ServeHTTP(w http.ResponseWriter, r *http.Request)    {}
 
 // FeatureFlagAggregatorBDDTestContext holds the test context for feature flag aggregator BDD scenarios
 type FeatureFlagAggregatorBDDTestContext struct {
-	app                    modular.Application
-	module                 *ReverseProxyModule
-	aggregator             *FeatureFlagAggregator
-	mockEvaluators         map[string]*MockFeatureFlagEvaluator
-	lastEvaluationResult   bool
-	lastError              error
-	discoveredEvaluators   []weightedEvaluatorInstance
-	evaluationOrder        []string
-	nameConflictResolved   bool
-	uniqueNamesGenerated   map[string]string
-	fileEvaluatorCalled    bool
+	app                     modular.Application
+	module                  *ReverseProxyModule
+	aggregator              *FeatureFlagAggregator
+	mockEvaluators          map[string]*MockFeatureFlagEvaluator
+	lastEvaluationResult    bool
+	lastError               error
+	discoveredEvaluators    []weightedEvaluatorInstance
+	evaluationOrder         []string
+	nameConflictResolved    bool
+	uniqueNamesGenerated    map[string]string
+	fileEvaluatorCalled     bool
 	externalEvaluatorCalled bool
-	evaluationStopped      bool
-	firstEvaluator         *MockFeatureFlagEvaluator
-	secondEvaluator        *MockFeatureFlagEvaluator
-	externalEvaluator      *MockFeatureFlagEvaluator
+	evaluationStopped       bool
+	firstEvaluator          *MockFeatureFlagEvaluator
+	secondEvaluator         *MockFeatureFlagEvaluator
+	externalEvaluator       *MockFeatureFlagEvaluator
 }
 
 // MockFeatureFlagEvaluator is a mock implementation for testing
@@ -117,7 +117,7 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) theEvaluatorsAreRegisteredWithNa
 	// Parse the names (e.g., "customEvaluator", "remoteFlags", and "rules-engine")
 	// For simplicity, we'll register three evaluators with different names
 	serviceNames := []string{"customEvaluator", "remoteFlags", "rules-engine"}
-	
+
 	for i, serviceName := range serviceNames {
 		evaluator := &MockFeatureFlagEvaluator{
 			name:     serviceName,
@@ -125,12 +125,12 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) theEvaluatorsAreRegisteredWithNa
 			decision: true,
 		}
 		ctx.mockEvaluators[serviceName] = evaluator
-		
+
 		if err := ctx.app.RegisterService(serviceName, evaluator); err != nil {
 			return fmt.Errorf("failed to register evaluator %s: %w", serviceName, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -171,13 +171,13 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) eachEvaluatorShouldBeAssignedAUn
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveThreeEvaluatorsWithWeights(weight1, weight2, weight3 int) error {
 	ctx.mockEvaluators = make(map[string]*MockFeatureFlagEvaluator)
-	
+
 	evaluators := []*MockFeatureFlagEvaluator{
 		{name: "eval1", weight: weight1, decision: true},
 		{name: "eval2", weight: weight2, decision: true},
 		{name: "eval3", weight: weight3, decision: true},
 	}
-	
+
 	for i, eval := range evaluators {
 		serviceName := fmt.Sprintf("evaluator%d", i+1)
 		ctx.mockEvaluators[serviceName] = eval
@@ -185,7 +185,7 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveThreeEvaluatorsWithWeights(
 			return fmt.Errorf("failed to register evaluator: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -197,12 +197,12 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) aFeatureFlagIsEvaluated() error 
 
 	// Create a dummy request
 	req, _ := http.NewRequest("GET", "/test", nil)
-	
+
 	// Evaluate a test flag
 	result, err := ctx.aggregator.EvaluateFlag(context.Background(), "test-flag", "", req)
 	ctx.lastEvaluationResult = result
 	ctx.lastError = err
-	
+
 	return nil
 }
 
@@ -212,14 +212,14 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) evaluatorsShouldBeCalledInAscend
 	for i, eval := range ctx.discoveredEvaluators {
 		weights[i] = eval.weight
 	}
-	
+
 	// Verify weights are in ascending order
 	for i := 1; i < len(weights); i++ {
 		if weights[i] < weights[i-1] {
 			return fmt.Errorf("evaluators not sorted by weight: %v", weights)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -234,25 +234,25 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) theFirstEvaluatorReturningADecis
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveTwoEvaluatorsRegisteredWithTheSameServiceName(serviceName string) error {
 	ctx.mockEvaluators = make(map[string]*MockFeatureFlagEvaluator)
-	
+
 	// Register two evaluators with the same name
 	eval1 := &MockFeatureFlagEvaluator{name: "eval1", weight: 10, decision: true}
 	eval2 := &MockFeatureFlagEvaluator{name: "eval2", weight: 20, decision: false}
-	
+
 	// Both registered with same service name
 	if err := ctx.app.RegisterService(serviceName, eval1); err != nil {
 		return fmt.Errorf("failed to register first evaluator: %w", err)
 	}
-	
+
 	// This would typically overwrite the first one, but for testing we'll simulate
 	// the unique name generation scenario by registering with different names internally
 	if err := ctx.app.RegisterService(serviceName+".1", eval2); err != nil {
 		return fmt.Errorf("failed to register second evaluator: %w", err)
 	}
-	
+
 	ctx.mockEvaluators[serviceName] = eval1
 	ctx.mockEvaluators[serviceName+".1"] = eval2
-	
+
 	return nil
 }
 
@@ -282,7 +282,7 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) bothEvaluatorsShouldBeAvailableF
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveExternalEvaluatorsThatReturnErrNoDecision() error {
 	ctx.mockEvaluators = make(map[string]*MockFeatureFlagEvaluator)
-	
+
 	// Create evaluator that returns ErrNoDecision
 	eval := &MockFeatureFlagEvaluator{
 		name:     "noDecisionEvaluator",
@@ -290,7 +290,7 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveExternalEvaluatorsThatRetur
 		decision: false,
 		err:      ErrNoDecision,
 	}
-	
+
 	ctx.mockEvaluators["noDecisionEvaluator"] = eval
 	return ctx.app.RegisterService("noDecisionEvaluator", eval)
 }
@@ -309,11 +309,11 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) theBuiltInFileEvaluatorShouldBeC
 			break
 		}
 	}
-	
+
 	if !fileEvaluatorFound {
 		return fmt.Errorf("file evaluator not found as fallback with weight 1000")
 	}
-	
+
 	ctx.fileEvaluatorCalled = true
 	return nil
 }
@@ -326,11 +326,11 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) itShouldHaveTheLowestPriorityWei
 			maxWeight = eval.weight
 		}
 	}
-	
+
 	if maxWeight != 1000 {
 		return fmt.Errorf("expected file evaluator to have highest weight (1000), got %d", maxWeight)
 	}
-	
+
 	return nil
 }
 
@@ -353,7 +353,9 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) theExternalEvaluatorReturnsTrueF
 }
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) iEvaluateFlag(flag string) error {
-	if err := ctx.theFeatureFlagAggregatorDiscoversEvaluators(); err != nil { return err }
+	if err := ctx.theFeatureFlagAggregatorDiscoversEvaluators(); err != nil {
+		return err
+	}
 	req, _ := http.NewRequest("GET", "/test", nil)
 	res, err := ctx.aggregator.EvaluateFlag(context.Background(), flag, "", req)
 	ctx.lastEvaluationResult = res
@@ -396,12 +398,16 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveTwoEvaluatorsWhereTheFirstR
 	ctx.firstEvaluator = first
 	ctx.secondEvaluator = second
 	ctx.mockEvaluators = map[string]*MockFeatureFlagEvaluator{"firstNoDecision": first, "secondDecision": second}
-	if err := ctx.app.RegisterService("firstNoDecision", first); err != nil { return err }
+	if err := ctx.app.RegisterService("firstNoDecision", first); err != nil {
+		return err
+	}
 	return ctx.app.RegisterService("secondDecision", second)
 }
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) theSecondEvaluatorReturnsTrueForFlag(flag string) error {
-	if ctx.secondEvaluator == nil { return fmt.Errorf("second evaluator not set") }
+	if ctx.secondEvaluator == nil {
+		return fmt.Errorf("second evaluator not set")
+	}
 	ctx.secondEvaluator.decision = true
 	return nil
 }
@@ -418,7 +424,9 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) evaluationShouldContinueToTheSec
 }
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) theResultShouldBeTrue() error {
-	if !ctx.lastEvaluationResult { return fmt.Errorf("expected result true, got false") }
+	if !ctx.lastEvaluationResult {
+		return fmt.Errorf("expected result true, got false")
+	}
 	return nil
 }
 
@@ -429,7 +437,9 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveTwoEvaluatorsWhereTheFirstR
 	ctx.firstEvaluator = first
 	ctx.secondEvaluator = second
 	ctx.mockEvaluators = map[string]*MockFeatureFlagEvaluator{"fatalEvaluator": first, "shouldNotBeCalled": second}
-	if err := ctx.app.RegisterService("fatalEvaluator", first); err != nil { return err }
+	if err := ctx.app.RegisterService("fatalEvaluator", first); err != nil {
+		return err
+	}
 	return ctx.app.RegisterService("shouldNotBeCalled", second)
 }
 
@@ -439,9 +449,15 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) iEvaluateAFeatureFlag() error {
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) evaluationShouldStopImmediately() error {
 	// Only first evaluator should be called
-	if ctx.firstEvaluator == nil || ctx.secondEvaluator == nil { return fmt.Errorf("evaluators not set") }
-	if !ctx.firstEvaluator.called { return fmt.Errorf("first evaluator not called") }
-	if ctx.secondEvaluator.called { return fmt.Errorf("second evaluator should NOT have been called") }
+	if ctx.firstEvaluator == nil || ctx.secondEvaluator == nil {
+		return fmt.Errorf("evaluators not set")
+	}
+	if !ctx.firstEvaluator.called {
+		return fmt.Errorf("first evaluator not called")
+	}
+	if ctx.secondEvaluator.called {
+		return fmt.Errorf("second evaluator should NOT have been called")
+	}
 	return nil
 }
 
@@ -453,24 +469,36 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) noFurtherEvaluatorsShouldBeCalle
 func (ctx *FeatureFlagAggregatorBDDTestContext) theAggregatorIsRegisteredAs(name string) error {
 	// Register a standalone aggregator service to ensure discovery should skip it
 	var slogLogger *slog.Logger
-	if l, ok := ctx.app.Logger().(*slog.Logger); ok { slogLogger = l } else { slogLogger = slog.Default() }
+	if l, ok := ctx.app.Logger().(*slog.Logger); ok {
+		slogLogger = l
+	} else {
+		slogLogger = slog.Default()
+	}
 	agg := NewFeatureFlagAggregator(ctx.app, slogLogger)
-	if err := ctx.app.RegisterService(name, agg); err != nil { return fmt.Errorf("failed to register aggregator service: %w", err) }
+	if err := ctx.app.RegisterService(name, agg); err != nil {
+		return fmt.Errorf("failed to register aggregator service: %w", err)
+	}
 	return nil
 }
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) externalEvaluatorsAreAlsoRegistered() error {
 	eval := &MockFeatureFlagEvaluator{name: "external1", weight: 30, decision: true}
-	if ctx.mockEvaluators == nil { ctx.mockEvaluators = map[string]*MockFeatureFlagEvaluator{} }
+	if ctx.mockEvaluators == nil {
+		ctx.mockEvaluators = map[string]*MockFeatureFlagEvaluator{}
+	}
 	ctx.mockEvaluators["external1"] = eval
 	return ctx.app.RegisterService("external1", eval)
 }
 
-func (ctx *FeatureFlagAggregatorBDDTestContext) evaluatorDiscoveryRuns() error { return ctx.theFeatureFlagAggregatorDiscoversEvaluators() }
+func (ctx *FeatureFlagAggregatorBDDTestContext) evaluatorDiscoveryRuns() error {
+	return ctx.theFeatureFlagAggregatorDiscoversEvaluators()
+}
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) theAggregatorShouldNotDiscoverItself() error {
 	for _, inst := range ctx.discoveredEvaluators {
-		if inst.name == "featureFlagEvaluator" { return fmt.Errorf("aggregator discovered itself") }
+		if inst.name == "featureFlagEvaluator" {
+			return fmt.Errorf("aggregator discovered itself")
+		}
 	}
 	return nil
 }
@@ -478,7 +506,9 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) theAggregatorShouldNotDiscoverIt
 func (ctx *FeatureFlagAggregatorBDDTestContext) onlyExternalEvaluatorsShouldBeIncluded() error {
 	// Discovered should be external(s) plus file evaluator if enabled
 	for _, inst := range ctx.discoveredEvaluators {
-		if inst.name == "featureFlagEvaluator" { return fmt.Errorf("unexpected aggregator instance present") }
+		if inst.name == "featureFlagEvaluator" {
+			return fmt.Errorf("unexpected aggregator instance present")
+		}
 	}
 	return nil
 }
@@ -486,25 +516,35 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) onlyExternalEvaluatorsShouldBeIn
 // Multiple modules / evaluator names scenario
 func (ctx *FeatureFlagAggregatorBDDTestContext) moduleARegistersAnEvaluatorAs(name string) error {
 	eval := &MockFeatureFlagEvaluator{name: name, weight: 40, decision: true}
-	if ctx.mockEvaluators == nil { ctx.mockEvaluators = map[string]*MockFeatureFlagEvaluator{} }
+	if ctx.mockEvaluators == nil {
+		ctx.mockEvaluators = map[string]*MockFeatureFlagEvaluator{}
+	}
 	ctx.mockEvaluators[name] = eval
 	return ctx.app.RegisterService(name, eval)
 }
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) moduleBRegistersAnEvaluatorAs(name string) error {
 	eval := &MockFeatureFlagEvaluator{name: name, weight: 60, decision: false}
-	if ctx.mockEvaluators == nil { ctx.mockEvaluators = map[string]*MockFeatureFlagEvaluator{} }
+	if ctx.mockEvaluators == nil {
+		ctx.mockEvaluators = map[string]*MockFeatureFlagEvaluator{}
+	}
 	ctx.mockEvaluators[name] = eval
 	return ctx.app.RegisterService(name, eval)
 }
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) bothEvaluatorsShouldBeDiscovered() error {
-	if err := ctx.theAggregatorDiscoversEvaluators(); err != nil { return err }
+	if err := ctx.theAggregatorDiscoversEvaluators(); err != nil {
+		return err
+	}
 	found := 0
 	for _, inst := range ctx.discoveredEvaluators {
-		if _, ok := ctx.mockEvaluators[inst.name]; ok { found++ }
+		if _, ok := ctx.mockEvaluators[inst.name]; ok {
+			found++
+		}
 	}
-	if found < 2 { return fmt.Errorf("expected both evaluators discovered, found %d", found) }
+	if found < 2 {
+		return fmt.Errorf("expected both evaluators discovered, found %d", found)
+	}
 	return nil
 }
 
@@ -536,7 +576,9 @@ func TestFeatureFlagAggregatorBDD(t *testing.T) {
 			ctx.Step(`^feature flags are enabled$`, func() error { return current.featureFlagsAreEnabled() })
 
 			// Interface-based discovery scenario
-			ctx.Step(`^I have multiple evaluators implementing FeatureFlagEvaluator with different service names$`, func() error { return current.iHaveMultipleEvaluatorsImplementingFeatureFlagEvaluatorWithDifferentServiceNames() })
+			ctx.Step(`^I have multiple evaluators implementing FeatureFlagEvaluator with different service names$`, func() error {
+				return current.iHaveMultipleEvaluatorsImplementingFeatureFlagEvaluatorWithDifferentServiceNames()
+			})
 			ctx.Step(`^the evaluators are registered with names "([^"]*)", "([^"]*)", and "([^"]*)"$`, func(name1, name2, name3 string) error {
 				return current.theEvaluatorsAreRegisteredWithNames(fmt.Sprintf("%s,%s,%s", name1, name2, name3))
 			})

@@ -2,9 +2,9 @@ package logmasker
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
-	"reflect"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -105,6 +105,7 @@ func (m *MockApplication) Init() error                                       { r
 func (m *MockApplication) Start() error                                      { return nil }
 func (m *MockApplication) Stop() error                                       { return nil }
 func (m *MockApplication) Run() error                                        { return nil }
+
 // Newly added methods to satisfy expanded modular.Application interface
 func (m *MockApplication) GetServicesByModule(moduleName string) []string { return []string{} }
 func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {

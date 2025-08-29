@@ -166,8 +166,8 @@ func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceR
 	entry := &modular.ServiceRegistryEntry{
 		Service:      service,
 		ModuleName:   "",          // Not tracked in mock
-		ModuleType:   nil,          // Not tracked in mock
-		OriginalName: serviceName,  // Same as actual in mock
+		ModuleType:   nil,         // Not tracked in mock
+		OriginalName: serviceName, // Same as actual in mock
 		ActualName:   serviceName,
 	}
 	return entry, true

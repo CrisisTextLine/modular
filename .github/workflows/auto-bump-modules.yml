@@ -34,6 +34,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Remove go.work files
+        run: |
+          git rm -f go.work || true
+          git rm -f go.work.sum || true
+          rm -f go.work go.work.sum || true
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:

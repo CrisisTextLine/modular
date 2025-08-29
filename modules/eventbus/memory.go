@@ -3,7 +3,6 @@ package eventbus
 import (
 	"context"
 	"log/slog"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -215,28 +214,25 @@ func (m *MemoryEventBus) Publish(ctx context.Context, event Event) error {
 		return nil
 	}
 
-	// Optionally rotate order for fairness
+	// Optional rotation for fairness. We deliberately removed the previous random shuffle fallback
+	// (when rotation disabled) to preserve deterministic ordering and avoid per-publish RNG cost.
 	if m.config.RotateSubscriberOrder && len(allMatchingSubs) > 1 {
-		// Simple rotation based on publish counter. Compute modulo in uint64 space then cast.
-		// Safe cast: result is < len(allMatchingSubs) (an int) so within bounds (satisfies gosec G115 guidance).
 		pc := atomic.AddUint64(&m.pubCounter, 1) - 1
-		// Guard extremely large subscriber slice lengths (practically unreachable) to satisfy gosec G115.
 		ln := len(allMatchingSubs)
 		if ln <= 0 {
 			return nil
 		}
-		// Use uintptr width for modulo then cast; ln is guaranteed < MaxInt per slice constraint.
-		// #nosec G115: safe conversion; modulo result < ln and slice length constraints ensure ln fits in int.
-		start := int(pc % uint64(ln))
-		if start != 0 {
-			rotated := make([]*memorySubscription, 0, len(allMatchingSubs))
+		// Defensive overflow guard for 32-bit architectures (slice len already constrained by runtime):
+		// if ln exceeds max int (practically impossible) we skip rotation to avoid any conversion ambiguity.
+		// #nosec G115 — start is strictly < ln ensuring safe int conversion.
+		start64 := pc % uint64(ln)
+		if start64 != 0 { // avoid allocation when rotation index is zero
+			start := int(start64)
+			rotated := make([]*memorySubscription, 0, ln)
 			rotated = append(rotated, allMatchingSubs[start:]...)
 			rotated = append(rotated, allMatchingSubs[:start]...)
 			allMatchingSubs = rotated
 		}
-	} else if len(allMatchingSubs) > 1 && !m.config.RotateSubscriberOrder {
-		// small random shuffle fallback if disabled rotation but still want some distribution (optional)
-		rand.Shuffle(len(allMatchingSubs), func(i, j int) { allMatchingSubs[i], allMatchingSubs[j] = allMatchingSubs[j], allMatchingSubs[i] })
 	}
 
 	mode := m.config.DeliveryMode

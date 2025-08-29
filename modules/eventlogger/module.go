@@ -621,12 +621,14 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 	}
 
 	// We're started - process normally
+	// Cache ownership classification (hot path) to avoid repeated isOwnEvent calls for this event instance.
+	isOwn := m.isOwnEvent(event)
 
 	// Attempt non-blocking enqueue first. If it fails, channel is full and we must drop oldest.
 	select {
 	case m.eventChan <- event:
 		// Enqueued successfully; record received (avoid loops for our own events)
-		if !m.isOwnEvent(event) {
+		if !isOwn {
 			m.emitOperationalEvent(ctx, EventTypeEventReceived, map[string]interface{}{
 				"event_type":   event.Type(),
 				"event_source": event.Source(),
@@ -648,7 +650,6 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 			// Nothing to drop (capacity might be 0); we'll treat as dropping the new event below if second send fails.
 		}
 
-		isOwn := m.isOwnEvent(event)
 		if !isOwn && dropped != nil {
 			// Only emit pressure events if the triggering event is external.
 			syncCtx := modular.WithSynchronousNotification(ctx)

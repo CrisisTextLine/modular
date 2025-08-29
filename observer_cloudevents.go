@@ -110,7 +110,12 @@ func NewModuleLifecycleEvent(source, subject, name, version, action string, meta
 	evt.SetTime(payload.Timestamp)
 	evt.SetSpecVersion(cloudevents.VersionV1)
 	_ = evt.SetData(cloudevents.ApplicationJSON, payload)
-	// CloudEvent extension attribute names must be lower-case alphanumerics (no underscores per spec)
+	// CloudEvents 1.0 spec (section 3.1.1) restricts extension attribute names to **lower-case alphanumerics only**
+	// (regex: [a-z0-9]{1,20}). Hyphens / underscores are NOT permitted in extension names. The reviewer suggested
+	// using hyphens for readability; we intentionally retain plain concatenated names to remain strictly
+	// compliant with the spec across all transports and SDKs. If readability / grouping is desired downstream,
+	// mapping can be performed externally (e.g. transforming to labels / tags). These names are therefore
+	// intentionally left without separators.
 	evt.SetExtension("payloadschema", ModuleLifecycleSchema)
 	evt.SetExtension("moduleaction", action)
 	evt.SetExtension("lifecyclesubject", subject)

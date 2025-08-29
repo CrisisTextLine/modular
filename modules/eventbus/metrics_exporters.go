@@ -26,7 +26,6 @@ package eventbus
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"time"
 
 	// Prometheus
@@ -172,8 +171,7 @@ func (e *DatadogStatsdExporter) flush() {
 	aggTags := append(e.baseTags, "engine:_all")
 	_ = e.client.Gauge("delivered_total", float64(totalDelivered), aggTags, 1)
 	_ = e.client.Gauge("dropped_total", float64(totalDropped), aggTags, 1)
-	// debug runtime stats (optional future extension)
-	_ = e.client.Gauge("go.goroutines", float64(runtime.NumGoroutine()), e.baseTags, 1)
+	// Removed always-on goroutine gauge per review feedback; runtime metrics belong in a broader runtime exporter.
 }
 
 // Close closes underlying statsd client.

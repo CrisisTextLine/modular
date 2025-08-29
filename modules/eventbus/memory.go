@@ -39,6 +39,7 @@ type memorySubscription struct {
 	isAsync   bool
 	eventCh   chan Event
 	done      chan struct{}
+	finished  chan struct{} // closed when handler goroutine exits
 	cancelled bool
 	mutex     sync.RWMutex
 }
@@ -324,6 +325,7 @@ func (m *MemoryEventBus) subscribe(ctx context.Context, topic string, handler Ev
 		isAsync:   isAsync,
 		eventCh:   make(chan Event, m.config.DefaultEventBufferSize),
 		done:      make(chan struct{}),
+		finished:  make(chan struct{}),
 		cancelled: false,
 	}
 
@@ -369,16 +371,13 @@ func (m *MemoryEventBus) Unsubscribe(ctx context.Context, subscription Subscript
 		return ErrInvalidSubscriptionType
 	}
 
-	// Cancel the subscription
-	err := sub.Cancel()
-	if err != nil {
+	// Cancel the subscription (sets cancelled flag and closes done channel)
+	if err := sub.Cancel(); err != nil {
 		return err
 	}
 
 	// Remove from subscriptions map
 	m.topicMutex.Lock()
-	defer m.topicMutex.Unlock()
-
 	topicDeleted := false
 	if subs, ok := m.subscriptions[sub.topic]; ok {
 		delete(subs, sub.id)
@@ -387,14 +386,19 @@ func (m *MemoryEventBus) Unsubscribe(ctx context.Context, subscription Subscript
 			topicDeleted = true
 		}
 	}
+	m.topicMutex.Unlock()
 
-	// Emit topic deleted event if this topic no longer has subscribers
+	// Wait (briefly) for handler goroutine to terminate to avoid post-unsubscribe deliveries
+	select {
+	case <-sub.finished:
+	case <-time.After(100 * time.Millisecond):
+	}
+
 	if topicDeleted {
 		m.emitEvent(ctx, EventTypeTopicDeleted, "memory-eventbus", map[string]interface{}{
 			"topic": sub.topic,
 		})
 	}
-
 	return nil
 }
 
@@ -426,6 +430,7 @@ func (m *MemoryEventBus) SubscriberCount(topic string) int {
 // handleEvents processes events for a subscription
 func (m *MemoryEventBus) handleEvents(sub *memorySubscription) {
 	defer m.wg.Done()
+	defer close(sub.finished)
 
 	for {
 		// Fast path: if subscription cancelled, exit before selecting (avoids processing backlog after unsubscribe)

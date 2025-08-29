@@ -222,6 +222,12 @@ func (m *EventLoggerModule) RegisterConfig(app modular.Application) error {
 
 // Init initializes the eventlogger module with the application context.
 func (m *EventLoggerModule) Init(app modular.Application) error {
+	// Acquire write lock during initialization to avoid data races with OnEvent
+	// which may run concurrently when early lifecycle events are emitted while
+	// modules are still initializing. OnEvent reads fields like config, outputs,
+	// eventQueue, queueMaxSize, started, and channels under the same mutex.
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	// Retrieve the registered config section
 	cfg, err := app.GetConfigSection(m.name)
 	if err != nil {
@@ -231,7 +237,7 @@ func (m *EventLoggerModule) Init(app modular.Application) error {
 	m.config = cfg.GetConfig().(*EventLoggerConfig)
 	m.logger = app.Logger()
 
-	// Initialize output targets
+	// Initialize output targets (still under lock for race safety)
 	m.outputs = make([]OutputTarget, 0, len(m.config.OutputTargets))
 	for i, targetConfig := range m.config.OutputTargets {
 		output, err := NewOutputTarget(targetConfig, m.logger)
@@ -241,7 +247,7 @@ func (m *EventLoggerModule) Init(app modular.Application) error {
 		m.outputs = append(m.outputs, output)
 	}
 
-	// Initialize channels
+	// Initialize channels (protected by lock to prevent concurrent visibility of partially constructed state)
 	m.eventChan = make(chan cloudevents.Event, m.config.BufferSize)
 	m.stopChan = make(chan struct{})
 

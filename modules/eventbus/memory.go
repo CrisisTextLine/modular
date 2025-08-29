@@ -58,6 +58,13 @@ func (s *memorySubscription) IsAsync() bool {
 	return s.isAsync
 }
 
+// isCancelled is a helper for internal fast path checks without exposing lock details
+func (s *memorySubscription) isCancelled() bool {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.cancelled
+}
+
 // Cancel cancels the subscription
 func (s *memorySubscription) Cancel() error {
 	s.mutex.Lock()
@@ -421,48 +428,41 @@ func (m *MemoryEventBus) handleEvents(sub *memorySubscription) {
 	defer m.wg.Done()
 
 	for {
+		// Fast path: if subscription cancelled, exit before selecting (avoids processing backlog after unsubscribe)
+		if sub.isCancelled() {
+			return
+		}
 		select {
 		case <-m.ctx.Done():
-			// Event bus is shutting down
 			return
 		case <-sub.done:
-			// Subscription was cancelled
 			return
 		case event := <-sub.eventCh:
-			// Process the event
+			// Re-check cancellation after dequeue to avoid processing additional events post-unsubscribe.
+			if sub.isCancelled() {
+				return
+			}
 			if sub.isAsync {
-				// For async subscriptions, queue the event handler in the worker pool
 				m.queueEventHandler(sub, event)
 				continue
 			}
-			// For sync subscriptions, process the event immediately
 			now := time.Now()
 			event.ProcessingStarted = &now
-
-			// Emit message received event
 			m.emitEvent(m.ctx, EventTypeMessageReceived, "memory-eventbus", map[string]interface{}{
 				"topic":           event.Topic,
 				"subscription_id": sub.id,
 			})
-
-			// Process the event
 			err := sub.handler(m.ctx, event)
-
-			// Record completion
 			completed := time.Now()
 			event.ProcessingCompleted = &completed
-
 			if err != nil {
-				// Emit message failed event for handler errors
 				m.emitEvent(m.ctx, EventTypeMessageFailed, "memory-eventbus", map[string]interface{}{
 					"topic":           event.Topic,
 					"subscription_id": sub.id,
 					"error":           err.Error(),
 				})
-				// Log error but continue processing
 				slog.Error("Event handler failed", "error", err, "topic", event.Topic)
 			}
-			// Count as delivered for sync subscriptions after processing
 			atomic.AddUint64(&m.deliveredCount, 1)
 		}
 	}

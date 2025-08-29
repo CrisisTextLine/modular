@@ -222,15 +222,19 @@ func (m *MemoryEventBus) Publish(ctx context.Context, event Event) error {
 		if ln <= 0 {
 			return nil
 		}
-		// Defensive overflow guard for 32-bit architectures (slice len already constrained by runtime):
-		// if ln exceeds max int (practically impossible) we skip rotation to avoid any conversion ambiguity.
-		// #nosec G115 — start is strictly < ln ensuring safe int conversion.
+		// Compute rotation starting offset. We keep start as uint64 and avoid any uint64->int cast
+		// (gosec G115) by performing a manual copy instead of slicing with an int index.
 		start64 := pc % uint64(ln)
 		if start64 != 0 { // avoid allocation when rotation index is zero
-			start := int(start64)
 			rotated := make([]*memorySubscription, 0, ln)
-			rotated = append(rotated, allMatchingSubs[start:]...)
-			rotated = append(rotated, allMatchingSubs[:start]...)
+			// First copy from start64 to end
+			for i := start64; i < uint64(ln); i++ {
+				rotated = append(rotated, allMatchingSubs[i])
+			}
+			// Then copy from 0 to start64-1
+			for i := uint64(0); i < start64; i++ {
+				rotated = append(rotated, allMatchingSubs[i])
+			}
 			allMatchingSubs = rotated
 		}
 	}

@@ -14,7 +14,9 @@ func TestNilServiceInstancePanic(t *testing.T) {
 	// Create a module that requires an interface-based service
 	consumerModule := &interfaceConsumerModule{}
 	
-	app := NewStdApplication(nil, nil)
+	// Create app with proper logger to avoid other nil pointer issues
+	logger := &mockTestLogger{}
+	app := NewStdApplication(nil, logger)
 	app.RegisterModule(nilServiceModule)
 	app.RegisterModule(consumerModule)
 	

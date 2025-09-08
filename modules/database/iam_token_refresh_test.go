@@ -61,7 +61,7 @@ func (m *MockIAMTokenProviderWithExpiry) RefreshToken() error {
 	defer m.mutex.Unlock()
 
 	m.refreshCount++
-	
+
 	// Simulate failure after certain attempts
 	if m.failAfter > 0 && m.refreshCount > m.failAfter {
 		m.shouldFail = true
@@ -71,7 +71,7 @@ func (m *MockIAMTokenProviderWithExpiry) RefreshToken() error {
 	// Generate new token
 	m.currentToken = fmt.Sprintf("refreshed-token-%d", m.refreshCount)
 	m.tokenExpiry = time.Now().Add(15 * time.Minute) // New 15-minute token
-	
+
 	return nil
 }
 
@@ -103,7 +103,7 @@ func (m *MockIAMTokenProviderWithExpiry) GetRefreshCount() int {
 func TestIAMTokenExpirationScenario(t *testing.T) {
 	// Create a mock token provider with a short-lived token
 	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 1*time.Second)
-	
+
 	ctx := context.Background()
 
 	// Test 1: Try to build DSN with valid token - should work
@@ -121,12 +121,12 @@ func TestIAMTokenExpirationScenario(t *testing.T) {
 	assert.Contains(t, err.Error(), "token expired", "Error should indicate token expiration")
 }
 
-// TestTokenRefreshWithExistingConnection tests the core issue: 
+// TestTokenRefreshWithExistingConnection tests the core issue:
 // What happens when tokens are refreshed but existing connections still use old token
 func TestTokenRefreshWithExistingConnection(t *testing.T) {
 	// This test demonstrates the core issue reported in the bug:
 	// "an application that was running fine, suddenly stopped being able to communicate with the database"
-	
+
 	// Create a mock token provider
 	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 15*time.Minute)
 
@@ -150,7 +150,7 @@ func TestTokenRefreshWithExistingConnection(t *testing.T) {
 
 	// Step 4: Verify that the DSNs are different (the key issue)
 	assert.NotEqual(t, initialDSN, newDSN, "DSNs should be different after token refresh")
-	
+
 	// This test demonstrates that when tokens are refreshed, the DSN changes,
 	// but existing database connections (sql.DB) were created with the old DSN
 	// and continue to use the old token until the connections are recreated.
@@ -163,7 +163,7 @@ func TestTokenProviderRealWorldScenario(t *testing.T) {
 	// 2. Token expires while application is running
 	// 3. Background refresh gets new token
 	// 4. Existing connections still use old token and fail
-	
+
 	mockProvider := NewMockIAMTokenProviderWithExpiry("startup-token", 5*time.Second)
 	ctx := context.Background()
 
@@ -174,7 +174,7 @@ func TestTokenProviderRealWorldScenario(t *testing.T) {
 
 	// Simulate time passing (token expires)
 	time.Sleep(6 * time.Second)
-	
+
 	// Token should now be expired
 	_, err = mockProvider.GetToken(ctx, "endpoint")
 	assert.Error(t, err, "Token should be expired")
@@ -197,7 +197,7 @@ func TestTokenProviderRealWorldScenario(t *testing.T) {
 // TestConnectionRecreationAfterTokenRefresh tests whether connection recreation helps
 func TestConnectionRecreationAfterTokenRefresh(t *testing.T) {
 	// This test demonstrates a potential solution: recreating connections after token refresh
-	
+
 	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 15*time.Minute)
 	ctx := context.Background()
 
@@ -205,7 +205,7 @@ func TestConnectionRecreationAfterTokenRefresh(t *testing.T) {
 	dsn1, err := mockProvider.BuildDSNWithIAMToken(ctx, "postgres://user:password@host:5432/db")
 	require.NoError(t, err)
 
-	// Step 2: Refresh token 
+	// Step 2: Refresh token
 	err = mockProvider.RefreshToken()
 	require.NoError(t, err)
 
@@ -244,20 +244,20 @@ func TestTokenRefreshCallbackFunctionality(t *testing.T) {
 
 	// Track callback invocations
 	var callbackInvoked bool
-	
+
 	callback := func(newToken string, endpoint string) {
 		callbackInvoked = true
 		// In a real scenario, this callback would be called when tokens are refreshed
 		assert.NotEmpty(t, newToken, "New token should not be empty")
 		assert.NotEmpty(t, endpoint, "Endpoint should not be empty")
 	}
-	
+
 	// Set callback
 	provider.SetTokenRefreshCallback(callback)
 
 	// Verify callback is set and provider is functional
 	assert.NotNil(t, provider, "Provider should be created")
-	
+
 	// We can't easily test the actual callback without real AWS credentials and token generation,
 	// but we can verify the mechanism is in place and doesn't cause issues
 	_ = callbackInvoked // Use the variable to avoid compiler error

@@ -103,7 +103,7 @@ type databaseServiceImpl struct {
 	eventEmitter     EventEmitter
 	ctx              context.Context
 	cancel           context.CancelFunc
-	endpoint         string // Store endpoint for reconnection
+	endpoint         string       // Store endpoint for reconnection
 	connMutex        sync.RWMutex // Protect database connection during recreation
 }
 
@@ -245,7 +245,7 @@ func (s *databaseServiceImpl) onTokenRefresh(newToken string, endpoint string) {
 
 	// Close existing connections to force pool refresh
 	oldDB := s.db
-	
+
 	// Build new DSN with refreshed token
 	newDSN, err := s.awsTokenProvider.BuildDSNWithIAMToken(s.ctx, s.config.DSN)
 	if err != nil {
@@ -310,7 +310,7 @@ func (s *databaseServiceImpl) Ping(ctx context.Context) error {
 	s.connMutex.RLock()
 	db := s.db
 	s.connMutex.RUnlock()
-	
+
 	if db == nil {
 		return ErrDatabaseNotConnected
 	}

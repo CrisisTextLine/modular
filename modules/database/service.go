@@ -306,6 +306,11 @@ func (s *databaseServiceImpl) onTokenRefresh(newToken string, endpoint string) {
 
 	// Close old connection in background to avoid blocking
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("Panic occurred while closing old database connection", "panic", r)
+			}
+		}()
 		if err := oldDB.Close(); err != nil {
 			s.logger.Error("Error closing old database connection", "error", err)
 		}

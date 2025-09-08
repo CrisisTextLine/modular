@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,11 +95,14 @@ func TestRefreshTokenWithCallback(t *testing.T) {
 			// Use mock provider for easier testing
 			provider := NewMockIAMTokenProviderWithExpiry("initial-token", 1*time.Hour)
 			
+			var mutex sync.Mutex
 			var callbackCalled bool
 			var callbackToken string
 			
 			if tt.setupCallback {
 				callback := func(token, endpoint string) {
+					mutex.Lock()
+					defer mutex.Unlock()
 					callbackCalled = true
 					callbackToken = token
 				}
@@ -114,11 +118,17 @@ func TestRefreshTokenWithCallback(t *testing.T) {
 				time.Sleep(50 * time.Millisecond)
 			}
 			
+			// Read callback results with mutex protection
+			mutex.Lock()
+			actualCallbackCalled := callbackCalled
+			actualCallbackToken := callbackToken
+			mutex.Unlock()
+			
 			if tt.expectCallbackRun {
-				assert.True(t, callbackCalled, "Callback should have been called")
-				assert.Equal(t, "refreshed-token-1", callbackToken)
+				assert.True(t, actualCallbackCalled, "Callback should have been called")
+				assert.Equal(t, "refreshed-token-1", actualCallbackToken)
 			} else {
-				assert.False(t, callbackCalled, "Callback should not have been called")
+				assert.False(t, actualCallbackCalled, "Callback should not have been called")
 			}
 		})
 	}

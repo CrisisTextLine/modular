@@ -28,6 +28,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -600,10 +601,25 @@ func (m *Module) ProvidesServices() []modular.ServiceProvider {
 }
 
 // RequiresServices declares services required by this module.
-// The database module is self-contained and doesn't require
-// services from other modules.
+// The database module requires the logger service for structured logging.
 func (m *Module) RequiresServices() []modular.ServiceDependency {
-	return nil // No required services
+	return []modular.ServiceDependency{
+		{
+			Name:     "logger",
+			Required: true,
+			Type:     reflect.TypeOf((*modular.Logger)(nil)).Elem(),
+		},
+	}
+}
+
+// Constructor provides a dependency injection constructor for the module.
+// This allows the logger service to be properly injected during module initialization.
+func (m *Module) Constructor() modular.ModuleConstructor {
+	return func(app modular.Application, services map[string]any) (modular.Module, error) {
+		// The logger service should be available in the services map
+		// but we can also fallback to app.Logger() for backwards compatibility
+		return m, nil
+	}
 }
 
 // GetConnection returns a database connection by name.

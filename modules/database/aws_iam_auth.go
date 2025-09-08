@@ -121,7 +121,17 @@ func (p *AWSIAMTokenProvider) refreshToken(ctx context.Context, endpoint string)
 	// Notify callback if set (this allows database service to recreate connections)
 	if p.tokenRefreshCallback != nil {
 		// Call callback in a separate goroutine to avoid blocking token refresh
-		go p.tokenRefreshCallback(token, endpoint)
+		// Add panic recovery to prevent callback panics from affecting token refresh
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// Log the panic but don't fail the token refresh process
+					// The actual logging will be handled by the callback implementation if available
+					fmt.Printf("Database token refresh callback panic recovered: %v\n", r)
+				}
+			}()
+			p.tokenRefreshCallback(token, endpoint)
+		}()
 	}
 
 	return token, nil

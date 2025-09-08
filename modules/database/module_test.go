@@ -186,7 +186,10 @@ func TestModule_Services(t *testing.T) {
 
 	// Test RequiredServices
 	required := module.RequiresServices()
-	assert.Empty(t, required)
+	assert.Len(t, required, 1)
+	assert.Equal(t, "logger", required[0].Name)
+	assert.True(t, required[0].Required)
+	assert.Equal(t, reflect.TypeOf((*modular.Logger)(nil)).Elem(), required[0].Type)
 
 	// Test ProvidedServices after initialization
 	app := NewMockApplication()

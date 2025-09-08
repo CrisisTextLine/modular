@@ -19,6 +19,12 @@ var (
 	ErrDatabaseNotConnected = errors.New("database not connected")
 )
 
+// Constants for database service
+const (
+	// DefaultConnectionTimeout is the default timeout for database connection tests
+	DefaultConnectionTimeout = 5 * time.Second
+)
+
 // DatabaseService defines the operations that can be performed with a database
 type DatabaseService interface {
 	// Connect establishes the database connection
@@ -189,8 +195,12 @@ func (s *databaseServiceImpl) Connect() error {
 		db.SetConnMaxIdleTime(s.config.ConnectionMaxIdleTime)
 	}
 
-	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Test connection with configurable timeout
+	timeout := DefaultConnectionTimeout
+	if s.config.AWSIAMAuth != nil && s.config.AWSIAMAuth.ConnectionTimeout > 0 {
+		timeout = s.config.AWSIAMAuth.ConnectionTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
@@ -278,7 +288,7 @@ func (s *databaseServiceImpl) onTokenRefresh(newToken string, endpoint string) {
 	}
 
 	// Test new connection with configurable timeout
-	timeout := 5 * time.Second // Default timeout
+	timeout := DefaultConnectionTimeout
 	if s.config.AWSIAMAuth != nil && s.config.AWSIAMAuth.ConnectionTimeout > 0 {
 		timeout = s.config.AWSIAMAuth.ConnectionTimeout
 	}

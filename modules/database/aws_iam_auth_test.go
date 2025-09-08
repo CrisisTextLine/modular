@@ -382,6 +382,10 @@ func (m *MockAWSIAMTokenProvider) StopTokenRefresh() {
 	// No-op for testing
 }
 
+func (m *MockAWSIAMTokenProvider) SetTokenRefreshCallback(callback TokenRefreshCallback) {
+	// No-op for testing
+}
+
 // TestAWSIAMAuthConfigEnvVarsWithoutInstancePrefix tests that AWS IAM environment variables
 // are read exactly as they are (without instance-specific prefixes) since they are AWS-specific
 func TestAWSIAMAuthConfigEnvVarsWithoutInstancePrefix(t *testing.T) {

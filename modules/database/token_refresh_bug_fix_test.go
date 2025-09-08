@@ -19,7 +19,7 @@ func TestIAMTokenRefreshBugFix(t *testing.T) {
 	// 3. Application should continue working (not suddenly stop communicating)
 
 	// Create a mock token provider that simulates token rotation
-	mockProvider := NewMockIAMTokenProviderWithExpiry("startup-token", 15*time.Minute)
+	mockProvider := NewMockIAMTokenProviderWithExpiry("startup-token", 3*time.Second)
 
 	ctx := context.Background()
 
@@ -44,15 +44,23 @@ func TestIAMTokenRefreshBugFix(t *testing.T) {
 	require.NoError(t, err, "Should get initial token")
 	assert.Equal(t, "startup-token", token1, "Should get startup token")
 
-	// Step 3: Time passes - simulate background token refresh (this is what would happen automatically)
-	// This simulates the background goroutine refreshing the token after some time
+	// Step 3: Wait for token to expire, then test automatic refresh behavior
+	// Sleep to let the token expire naturally
+	time.Sleep(4 * time.Second) // Token expires after 3 seconds
+
+	// Now the token should be expired
+	_, err = mockProvider.GetToken(ctx, "host.example.com:5432")
+	assert.Error(t, err, "Token should be expired after waiting")
+	assert.Contains(t, err.Error(), "token expired", "Error should indicate token expiration")
+
+	// Trigger refresh (simulating what the background goroutine would do)
 	err = mockProvider.RefreshToken()
-	require.NoError(t, err, "Background token refresh should succeed")
+	require.NoError(t, err, "Token refresh should succeed")
 
 	// Verify token has been refreshed
 	assert.Equal(t, 1, mockProvider.GetRefreshCount(), "Token should have been refreshed once")
 
-	// Get new token to verify it's different
+	// Get new token to verify it's different and valid
 	token2, err := mockProvider.GetToken(ctx, "host.example.com:5432")
 	require.NoError(t, err, "Should get refreshed token")
 	assert.Equal(t, "refreshed-token-1", token2, "Should get refreshed token")
@@ -64,7 +72,7 @@ func TestIAMTokenRefreshBugFix(t *testing.T) {
 	assert.Contains(t, newDSN, "refreshed-token-1", "New DSN should use refreshed token")
 	assert.NotEqual(t, initialDSN, newDSN, "DSN should be different after token refresh")
 
-	// Step 4: Verify multiple token refreshes work
+	// Step 4: Verify multiple token refreshes work with realistic timing
 	for i := 0; i < 3; i++ {
 		err = mockProvider.RefreshToken()
 		require.NoError(t, err, "Multiple token refreshes should work")
@@ -90,7 +98,7 @@ func TestTokenRefreshCallbackNotifiesService(t *testing.T) {
 	// This test validates that our callback mechanism is properly set up
 
 	// Create a mock provider
-	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 15*time.Minute)
+	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 3*time.Second)
 
 	// Test that the callback mechanism exists and can be tested
 	// We don't need to actually connect to test the callback setup
@@ -109,13 +117,19 @@ func TestTokenRefreshCallbackNotifiesService(t *testing.T) {
 	// Set callback on mock provider
 	mockProvider.SetTokenRefreshCallback(callback)
 
-	// Simulate what would happen in the real token provider
-	// (our mock doesn't actually call the callback, but the real implementation does)
-	callback("test-token", "test-endpoint")
+	// Set endpoint for callback testing
+	mockProvider.StartTokenRefresh(context.Background(), "test-endpoint")
+
+	// Trigger a token refresh which should call the callback
+	err := mockProvider.RefreshToken()
+	require.NoError(t, err, "Token refresh should succeed")
+
+	// Give callback time to execute (it runs in a goroutine)
+	time.Sleep(100 * time.Millisecond)
 
 	// Verify callback mechanism works
 	assert.True(t, callbackReceived, "Callback should be received")
-	assert.Equal(t, "test-token", receivedToken, "Should receive correct token")
+	assert.Equal(t, "refreshed-token-1", receivedToken, "Should receive correct token")
 	assert.Equal(t, "test-endpoint", receivedEndpoint, "Should receive correct endpoint")
 
 	// This test demonstrates that the callback mechanism is functional

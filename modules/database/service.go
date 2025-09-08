@@ -101,6 +101,7 @@ type databaseServiceImpl struct {
 	awsTokenProvider IAMTokenProvider
 	migrationService MigrationService
 	eventEmitter     EventEmitter
+	logger           modular.Logger // Logger service for error reporting
 	ctx              context.Context
 	cancel           context.CancelFunc
 	endpoint         string       // Store endpoint for reconnection
@@ -108,7 +109,7 @@ type databaseServiceImpl struct {
 }
 
 // NewDatabaseService creates a new database service from configuration
-func NewDatabaseService(config ConnectionConfig) (DatabaseService, error) {
+func NewDatabaseService(config ConnectionConfig, logger modular.Logger) (DatabaseService, error) {
 	if config.Driver == "" {
 		return nil, ErrEmptyDriver
 	}
@@ -120,6 +121,7 @@ func NewDatabaseService(config ConnectionConfig) (DatabaseService, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	service := &databaseServiceImpl{
 		config: config,
+		logger: logger,
 		ctx:    ctx,
 		cancel: cancel,
 	}
@@ -250,14 +252,14 @@ func (s *databaseServiceImpl) onTokenRefresh(newToken string, endpoint string) {
 	newDSN, err := s.awsTokenProvider.BuildDSNWithIAMToken(s.ctx, s.config.DSN)
 	if err != nil {
 		// Log error but don't crash the application
-		fmt.Printf("Failed to build DSN with refreshed IAM token: %v\n", err)
+		s.logger.Error("Failed to build DSN with refreshed IAM token", "error", err, "endpoint", endpoint)
 		return
 	}
 
 	// Create new database connection
 	newDB, err := sql.Open(s.config.Driver, newDSN)
 	if err != nil {
-		fmt.Printf("Failed to open new database connection with refreshed token: %v\n", err)
+		s.logger.Error("Failed to open new database connection with refreshed token", "error", err, "driver", s.config.Driver)
 		return
 	}
 
@@ -275,11 +277,16 @@ func (s *databaseServiceImpl) onTokenRefresh(newToken string, endpoint string) {
 		newDB.SetConnMaxIdleTime(s.config.ConnectionMaxIdleTime)
 	}
 
-	// Test new connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Test new connection with configurable timeout
+	timeout := 5 * time.Second // Default timeout
+	if s.config.AWSIAMAuth != nil && s.config.AWSIAMAuth.ConnectionTimeout > 0 {
+		timeout = s.config.AWSIAMAuth.ConnectionTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if err := newDB.PingContext(ctx); err != nil {
-		fmt.Printf("Failed to ping database with refreshed token: %v\n", err)
+		s.logger.Error("Failed to ping database with refreshed token", "error", err, "timeout", timeout)
 		newDB.Close()
 		return
 	}
@@ -290,7 +297,7 @@ func (s *databaseServiceImpl) onTokenRefresh(newToken string, endpoint string) {
 	// Close old connection in background to avoid blocking
 	go func() {
 		if err := oldDB.Close(); err != nil {
-			fmt.Printf("Error closing old database connection: %v\n", err)
+			s.logger.Error("Error closing old database connection", "error", err)
 		}
 	}()
 

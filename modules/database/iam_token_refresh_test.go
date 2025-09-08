@@ -15,12 +15,14 @@ import (
 
 // MockIAMTokenProviderWithExpiry simulates token expiration scenarios
 type MockIAMTokenProviderWithExpiry struct {
-	mutex        sync.RWMutex
-	currentToken string
-	tokenExpiry  time.Time
-	refreshCount int
-	shouldFail   bool
-	failAfter    int // fail after this many refresh attempts
+	mutex                sync.RWMutex
+	currentToken         string
+	tokenExpiry          time.Time
+	refreshCount         int
+	shouldFail           bool
+	failAfter            int // fail after this many refresh attempts
+	tokenRefreshCallback TokenRefreshCallback
+	endpoint             string
 }
 
 func NewMockIAMTokenProviderWithExpiry(initialToken string, validDuration time.Duration) *MockIAMTokenProviderWithExpiry {
@@ -70,7 +72,12 @@ func (m *MockIAMTokenProviderWithExpiry) RefreshToken() error {
 
 	// Generate new token
 	m.currentToken = fmt.Sprintf("refreshed-token-%d", m.refreshCount)
-	m.tokenExpiry = time.Now().Add(15 * time.Minute) // New 15-minute token
+	m.tokenExpiry = time.Now().Add(3 * time.Second) // New 3-second token for testing
+
+	// Call the refresh callback if set (simulating the real provider behavior)
+	if m.tokenRefreshCallback != nil {
+		go m.tokenRefreshCallback(m.currentToken, m.endpoint)
+	}
 
 	return nil
 }
@@ -82,7 +89,9 @@ func (m *MockIAMTokenProviderWithExpiry) ExpireToken() {
 }
 
 func (m *MockIAMTokenProviderWithExpiry) StartTokenRefresh(ctx context.Context, endpoint string) {
-	// No-op for testing
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.endpoint = endpoint
 }
 
 func (m *MockIAMTokenProviderWithExpiry) StopTokenRefresh() {
@@ -90,7 +99,9 @@ func (m *MockIAMTokenProviderWithExpiry) StopTokenRefresh() {
 }
 
 func (m *MockIAMTokenProviderWithExpiry) SetTokenRefreshCallback(callback TokenRefreshCallback) {
-	// No-op for testing, but could be extended to test callback behavior
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.tokenRefreshCallback = callback
 }
 
 func (m *MockIAMTokenProviderWithExpiry) GetRefreshCount() int {
@@ -128,7 +139,7 @@ func TestTokenRefreshWithExistingConnection(t *testing.T) {
 	// "an application that was running fine, suddenly stopped being able to communicate with the database"
 
 	// Create a mock token provider
-	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 15*time.Minute)
+	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 3*time.Second)
 
 	ctx := context.Background()
 
@@ -198,7 +209,7 @@ func TestTokenProviderRealWorldScenario(t *testing.T) {
 func TestConnectionRecreationAfterTokenRefresh(t *testing.T) {
 	// This test demonstrates a potential solution: recreating connections after token refresh
 
-	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 15*time.Minute)
+	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 3*time.Second)
 	ctx := context.Background()
 
 	// Step 1: Create initial connection DSN
@@ -261,4 +272,106 @@ func TestTokenRefreshCallbackFunctionality(t *testing.T) {
 	// We can't easily test the actual callback without real AWS credentials and token generation,
 	// but we can verify the mechanism is in place and doesn't cause issues
 	_ = callbackInvoked // Use the variable to avoid compiler error
+}
+
+// TestAutomaticTokenRefreshOnExpiry tests token refresh triggered by token expiration
+func TestAutomaticTokenRefreshOnExpiry(t *testing.T) {
+	// This test demonstrates automatic token refresh when tokens expire
+	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 2*time.Second)
+	ctx := context.Background()
+
+	// Set up callback to track refresh events
+	var callbackInvocations []string
+	var callbackMutex sync.Mutex
+	callback := func(newToken string, endpoint string) {
+		callbackMutex.Lock()
+		defer callbackMutex.Unlock()
+		callbackInvocations = append(callbackInvocations, newToken)
+	}
+	mockProvider.SetTokenRefreshCallback(callback)
+	mockProvider.StartTokenRefresh(ctx, "test-endpoint")
+
+	// Initial token should work
+	token1, err := mockProvider.GetToken(ctx, "endpoint")
+	require.NoError(t, err)
+	assert.Equal(t, "initial-token", token1)
+
+	// Wait for token to expire
+	time.Sleep(3 * time.Second)
+
+	// Token should now be expired
+	_, err = mockProvider.GetToken(ctx, "endpoint")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "token expired")
+
+	// Simulate automatic refresh (this would be triggered by detection of expired token)
+	err = mockProvider.RefreshToken()
+	require.NoError(t, err)
+
+	// Give callback time to execute
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify callback was invoked
+	callbackMutex.Lock()
+	defer callbackMutex.Unlock()
+	assert.Len(t, callbackInvocations, 1, "Callback should be invoked once")
+	assert.Equal(t, "refreshed-token-1", callbackInvocations[0])
+
+	// New token should work
+	token2, err := mockProvider.GetToken(ctx, "endpoint")
+	require.NoError(t, err)
+	assert.Equal(t, "refreshed-token-1", token2)
+}
+
+// TestErrorDrivenTokenRefresh tests refresh triggered by database connection errors
+func TestErrorDrivenTokenRefresh(t *testing.T) {
+	// This test simulates the scenario where a database operation fails due to expired token
+	// and triggers a token refresh to recover
+	mockProvider := NewMockIAMTokenProviderWithExpiry("working-token", 2*time.Second)
+	ctx := context.Background()
+
+	// Track refresh events
+	var refreshEvents []string
+	var eventMutex sync.Mutex
+	callback := func(newToken string, endpoint string) {
+		eventMutex.Lock()
+		defer eventMutex.Unlock()
+		refreshEvents = append(refreshEvents, fmt.Sprintf("refresh:%s:%s", newToken, endpoint))
+	}
+	mockProvider.SetTokenRefreshCallback(callback)
+	mockProvider.StartTokenRefresh(ctx, "db.example.com:5432")
+
+	// Initial DSN creation should work
+	dsn1, err := mockProvider.BuildDSNWithIAMToken(ctx, "postgres://user:password@db.example.com:5432/mydb")
+	require.NoError(t, err)
+	assert.Contains(t, dsn1, "working-token")
+
+	// Simulate passage of time - token expires
+	time.Sleep(3 * time.Second)
+
+	// Attempt to use token should fail (simulating database error)
+	_, err = mockProvider.GetToken(ctx, "db.example.com:5432")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "token expired")
+
+	// Simulate error-driven refresh (this would be triggered by the database service
+	// detecting authentication failures)
+	err = mockProvider.RefreshToken()
+	require.NoError(t, err)
+
+	// Give callback time to execute
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify refresh event was recorded
+	eventMutex.Lock()
+	defer eventMutex.Unlock()
+	assert.Len(t, refreshEvents, 1, "Should have one refresh event")
+	assert.Contains(t, refreshEvents[0], "refreshed-token-1")
+	assert.Contains(t, refreshEvents[0], "db.example.com:5432")
+
+	// New DSN should work with fresh token
+	dsn2, err := mockProvider.BuildDSNWithIAMToken(ctx, "postgres://user:password@db.example.com:5432/mydb")
+	require.NoError(t, err)
+	assert.Contains(t, dsn2, "refreshed-token-1")
+	assert.NotEqual(t, dsn1, dsn2, "DSNs should be different after refresh")
 }

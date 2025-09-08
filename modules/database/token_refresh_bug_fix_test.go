@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,12 +104,16 @@ func TestTokenRefreshCallbackNotifiesService(t *testing.T) {
 	// Test that the callback mechanism exists and can be tested
 	// We don't need to actually connect to test the callback setup
 
+	// Use sync.Mutex to avoid data races
+	var mu sync.Mutex
 	var callbackReceived bool
 	var receivedToken string
 	var receivedEndpoint string
 
 	// Test the callback directly
 	callback := func(newToken string, endpoint string) {
+		mu.Lock()
+		defer mu.Unlock()
 		callbackReceived = true
 		receivedToken = newToken
 		receivedEndpoint = endpoint
@@ -127,10 +132,12 @@ func TestTokenRefreshCallbackNotifiesService(t *testing.T) {
 	// Give callback time to execute (it runs in a goroutine)
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify callback mechanism works
+	// Verify callback mechanism works with proper synchronization
+	mu.Lock()
 	assert.True(t, callbackReceived, "Callback should be received")
 	assert.Equal(t, "refreshed-token-1", receivedToken, "Should receive correct token")
 	assert.Equal(t, "test-endpoint", receivedEndpoint, "Should receive correct endpoint")
+	mu.Unlock()
 
 	// This test demonstrates that the callback mechanism is functional
 	// In real usage with AWSIAMTokenProvider, the refreshToken method

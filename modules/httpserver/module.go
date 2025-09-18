@@ -664,9 +664,6 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 		}, nil)
 		// Request events should be delivered synchronously; set hint via a background context to avoid cancellation
 		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(r.Context()), requestReceivedEvent); emitErr != nil {
-			// Temporary diagnostic to understand why events may not be observed in tests
-			//nolint:forbidigo
-			fmt.Println("[httpserver] DEBUG: failed to emit request.received:", emitErr)
 			if m.logger != nil {
 				m.logger.Debug("Failed to emit request received event", "error", emitErr)
 			}
@@ -695,8 +692,6 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 		}, nil)
 		// Request events should be delivered synchronously; set hint via a background context to avoid cancellation
 		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(r.Context()), requestHandledEvent); emitErr != nil {
-			//nolint:forbidigo
-			fmt.Println("[httpserver] DEBUG: failed to emit request.handled:", emitErr)
 			if m.logger != nil {
 				m.logger.Debug("Failed to emit request handled event", "error", emitErr)
 			}

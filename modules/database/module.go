@@ -107,14 +107,15 @@ func (l *lazyDefaultService) ExecContext(ctx context.Context, query string, args
 		return nil, ErrNoDefaultService
 	}
 
-	fmt.Printf("lazyDefaultService.ExecContext called with query: %s\n", query)
+	// Use logger for debug logging
+	l.module.logger.Debug("Executing query", "query", query)
 
 	// Record start time for performance tracking
 	startTime := time.Now()
 	result, err := service.ExecContext(ctx, query, args...)
 	duration := time.Since(startTime)
 
-	fmt.Printf("Query execution completed, duration: %v, error: %v\n", duration, err)
+	l.module.logger.Debug("Query execution completed", "duration", duration, "error", err)
 
 	if err != nil {
 		// Emit query error event
@@ -207,7 +208,7 @@ func (l *lazyDefaultService) QueryContext(ctx context.Context, query string, arg
 
 		go func() {
 			if emitErr := l.module.EmitEvent(ctx, event); emitErr != nil {
-				fmt.Printf("Failed to emit query error event: %v\n", emitErr)
+				l.module.logger.Error("Failed to emit query error event", "error", emitErr)
 			}
 		}()
 
@@ -224,7 +225,7 @@ func (l *lazyDefaultService) QueryContext(ctx context.Context, query string, arg
 
 	go func() {
 		if emitErr := l.module.EmitEvent(ctx, event); emitErr != nil {
-			fmt.Printf("Failed to emit query success event: %v\n", emitErr)
+			l.module.logger.Error("Failed to emit query success event", "error", emitErr)
 		}
 	}()
 
@@ -283,7 +284,7 @@ func (l *lazyDefaultService) BeginTx(ctx context.Context, opts *sql.TxOptions) (
 
 	go func() {
 		if emitErr := l.module.EmitEvent(ctx, event); emitErr != nil {
-			fmt.Printf("Failed to emit transaction event: %v\n", emitErr)
+			l.module.logger.Error("Failed to emit transaction event", "error", emitErr)
 		}
 	}()
 
@@ -309,7 +310,7 @@ func (l *lazyDefaultService) Begin() (*sql.Tx, error) {
 
 	go func() {
 		if emitErr := l.module.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
-			fmt.Printf("Failed to emit transaction started event: %v\n", emitErr)
+			l.module.logger.Error("Failed to emit transaction started event", "error", emitErr)
 		}
 	}()
 
@@ -406,6 +407,7 @@ type Module struct {
 	connections map[string]*sql.DB
 	services    map[string]DatabaseService
 	subject     modular.Subject // For event observation
+	logger      modular.Logger  // For structured logging
 }
 
 var (
@@ -472,6 +474,10 @@ func (m *Module) RegisterConfig(app modular.Application) error {
 //  3. Create database services for each connection
 //  4. Test initial connectivity
 func (m *Module) Init(app modular.Application) error {
+	// Initialize the logger
+	m.logger = app.Logger()
+	m.logger.Info("Initializing database module")
+
 	// Get the configuration
 	provider, err := app.GetConfigSection(m.Name())
 	if err != nil {
@@ -504,7 +510,7 @@ func (m *Module) Init(app modular.Application) error {
 
 	go func() {
 		if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
-			fmt.Printf("Failed to emit config loaded event: %v\n", emitErr)
+			m.logger.Error("Failed to emit config loaded event", "error", emitErr)
 		}
 	}()
 
@@ -545,7 +551,7 @@ func (m *Module) Stop(ctx context.Context) error {
 
 			go func() {
 				if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-					fmt.Printf("Failed to emit database close error event: %v\n", emitErr)
+					m.logger.Error("Failed to emit database close error event", "error", emitErr)
 				}
 			}()
 
@@ -559,7 +565,7 @@ func (m *Module) Stop(ctx context.Context) error {
 
 		go func() {
 			if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-				fmt.Printf("Failed to emit database disconnected event: %v\n", emitErr)
+				m.logger.Error("Failed to emit database disconnected event", "error", emitErr)
 			}
 		}()
 	}
@@ -675,26 +681,26 @@ func (m *Module) GetConnections() []string {
 // Similar to GetDefaultConnection, but returns a DatabaseService
 // interface that provides additional functionality beyond the raw sql.DB.
 func (m *Module) GetDefaultService() DatabaseService {
-	fmt.Printf("GetDefaultService called - config: %+v, services: %+v\n", m.config, m.services)
+	m.logger.Debug("Getting default database service", "config_default", m.config.Default, "available_services", len(m.services))
 	if m.config == nil || m.config.Default == "" {
-		fmt.Printf("GetDefaultService: config is nil or default is empty\n")
+		m.logger.Debug("No default database service configured")
 		return nil
 	}
 
 	if service, exists := m.services[m.config.Default]; exists {
-		fmt.Printf("GetDefaultService: found service for default '%s'\n", m.config.Default)
+		m.logger.Debug("Found default database service", "service_name", m.config.Default)
 		return service
 	}
 
-	fmt.Printf("GetDefaultService: default service '%s' not found, trying any available\n", m.config.Default)
+	m.logger.Debug("Default service not found, trying fallback", "requested", m.config.Default)
 
 	// If default connection name doesn't exist, try to return any available service
 	for name, service := range m.services {
-		fmt.Printf("GetDefaultService: returning service '%s' as fallback\n", name)
+		m.logger.Debug("Using fallback database service", "service_name", name)
 		return service
 	}
 
-	fmt.Printf("GetDefaultService: no services available\n")
+	m.logger.Debug("No database services available")
 	return nil
 }
 
@@ -737,7 +743,7 @@ func (m *Module) initializeConnections(app modular.Application) error {
 				}, nil)
 
 				if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
-					fmt.Printf("Failed to emit database connection failed event: %v\n", emitErr)
+					m.logger.Error("Failed to emit database connection failed event", "error", emitErr)
 				}
 
 				return fmt.Errorf("failed to connect to database '%s': %w", name, err)
@@ -751,7 +757,7 @@ func (m *Module) initializeConnections(app modular.Application) error {
 
 			go func() {
 				if emitErr := m.EmitEvent(modular.WithSynchronousNotification(context.Background()), event); emitErr != nil {
-					fmt.Printf("Failed to emit database connected event: %v\n", emitErr)
+					m.logger.Error("Failed to emit database connected event", "error", emitErr)
 				}
 			}()
 
@@ -784,8 +790,7 @@ func (m *Module) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 		if err := m.subject.NotifyObservers(ctx, event); err != nil {
 			// Log error but don't fail the operation
 			// This ensures event emission issues don't affect database functionality
-			// Use a logger if available to avoid noisy stdout during tests
-			fmt.Printf("Failed to notify observers for event %s: %v\n", event.Type(), err)
+			m.logger.Error("Failed to notify observers", "event_type", event.Type(), "error", err)
 		}
 	}()
 	return nil

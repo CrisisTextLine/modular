@@ -2813,8 +2813,9 @@ func (m *ReverseProxyModule) GetHealthStatus() map[string]*HealthStatus {
 }
 
 // setupFeatureFlagEvaluation sets up the feature flag evaluation system using the aggregator pattern.
-// It creates the internal file-based evaluator and registers it as "featureFlagEvaluator.file",
-// then creates an aggregator that discovers all evaluators and registers it as "featureFlagEvaluator".
+// It creates the internal file-based evaluator and registers it as "featureFlagEvaluator.file".
+// If an external evaluator was provided via constructor, it registers it as "featureFlagEvaluator.external".
+// Then it always creates an aggregator that discovers all evaluators and provides proper fallback behavior.
 func (m *ReverseProxyModule) setupFeatureFlagEvaluation() error {
 	if !m.config.FeatureFlags.Enabled {
 		m.app.Logger().Debug("Feature flags disabled, skipping evaluation setup")
@@ -2841,15 +2842,24 @@ func (m *ReverseProxyModule) setupFeatureFlagEvaluation() error {
 		return fmt.Errorf("failed to register file-based evaluator service: %w", err)
 	}
 
-	// Create and register the aggregator as "featureFlagEvaluator"
-	// Only do this if we haven't already received an external evaluator via constructor
-	if !m.featureFlagEvaluatorProvided {
-		aggregator := NewFeatureFlagAggregator(m.app, logger)
-		m.featureFlagEvaluator = aggregator
+	// If we received an external evaluator via constructor, register it so the aggregator can discover it
+	if m.featureFlagEvaluatorProvided && m.featureFlagEvaluator != nil {
+		// Register the external evaluator with a unique name so the aggregator can find it
+		if err := m.app.RegisterService("featureFlagEvaluator.external", m.featureFlagEvaluator); err != nil {
+			return fmt.Errorf("failed to register external evaluator service: %w", err)
+		}
+		m.app.Logger().Info("Registered external feature flag evaluator for aggregation")
+	}
 
-		m.app.Logger().Info("Created feature flag aggregator with file-based fallback")
+	// Always create and use the aggregator - this ensures fallback behavior works correctly
+	// The aggregator will discover all registered evaluators including external ones
+	aggregator := NewFeatureFlagAggregator(m.app, logger)
+	m.featureFlagEvaluator = aggregator
+
+	if m.featureFlagEvaluatorProvided {
+		m.app.Logger().Info("Created feature flag aggregator with external evaluator and file-based fallback")
 	} else {
-		m.app.Logger().Info("Using external feature flag evaluator provided via service dependency")
+		m.app.Logger().Info("Created feature flag aggregator with file-based fallback")
 	}
 
 	return nil

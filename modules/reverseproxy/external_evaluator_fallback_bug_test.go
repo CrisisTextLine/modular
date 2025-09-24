@@ -30,8 +30,14 @@ func (m *mockExternalEvaluatorReturnsErrNoDecision) Weight() int {
 	return 50 // Higher priority than file evaluator (weight 1000)
 }
 
-// TestExternalEvaluatorFallbackBug reproduces the bug described in the issue
-func TestExternalEvaluatorFallbackBug(t *testing.T) {
+// TestExternalEvaluatorFallbackFix reproduces and verifies the fix for the bug described in the issue.
+//
+// The bug: When external evaluator is provided via constructor, it bypassed the aggregator entirely,
+// so when it returned ErrNoDecision, there was no fallback to file-based evaluator.
+//
+// The fix: Always use aggregator pattern, register external evaluator for discovery,
+// ensuring proper fallback chain: External → File → Safe defaults.
+func TestExternalEvaluatorFallbackFix(t *testing.T) {
 	// Create a mock application
 	moduleApp := NewMockTenantApplication()
 
@@ -91,44 +97,49 @@ func TestExternalEvaluatorFallbackBug(t *testing.T) {
 		t.Fatalf("Failed to start module: %v", err)
 	}
 
-	// Test what the behavior SHOULD be (this will fail until we fix the bug)
+	// Test that the fix works correctly
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/test", nil)
-	
-	// We need to test the flag with the YAML value false to show the problem
+
+	// Test the evaluateFeatureFlag method - should now use aggregator with fallback
 	result := module.evaluateFeatureFlag("my-api", req)
-	
-	// First verify the setup: external evaluator returns ErrNoDecision
-	if module.featureFlagEvaluator != nil {
-		directResult, err := module.featureFlagEvaluator.EvaluateFlag(context.Background(), "my-api", "", req)
-		t.Logf("Direct evaluator result: %v, error: %v", directResult, err)
-		if err == nil || err != ErrNoDecision {
-			t.Errorf("Expected external evaluator to return ErrNoDecision, got: %v", err)
-		}
+
+	// Verify the fix: now uses aggregator instead of external evaluator directly
+	if _, isAggregator := module.featureFlagEvaluator.(*FeatureFlagAggregator); !isAggregator {
+		t.Errorf("Expected module to use aggregator after fix, got: %T", module.featureFlagEvaluator)
 	}
 
-	// The problem: evaluateFeatureFlag uses EvaluateFlagWithDefault(true) 
-	// which returns true when external evaluator returns ErrNoDecision
-	// It should instead fall back to file evaluator which has the YAML config
+	// The aggregator should now call external evaluator, get ErrNoDecision, then fallback to file evaluator
 	t.Logf("evaluateFeatureFlag result: %v", result)
 	t.Logf("featureFlagEvaluatorProvided: %v", module.featureFlagEvaluatorProvided)
 	t.Logf("featureFlagEvaluator type: %T", module.featureFlagEvaluator)
 
-	// This test will pass with the current buggy behavior but shows the problem
-	if result {
-		t.Logf("Current behavior: returns true (hard-coded default) - this is the bug")
-	}
-
-	// What SHOULD happen: fallback to file evaluator should return the YAML value
-	// Let's manually test what the file evaluator would return
-	// We need to access the app's registered service "featureFlagEvaluator.file"
+	// Verify the fix: should return file evaluator result (false) instead of hard-coded default (true)
 	var fileEvaluator FeatureFlagEvaluator
 	if err := module.app.GetService("featureFlagEvaluator.file", &fileEvaluator); err == nil {
 		fileResult, fileErr := fileEvaluator.EvaluateFlag(context.Background(), "my-api", "", req)
-		t.Logf("File evaluator would return: %v, error: %v", fileResult, fileErr)
-		if fileErr == nil && fileResult != result {
-			t.Errorf("BUG DETECTED: External evaluator fallback should return file evaluator result (%v), but returned hard-coded default (%v)", fileResult, result)
+		t.Logf("File evaluator returns: %v, error: %v", fileResult, fileErr)
+		if fileErr == nil && fileResult == result {
+			t.Logf("SUCCESS: External evaluator fallback now correctly returns file evaluator result (%v)", fileResult)
+		} else {
+			t.Errorf("FAIL: Expected aggregator result (%v) to match file evaluator result (%v)", result, fileResult)
 		}
 	} else {
 		t.Logf("File evaluator not registered: %v", err)
+	}
+
+	// Verify that external evaluator was registered and discoverable
+	var registeredExternalEvaluator FeatureFlagEvaluator
+	if err := module.app.GetService("featureFlagEvaluator.external", &registeredExternalEvaluator); err == nil {
+		t.Logf("SUCCESS: External evaluator registered and discoverable by aggregator")
+
+		// Test that external evaluator still returns ErrNoDecision when called directly
+		_, extErr := registeredExternalEvaluator.EvaluateFlag(context.Background(), "my-api", "", req)
+		if extErr == ErrNoDecision {
+			t.Logf("SUCCESS: External evaluator correctly returns ErrNoDecision")
+		} else {
+			t.Errorf("Expected external evaluator to return ErrNoDecision, got: %v", extErr)
+		}
+	} else {
+		t.Errorf("FAIL: External evaluator not registered for discovery: %v", err)
 	}
 }

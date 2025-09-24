@@ -81,7 +81,7 @@ func TestCompleteFeatureFlagSystem(t *testing.T) {
 
 	// Create application
 	app := NewMockTenantApplication()
-	
+
 	// Register tenant service
 	tenantService := modular.NewStandardTenantService(logger)
 	err := app.RegisterService("tenantService", tenantService)
@@ -94,9 +94,9 @@ func TestCompleteFeatureFlagSystem(t *testing.T) {
 		FeatureFlags: FeatureFlagsConfig{
 			Enabled: true,
 			Flags: map[string]bool{
-				"file-only-flag":    true,
+				"file-only-flag":     true,
 				"priority-test-flag": false, // External should override this
-				"fallback-flag":     true,
+				"fallback-flag":      true,
 			},
 		},
 		BackendServices: map[string]string{
@@ -110,7 +110,7 @@ func TestCompleteFeatureFlagSystem(t *testing.T) {
 		name:   "external-evaluator",
 		weight: 50, // Higher priority than file evaluator (weight 1000)
 	}
-	
+
 	// Create mock router for reverseproxy
 	router := &MockRouter{}
 	err = app.RegisterService("router", router)
@@ -120,7 +120,7 @@ func TestCompleteFeatureFlagSystem(t *testing.T) {
 
 	// Register reverseproxy module
 	rpModule := NewModule()
-	
+
 	// Register modules
 	app.RegisterModule(externalModule)
 	app.RegisterModule(rpModule)
@@ -192,7 +192,7 @@ func TestBackwardsCompatibility(t *testing.T) {
 
 	// Create application
 	app := NewMockTenantApplication()
-	
+
 	// Register tenant service
 	tenantService := modular.NewStandardTenantService(logger)
 	err := app.RegisterService("tenantService", tenantService)
@@ -243,7 +243,7 @@ func TestBackwardsCompatibility(t *testing.T) {
 	}
 
 	aggregator := NewFeatureFlagAggregator(app, logger)
-	
+
 	// Test aggregator with just the file evaluator
 	result, err = aggregator.EvaluateFlag(context.Background(), "test-flag", "", req)
 	if err != nil {
@@ -258,7 +258,7 @@ func TestBackwardsCompatibility(t *testing.T) {
 func TestServiceExposure(t *testing.T) {
 	// Test that a basic module provides the expected service structure
 	rpModule := NewModule()
-	
+
 	// Before configuration, should provide minimal services
 	initialServices := rpModule.ProvidesServices()
 	if len(initialServices) != 0 {
@@ -269,7 +269,7 @@ func TestServiceExposure(t *testing.T) {
 	rpModule.config = &ReverseProxyConfig{
 		FeatureFlags: FeatureFlagsConfig{Enabled: true},
 	}
-	
+
 	// Create a dummy aggregator for testing
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	app := NewMockTenantApplication()
@@ -277,7 +277,7 @@ func TestServiceExposure(t *testing.T) {
 
 	// Now should provide services
 	services := rpModule.ProvidesServices()
-	
+
 	// Should provide both reverseproxy.provider and featureFlagEvaluator services
 	var hasProvider, hasEvaluator bool
 	for _, svc := range services {

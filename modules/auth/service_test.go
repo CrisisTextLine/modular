@@ -2,9 +2,11 @@ package auth
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -453,7 +455,7 @@ func TestService_OAuth2(t *testing.T) {
 	// Set up realistic user info for the mock server
 	expectedUserInfo := map[string]interface{}{
 		"id":      "12345",
-		"email":   "testuser@example.com",  
+		"email":   "testuser@example.com",
 		"name":    "Test User",
 		"picture": "https://example.com/avatar.jpg",
 	}
@@ -491,7 +493,7 @@ func TestService_OAuth2(t *testing.T) {
 	assert.Equal(t, "google", result.Provider)
 	assert.Equal(t, mockServer.GetValidToken(), result.AccessToken)
 	assert.NotNil(t, result.UserInfo)
-	
+
 	// Verify user info contains expected data plus provider info
 	assert.Equal(t, "google", result.UserInfo["provider"])
 	assert.Equal(t, expectedUserInfo["email"], result.UserInfo["email"])
@@ -506,4 +508,62 @@ func TestService_OAuth2(t *testing.T) {
 	// Test OAuth2 exchange with non-existent provider
 	_, err = service.ExchangeOAuth2Code("nonexistent", mockServer.GetValidCode(), "test-state")
 	assert.ErrorIs(t, err, ErrProviderNotFound)
+}
+
+func TestService_ValidateToken_Expired(t *testing.T) {
+	config := &Config{
+		JWT: JWTConfig{
+			Secret:            "test-secret",
+			Expiration:        1 * time.Hour,
+			RefreshExpiration: 24 * time.Hour,
+			Issuer:            "test-issuer",
+		},
+	}
+
+	userStore := NewMemoryUserStore()
+	sessionStore := NewMemorySessionStore()
+	service := NewService(config, userStore, sessionStore)
+
+	// Create a real expired JWT token using the same method as the service
+	now := time.Now()
+	expiredTime := now.Add(-1 * time.Hour) // Token expired 1 hour ago
+
+	// Create claims with past expiration
+	accessClaims := jwt.MapClaims{
+		"user_id": "expired-test-user",
+		"type":    "access",
+		"iat":     expiredTime.Add(-24 * time.Hour).Unix(), // issued 25 hours ago
+		"exp":     expiredTime.Unix(),                      // expired 1 hour ago
+		"counter": 1,
+	}
+
+	if config.JWT.Issuer != "" {
+		accessClaims["iss"] = config.JWT.Issuer
+	}
+	accessClaims["sub"] = "expired-test-user"
+	accessClaims["email"] = "expired@example.com"
+
+	// Generate the expired token using the same method as the service
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	tokenString, err := token.SignedString([]byte(config.JWT.Secret))
+	require.NoError(t, err)
+
+	// Validate the expired token
+	_, err = service.ValidateToken(tokenString)
+
+	// Should get token expired error
+	assert.ErrorIs(t, err, ErrTokenExpired)
+
+	// Also validate that the error message contains expected text
+	assert.Contains(t, strings.ToLower(err.Error()), "expired")
+
+	// Test that a valid token still works
+	validTokenPair, err := service.GenerateToken("valid-user", map[string]interface{}{
+		"email": "valid@example.com",
+	})
+	require.NoError(t, err)
+
+	claims, err := service.ValidateToken(validTokenPair.AccessToken)
+	require.NoError(t, err)
+	assert.Equal(t, "valid-user", claims.UserID)
 }

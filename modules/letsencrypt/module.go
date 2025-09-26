@@ -346,7 +346,7 @@ func (m *LetsEncryptModule) Constructor() modular.ModuleConstructor {
 		// Extract logger from services
 		logger, ok := services["logger"].(modular.Logger)
 		if !ok {
-			return nil, fmt.Errorf("required logger service not found or invalid type")
+			return nil, ErrLoggerServiceUnavailable
 		}
 
 		// Create new module instance with injected logger

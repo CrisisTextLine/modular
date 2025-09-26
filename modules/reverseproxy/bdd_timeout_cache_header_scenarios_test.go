@@ -25,9 +25,15 @@ func (ctx *ReverseProxyBDDTestContext) timeoutBehaviorShouldBeAppliedPerRoute() 
 
 	// Create a slow server that takes longer to respond
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second) // Slow response, should timeout with 500ms limit
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "Slow response from path: %s", r.URL.Path)
+		// Sleep for longer than timeout but check for context cancellation
+		select {
+		case <-time.After(2 * time.Second): // Slow response, should timeout with 500ms limit
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, "Slow response from path: %s", r.URL.Path)
+		case <-r.Context().Done():
+			// Request was cancelled/timed out
+			return
+		}
 	}))
 	ctx.testServers = append(ctx.testServers, slowServer)
 
@@ -92,14 +98,25 @@ func (ctx *ReverseProxyBDDTestContext) timeoutBehaviorShouldBeAppliedPerRoute() 
 	slowResp, err := ctx.makeRequestThroughModule("GET", "/slow/endpoint", nil)
 	slowDuration := time.Since(start)
 
+	// Debug output for per-route timeout
+	fmt.Printf("Slow route duration: %v, err: %v, status: %d\n", slowDuration, err, func() int {
+		if slowResp != nil {
+			return slowResp.StatusCode
+		}
+		return 0
+	}())
+
 	// Store results for further validation
 	ctx.lastError = err
 	ctx.lastResponse = slowResp
 
-	// The slow route should timeout because server takes 600ms but route timeout is 500ms
-	if err == nil && slowResp != nil && slowResp.StatusCode == http.StatusOK {
-		slowResp.Body.Close()
-		return fmt.Errorf("slow route should have timed out due to per-route timeout configuration")
+	// The slow route should timeout because server takes 2s but route timeout is 500ms
+	// Accept either an error or a 504 Gateway Timeout status as valid timeout behavior
+	if err == nil && (slowResp == nil || (slowResp.StatusCode != http.StatusGatewayTimeout && slowResp.StatusCode == http.StatusOK)) {
+		if slowResp != nil {
+			slowResp.Body.Close()
+		}
+		return fmt.Errorf("slow route should have timed out due to per-route override")
 	}
 
 	// Verify timeout occurred around the per-route timeout (500ms), not global (2s)

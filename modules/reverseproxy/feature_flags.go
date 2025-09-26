@@ -100,7 +100,7 @@ func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logg
 		)
 		// Validate that tenant-aware config was created successfully
 		if tenantAwareConfig == nil {
-			return nil, fmt.Errorf("failed to create tenant-aware config for feature flags")
+			return nil, ErrTenantAwareConfigCreation
 		}
 	} else {
 		// When no tenant service is available, we'll use defaultConfigProvider directly
@@ -145,14 +145,14 @@ func (f *FileBasedFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, flagID
 		config, ok = rawConfig.(*ReverseProxyConfig)
 		if !ok {
 			f.logger.DebugContext(ctx, "Configuration is not of expected type", "flag", flagID, "type", fmt.Sprintf("%T", rawConfig))
-			return false, fmt.Errorf("invalid configuration type for feature flag %s", flagID)
+			return false, fmt.Errorf("%w: %s", ErrInvalidFeatureFlagConfigType, flagID)
 		}
 	} else {
 		// Fall back to default config provider when no tenant service is available
 		f.logger.DebugContext(ctx, "Using default config provider (no tenant service available)", "flag", flagID)
 		if f.defaultConfigProvider == nil {
 			f.logger.DebugContext(ctx, "No default config provider available", "flag", flagID)
-			return false, fmt.Errorf("no configuration provider available for feature flag %s", flagID)
+			return false, fmt.Errorf("%w: %s", ErrNoFeatureFlagConfigProvider, flagID)
 		}
 
 		rawConfig := f.defaultConfigProvider.GetConfig()
@@ -165,7 +165,7 @@ func (f *FileBasedFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, flagID
 		config, ok = rawConfig.(*ReverseProxyConfig)
 		if !ok {
 			f.logger.DebugContext(ctx, "Default configuration is not of expected type", "flag", flagID, "type", fmt.Sprintf("%T", rawConfig))
-			return false, fmt.Errorf("invalid default configuration type for feature flag %s", flagID)
+			return false, fmt.Errorf("%w: %s", ErrInvalidDefaultFeatureFlagConfig, flagID)
 		}
 	}
 

@@ -337,6 +337,11 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 			logger,
 		)
 
+		// Set up event emitter for health checker
+		m.healthChecker.eventEmitter = func(eventType string, data map[string]interface{}) {
+			m.emitEvent(context.Background(), eventType, data) //nolint:contextcheck // module-level health events are not tied to a request context
+		}
+
 		// Set up circuit breaker provider for health checker
 		m.healthChecker.SetCircuitBreakerProvider(func(backendID string) *HealthCircuitBreakerInfo {
 			if cb, exists := m.circuitBreakers[backendID]; exists {
@@ -376,7 +381,7 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 			// Create circuit breaker for this backend
 			cb := NewCircuitBreakerWithConfig(backendID, cbConfig, m.metrics)
 			cb.eventEmitter = func(eventType string, data map[string]interface{}) {
-				m.emitEvent(context.Background(), eventType, data)
+				m.emitEvent(context.Background(), eventType, data) //nolint:contextcheck // circuit breaker transitions occur outside request scope
 			}
 			m.circuitBreakers[backendID] = cb
 
@@ -390,12 +395,12 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 	if m.healthChecker != nil {
 		m.healthChecker.SetEventEmitter(func(eventType string, data map[string]interface{}) {
 			// Use background context; health check events are operational
-			m.emitEvent(context.Background(), eventType, data)
+			m.emitEvent(context.Background(), eventType, data) //nolint:contextcheck // health checker emits operational telemetry without request context
 		})
 	}
 
 	// Emit config loaded event
-	m.emitEvent(context.Background(), EventTypeConfigLoaded, map[string]interface{}{
+	m.emitEvent(context.Background(), EventTypeConfigLoaded, map[string]interface{}{ //nolint:contextcheck // configuration lifecycle events have no request context
 		"backend_count":            len(m.config.BackendServices),
 		"composite_routes_count":   len(m.config.CompositeRoutes),
 		"circuit_breakers_enabled": len(m.circuitBreakers) > 0,
@@ -403,6 +408,11 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 		"cache_enabled":            m.config.CacheEnabled,
 		"request_timeout":          m.config.RequestTimeout.String(),
 	})
+
+	// Initialize response cache if caching is enabled
+	if err := m.setupResponseCache(); err != nil {
+		return fmt.Errorf("failed to setup response cache: %w", err)
+	}
 
 	// Mark initialization complete so subsequent dynamic backend additions emit events
 	m.initialized = true
@@ -538,7 +548,7 @@ func (m *ReverseProxyModule) Constructor() modular.ModuleConstructor {
 func (m *ReverseProxyModule) Start(ctx context.Context) error {
 	// Ensure configuration is loaded
 	if m.config == nil {
-		return fmt.Errorf("configuration not loaded - module may not be properly initialized")
+		return fmt.Errorf("%w: module may not be properly initialized", ErrConfigurationNotLoaded)
 	}
 
 	// Load tenant-specific configurations
@@ -1145,6 +1155,12 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 			}
 		}(routePath, backendID)
 
+		// Remember the handler for dynamic route resolution (especially for wildcard patterns)
+		if _, ok := m.backendRoutes[backendID]; !ok {
+			m.backendRoutes[backendID] = make(map[string]http.HandlerFunc)
+		}
+		m.backendRoutes[backendID][routePath] = handler
+
 		m.safeHandleFunc(routePath, handler)
 		registeredPaths[routePath] = true
 
@@ -1161,43 +1177,112 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 		}
 	}
 
-	// Register default backend as catch-all if specified and not already registered
+	// Register catch-all route if not already registered and a default backend is configured
 	if m.defaultBackend != "" && !registeredPaths["/*"] {
-		// Check if the default backend exists in the global proxy map
 		defaultProxy, exists := m.backendProxies[m.defaultBackend]
 		if !exists || defaultProxy == nil {
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Warn("Default backend configured but proxy not available", "backend", m.defaultBackend)
+			}
 			return nil
 		}
-
-		// Create a selective catch-all route handler that excludes health/metrics endpoints
 		handler := func(w http.ResponseWriter, r *http.Request) {
-			// Check if this is a health or metrics path that should not be proxied
+			// Exclude internal endpoints from proxying
 			if m.shouldExcludeFromProxy(r.URL.Path) {
-				// Let other handlers handle this (health/metrics endpoints)
 				http.NotFound(w, r)
 				return
 			}
 
-			// Check tenant header enforcement
+			// Enforce tenant header requirement before attempting resolution
 			_, hasTenant := TenantIDFromRequest(m.config.TenantIDHeader, r)
 			if m.config.RequireTenantID && !hasTenant {
 				http.Error(w, fmt.Sprintf("Header %s is required", m.config.TenantIDHeader), http.StatusBadRequest)
 				return
 			}
 
-			// Use the default backend proxy handler
-			backendHandler := m.createBackendProxyHandler(m.defaultBackend)
-			backendHandler(w, r)
+			// Try to match composite routes first
+			if compositeHandler, ok := m.findBestCompositeHandler(r.URL.Path); ok {
+				compositeHandler(w, r)
+				return
+			}
+
+			// Then try explicit route patterns (including wildcard patterns)
+			if pattern, ok := m.findBestRoutePattern(r.URL.Path, m.config.Routes); ok {
+				routeHandler := m.createTenantAwareHandler(pattern)
+				routeHandler(w, r)
+				return
+			}
+
+			// Fallback to default backend
+			h := m.createBackendProxyHandler(m.defaultBackend)
+			h(w, r)
 		}
 
-		// Register the selective catch-all default route
 		m.safeHandleFunc("/*", handler)
 		if m.app != nil && m.app.Logger() != nil {
-			m.app.Logger().Info("Registered selective catch-all route for default backend", "backend", m.defaultBackend)
+			m.app.Logger().Info("Registered catch-all route with default backend fallback", "backend", m.defaultBackend)
 		}
 	}
 
 	return nil
+}
+
+// findBestCompositeHandler returns the most specific composite route handler that matches the request path.
+// Specificity is determined by the longest matching pattern. If patterns have the same length, the first
+// encountered handler is used, which is acceptable because composite route keys are typically unique.
+func (m *ReverseProxyModule) findBestCompositeHandler(requestPath string) (http.HandlerFunc, bool) {
+	var (
+		selectedHandler http.HandlerFunc
+		selectedPattern string
+		matched         bool
+	)
+
+	for pattern, handler := range m.compositeRoutes {
+		if handler == nil {
+			continue
+		}
+		if !m.matchesRoute(requestPath, pattern) {
+			continue
+		}
+
+		if !matched || len(pattern) > len(selectedPattern) {
+			selectedHandler = handler
+			selectedPattern = pattern
+			matched = true
+		}
+	}
+
+	return selectedHandler, matched
+}
+
+// findBestRoutePattern identifies the most specific route pattern matching the request path across the provided
+// route maps. Earlier route maps take precedence when patterns are equally specific. This allows tenant-specific
+// routes to override global ones while still supporting wildcard matching.
+func (m *ReverseProxyModule) findBestRoutePattern(requestPath string, routeSets ...map[string]string) (string, bool) {
+	bestPattern := ""
+	bestLength := -1
+	bestPriority := len(routeSets)
+	matched := false
+
+	for priority, routes := range routeSets {
+		if routes == nil {
+			continue
+		}
+		for pattern := range routes {
+			if !m.matchesRoute(requestPath, pattern) {
+				continue
+			}
+			patternLength := len(pattern)
+			if !matched || patternLength > bestLength || (patternLength == bestLength && priority < bestPriority) {
+				bestPattern = pattern
+				bestLength = patternLength
+				bestPriority = priority
+				matched = true
+			}
+		}
+	}
+
+	return bestPattern, matched
 }
 
 // shouldExcludeFromProxy checks if a request path should be excluded from proxying
@@ -1339,15 +1424,29 @@ func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backe
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
 	// Emit proxy created event
-	m.emitEvent(context.Background(), EventTypeProxyCreated, map[string]interface{}{
+	m.emitEvent(context.Background(), EventTypeProxyCreated, map[string]interface{}{ //nolint:contextcheck // proxy creation occurs during module initialization
 		"backend_id": backendID,
 		"target_url": target.String(),
 		"endpoint":   endpoint,
 	})
 
-	// Use the module's custom transport if available
+	// Use the module's custom transport if available, otherwise set a default timeout-aware transport
 	if m.httpClient != nil && m.httpClient.Transport != nil {
 		proxy.Transport = m.httpClient.Transport
+	} else {
+		// Create a timeout-aware transport that respects request context
+		proxy.Transport = &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
+		}
 	}
 
 	// Store the original target for use in the director function
@@ -1450,6 +1549,9 @@ func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backe
 			strings.Contains(err.Error(), "no such host") ||
 			strings.Contains(err.Error(), "connection timeout") {
 			http.Error(w, "Backend service unavailable", http.StatusBadGateway)
+		} else if strings.Contains(err.Error(), "context deadline exceeded") ||
+			strings.Contains(err.Error(), "timeout") {
+			http.Error(w, "Gateway timeout", http.StatusGatewayTimeout)
 		} else {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
@@ -1494,7 +1596,7 @@ func (m *ReverseProxyModule) createBackendProxy(backendID, serviceURL string) er
 
 	// Emit backend added event only for dynamic additions after initialization
 	if m.initialized {
-		m.emitEvent(context.Background(), EventTypeBackendAdded, map[string]interface{}{
+		m.emitEvent(context.Background(), EventTypeBackendAdded, map[string]interface{}{ //nolint:contextcheck // backend mutations originate from administrative actions without request context
 			"backend": backendID,
 			"url":     serviceURL,
 			"time":    time.Now().UTC().Format(time.RFC3339Nano),
@@ -1514,8 +1616,16 @@ func (m *ReverseProxyModule) AddBackend(backendID, serviceURL string) error { //
 	if m.config.BackendServices == nil {
 		m.config.BackendServices = make(map[string]string)
 	}
-	if _, exists := m.config.BackendServices[backendID]; exists {
-		return fmt.Errorf("backend %s already exists", backendID)
+
+	// Track whether this is an update of an existing backend so we can log accordingly
+	if existingURL, exists := m.config.BackendServices[backendID]; exists {
+		if m.app != nil && m.app.Logger() != nil {
+			if existingURL != serviceURL {
+				m.app.Logger().Info("Updating backend service URL", "backend", backendID, "old", existingURL, "new", serviceURL)
+			} else {
+				m.app.Logger().Debug("Backend already configured with requested URL", "backend", backendID)
+			}
+		}
 	}
 
 	// Persist in config and create proxy (this will emit backend.added event because initialized=true)
@@ -1560,7 +1670,7 @@ func (m *ReverseProxyModule) RemoveBackend(backendID string) error { //nolint:ir
 
 	// Emit removal event
 	if m.initialized {
-		m.emitEvent(context.Background(), EventTypeBackendRemoved, map[string]interface{}{
+		m.emitEvent(context.Background(), EventTypeBackendRemoved, map[string]interface{}{ //nolint:contextcheck // backend removal triggered outside request path
 			"backend": backendID,
 			"url":     serviceURL,
 			"time":    time.Now().UTC().Format(time.RFC3339Nano),
@@ -1594,7 +1704,7 @@ func (m *ReverseProxyModule) selectBackendFromGroup(group string) (string, int, 
 	// Emit load balancing decision events if module initialized so tests can observe
 	if m.initialized {
 		// Generic decision event (once per selection)
-		m.emitEvent(context.Background(), EventTypeLoadBalanceDecision, map[string]interface{}{
+		m.emitEvent(context.Background(), EventTypeLoadBalanceDecision, map[string]interface{}{ //nolint:contextcheck // load balance telemetry is generated asynchronously
 			"group":            group,
 			"selected_backend": selected,
 			"index":            idx,
@@ -1602,7 +1712,7 @@ func (m *ReverseProxyModule) selectBackendFromGroup(group string) (string, int, 
 			"time":             time.Now().UTC().Format(time.RFC3339Nano),
 		})
 		// Round-robin specific event includes rotation information
-		m.emitEvent(context.Background(), EventTypeLoadBalanceRoundRobin, map[string]interface{}{
+		m.emitEvent(context.Background(), EventTypeLoadBalanceRoundRobin, map[string]interface{}{ //nolint:contextcheck // load balancer metrics sample outside request handling
 			"group":   group,
 			"backend": selected,
 			"index":   idx,
@@ -1980,84 +2090,125 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 				ExpectContinueTimeout: 1 * time.Second,
 			}
 
-			// Execute the request via circuit breaker
-			resp, err := cb.Execute(r, func(req *http.Request) (*http.Response, error) {
-				// Create a ResponseWriter wrapper to capture response
-				recorder := httptest.NewRecorder()
+			// Create a copy of the proxy with the timeout transport
+			proxyCopy := &httputil.ReverseProxy{
+				Director:       proxy.Director,
+				Transport:      timeoutTransport,
+				FlushInterval:  proxy.FlushInterval,
+				ErrorLog:       proxy.ErrorLog,
+				BufferPool:     proxy.BufferPool,
+				ModifyResponse: proxy.ModifyResponse,
+				ErrorHandler:   proxy.ErrorHandler,
+			}
 
-				// Create a copy of the proxy with the timeout transport
-				proxyCopy := &httputil.ReverseProxy{
-					Director:       proxy.Director,
-					Transport:      timeoutTransport,
-					FlushInterval:  proxy.FlushInterval,
-					ErrorLog:       proxy.ErrorLog,
-					BufferPool:     proxy.BufferPool,
-					ModifyResponse: proxy.ModifyResponse,
-					ErrorHandler:   proxy.ErrorHandler,
-				}
+			// Execute the request via circuit breaker with proper timeout handling
+			done := make(chan struct{})
+			var sw *statusCapturingResponseWriter
+			var cbErr error
+			var cbResp *http.Response
 
-				// Serve the request
-				proxyCopy.ServeHTTP(recorder, req)
+			go func() {
+				defer close(done)
+				sw = &statusCapturingResponseWriter{ResponseWriter: w, status: http.StatusOK}
+				// Use timeout-aware proxy directly to ensure real timeout behavior
+				cbResp, cbErr = cb.Execute(r, func(req *http.Request) (*http.Response, error) { //nolint:bodyclose // synthetic response carries no body and is explicitly closed after execution
+					proxyCopy.ServeHTTP(sw, req)
 
-				// Convert recorder to response
-				return recorder.Result(), nil
-			})
+					// Create response with captured status
+					resp := &http.Response{StatusCode: sw.status, Body: http.NoBody}
 
-			if errors.Is(err, ErrCircuitOpen) {
-				// Circuit is open, return service unavailable
-				if m.app != nil && m.app.Logger() != nil {
-					m.app.Logger().Warn("Circuit breaker open, denying request",
-						"backend", finalBackend, "tenant", tenantID, "path", r.URL.Path)
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusServiceUnavailable)
-				if _, err := w.Write([]byte(`{"error":"Service temporarily unavailable","code":"CIRCUIT_OPEN"}`)); err != nil {
-					if m.app != nil && m.app.Logger() != nil {
-						m.app.Logger().Error("Failed to write circuit breaker response", "error", err)
+					// Return error for failure status codes to trigger circuit breaker failure recording
+					if sw.status >= 500 {
+						return resp, fmt.Errorf("%w: %d", ErrBackendErrorStatus, sw.status)
+					}
+
+					return resp, nil
+				})
+			}()
+
+			// Wait for either completion or timeout
+			select {
+			case <-done:
+				if cbResp != nil && cbResp.Body != nil {
+					if err := cbResp.Body.Close(); err != nil && m.app != nil && m.app.Logger() != nil {
+						m.app.Logger().Warn("Failed to close circuit breaker response body", "error", err)
 					}
 				}
-				return
-			} else if err != nil {
-				// Some other error occurred
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				// Request completed
+				if errors.Is(cbErr, ErrCircuitOpen) {
+					// Circuit is open
+					if m.app != nil && m.app.Logger() != nil {
+						m.app.Logger().Warn("Circuit breaker open, denying request",
+							"backend", finalBackend, "tenant", tenantID, "path", r.URL.Path)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					if _, err := w.Write([]byte(`{"error":"Service temporarily unavailable","code":"CIRCUIT_OPEN"}`)); err != nil {
+						if m.app != nil && m.app.Logger() != nil {
+							m.app.Logger().Error("Failed to write circuit breaker response", "error", err)
+						}
+					}
+					return
+				} else if cbErr != nil {
+					// Some other error occurred
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					return
+				}
+			case <-r.Context().Done():
+				// Request timed out
+				http.Error(w, "Request timeout", http.StatusGatewayTimeout)
 				return
 			}
 
-			// Copy response to the original ResponseWriter
-			for k, vals := range resp.Header {
-				for _, v := range vals {
-					w.Header().Add(k, v)
+			// Emit success or failure event based on status code
+			if sw != nil {
+				if sw.status >= 400 {
+					m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+						"backend": backend,
+						"method":  r.Method,
+						"path":    r.URL.Path,
+						"status":  sw.status,
+						"error":   fmt.Sprintf("upstream returned status %d", sw.status),
+					})
+				} else {
+					m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+						"backend": backend,
+						"method":  r.Method,
+						"path":    r.URL.Path,
+						"status":  sw.status,
+					})
 				}
-			}
-			w.WriteHeader(resp.StatusCode)
-			if resp.Body != nil {
-				defer resp.Body.Close()
-				_, err := io.Copy(w, resp.Body)
-				if err != nil {
-					// Log error but continue processing
-					m.app.Logger().Error("Failed to copy response body", "error", err)
-				}
-			}
-
-			// Emit success or failure event based on status code (previously missing in circuit breaker path)
-			if resp.StatusCode >= 400 {
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
-					"backend": backend,
-					"method":  r.Method,
-					"path":    r.URL.Path,
-					"status":  resp.StatusCode,
-					"error":   fmt.Sprintf("upstream returned status %d", resp.StatusCode),
-				})
-			} else {
-				m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
-					"backend": backend,
-					"method":  r.Method,
-					"path":    r.URL.Path,
-					"status":  resp.StatusCode,
-				})
 			}
 		} else {
 			// No circuit breaker, use the proxy directly but capture status and apply timeout
+			// Ensure the proxy's transport is configured with the specific request timeout
+			if proxy.Transport != nil {
+				if transport, ok := proxy.Transport.(*http.Transport); ok {
+					// Clone the transport and update timeout settings for this request
+					transportCopy := transport.Clone()
+					transportCopy.ResponseHeaderTimeout = requestTimeout
+					transportCopy.DialContext = (&net.Dialer{
+						Timeout:   requestTimeout,
+						KeepAlive: 30 * time.Second,
+					}).DialContext
+					proxy.Transport = transportCopy
+				}
+			} else {
+				// Set a timeout-aware transport if none exists
+				proxy.Transport = &http.Transport{
+					DialContext: (&net.Dialer{
+						Timeout:   requestTimeout,
+						KeepAlive: 30 * time.Second,
+					}).DialContext,
+					TLSHandshakeTimeout:   10 * time.Second,
+					ResponseHeaderTimeout: requestTimeout,
+					ExpectContinueTimeout: 1 * time.Second,
+					MaxIdleConns:          100,
+					MaxIdleConnsPerHost:   10,
+					IdleConnTimeout:       90 * time.Second,
+				}
+			}
+
 			// Create a timeout context for the request
 			done := make(chan struct{})
 			var sw *statusCapturingResponseWriter
@@ -2129,7 +2280,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 			// Create new circuit breaker with config and store for reuse
 			cb = NewCircuitBreakerWithConfig(backend, cbConfig, m.metrics)
 			cb.eventEmitter = func(eventType string, data map[string]interface{}) {
-				m.emitEvent(context.Background(), eventType, data)
+				m.emitEvent(context.Background(), eventType, data) //nolint:contextcheck // circuit breaker events occur outside request handling
 			}
 			m.circuitBreakers[backend] = cb
 		}
@@ -2945,7 +3096,7 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 				if tenantCfg.Routes != nil {
 					if backendID, ok := tenantCfg.Routes[path]; ok {
 						// Use tenant-specific backend for this path
-						handler := m.createBackendProxyHandlerForTenant(tenantID, backendID)
+						handler := m.createBackendProxyHandlerForTenant(tenantID, backendID) //nolint:contextcheck // handler captures request context via *http.Request
 						handler(w, r)
 						return
 					}
@@ -2989,7 +3140,7 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 			if tenantCfg, exists := m.tenants[tenantID]; exists && tenantCfg != nil {
 				// Check if tenant has default backend
 				if tenantCfg.DefaultBackend != "" {
-					handler := m.createBackendProxyHandlerForTenant(tenantID, tenantCfg.DefaultBackend)
+					handler := m.createBackendProxyHandlerForTenant(tenantID, tenantCfg.DefaultBackend) //nolint:contextcheck // tenant handler leverages request context
 					handler(w, r)
 					return
 				}
@@ -3004,7 +3155,7 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 					if m.app != nil && m.app.Logger() != nil {
 						m.app.Logger().Info("Using tenant-aware global default backend", "backend", m.defaultBackend, "tenant", tenantIDStr)
 					}
-					handler := m.createBackendProxyHandlerForTenant(modular.TenantID(tenantIDStr), m.defaultBackend)
+					handler := m.createBackendProxyHandlerForTenant(modular.TenantID(tenantIDStr), m.defaultBackend) //nolint:contextcheck // handler obtains context from incoming request
 					handler(w, r)
 					return
 				} else {
@@ -3048,7 +3199,7 @@ func (m *ReverseProxyModule) createTenantAwareCatchAllHandler() http.HandlerFunc
 					if m.app != nil && m.app.Logger() != nil {
 						m.app.Logger().Debug("Using tenant default backend", "tenant", tenantID, "backend", tenantCfg.DefaultBackend)
 					}
-					handler := m.createBackendProxyHandlerForTenant(tenantID, tenantCfg.DefaultBackend)
+					handler := m.createBackendProxyHandlerForTenant(tenantID, tenantCfg.DefaultBackend) //nolint:contextcheck // tenant default handler reuses request context
 					handler(w, r)
 					return
 				}
@@ -3186,8 +3337,8 @@ func (m *ReverseProxyModule) withCache(handler http.HandlerFunc, backend string)
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Get effective config (considering tenant overrides)
 		effectiveConfig := m.getEffectiveConfigForRequest(r)
-		if effectiveConfig == nil || !effectiveConfig.CacheEnabled {
-			// Caching disabled for this request
+		if effectiveConfig == nil || !effectiveConfig.CacheEnabled || m.responseCache == nil {
+			// Caching disabled for this request or cache not initialized
 			handler(w, r)
 			return
 		}
@@ -3211,7 +3362,11 @@ func (m *ReverseProxyModule) withCache(handler http.HandlerFunc, backend string)
 			}
 			w.Header().Set("X-Cache", "HIT")
 			w.WriteHeader(cachedResp.StatusCode)
-			w.Write(cachedResp.Body)
+			if _, err := w.Write(cachedResp.Body); err != nil {
+				if m.app != nil && m.app.Logger() != nil {
+					m.app.Logger().Error("Failed to write cached response body", "error", err)
+				}
+			}
 			return
 		}
 
@@ -3239,7 +3394,11 @@ func (m *ReverseProxyModule) withCache(handler http.HandlerFunc, backend string)
 		}
 		w.Header().Set("X-Cache", "MISS")
 		w.WriteHeader(recorder.statusCode)
-		w.Write(recorder.body)
+		if _, err := w.Write(recorder.body); err != nil {
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Error("Failed to write proxied response body", "error", err)
+			}
+		}
 	}
 }
 
@@ -3299,15 +3458,20 @@ type cacheResponseRecorder struct {
 
 func (r *cacheResponseRecorder) WriteHeader(statusCode int) {
 	r.statusCode = statusCode
-	// Copy headers
-	for key, values := range r.ResponseWriter.Header() {
+	// Copy headers from the underlying response writer
+	for key, values := range r.Header() {
 		r.headers[key] = values
 	}
 }
 
 func (r *cacheResponseRecorder) Write(data []byte) (int, error) {
+	// Capture the data for caching
 	r.body = append(r.body, data...)
 	return len(data), nil
+}
+
+func (r *cacheResponseRecorder) Header() http.Header {
+	return r.ResponseWriter.Header()
 }
 
 // GetBackendHealthStatus returns the health status of a specific backend.
@@ -3366,9 +3530,29 @@ func (m *ReverseProxyModule) getAlternativeBackend(alternativeBackend string) st
 // handleDryRunRequest processes a request with dry run enabled, sending it to both backends
 // and returning the response from the appropriate backend based on configuration.
 func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, routeConfig RouteConfig, primaryBackend, secondaryBackend string) {
+	// Emit request received event for dry run
+	m.emitEvent(ctx, EventTypeRequestReceived, map[string]interface{}{
+		"method":        r.Method,
+		"path":          r.URL.Path,
+		"backend":       primaryBackend,
+		"dryRunBackend": secondaryBackend,
+		"dryRun":        true,
+		"remote_addr":   r.RemoteAddr,
+	})
+
 	if m.dryRunHandler == nil {
 		// Dry run not initialized, fall back to regular handling
 		m.app.Logger().Warn("Dry run requested but handler not initialized, falling back to regular handling")
+
+		// Emit request failed event for dry run handler not available
+		m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
+			"method":  r.Method,
+			"path":    r.URL.Path,
+			"backend": primaryBackend,
+			"error":   "dry run handler not initialized",
+			"reason":  "handler_not_available",
+		})
+
 		if primaryBackend == "composite" {
 			// Handle composite route specially
 			m.app.Logger().Debug("Dry run fallback for composite route not available, returning 503")
@@ -3423,6 +3607,17 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 
 	// Send request to the return backend and capture response
 	returnHandler(recorder, returnRequest)
+
+	// Emit request processed event for successful dry run processing
+	m.emitEvent(ctx, EventTypeRequestProcessed, map[string]interface{}{
+		"method":          r.Method,
+		"path":            r.URL.Path,
+		"backend":         returnBackend,
+		"dryRunBackend":   secondaryBackend,
+		"statusCode":      recorder.Code,
+		"dryRun":          true,
+		"returnedBackend": returnBackend,
+	})
 
 	// Copy the recorded response to the original response writer
 	// Copy headers
@@ -3486,6 +3681,21 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 
 		// Add nil checks before accessing result fields
 		if result != nil && !isEmptyComparisonResult(result.Comparison) {
+			// Emit dry run comparison event
+			m.emitEvent(requestCtx, EventTypeDryRunComparison, map[string]interface{}{
+				"endpoint":         endpointPath,
+				"primaryBackend":   primaryBackend,
+				"secondaryBackend": secondaryBackend,
+				"returnedBackend":  returnBackend,
+				"statusCodeMatch":  result.Comparison.StatusCodeMatch,
+				"bodyMatch":        result.Comparison.BodyMatch,
+				"headersMatch":     result.Comparison.HeadersMatch,
+				"differences":      len(result.Comparison.Differences),
+				"primaryStatus":    result.PrimaryResponse.StatusCode,
+				"secondaryStatus":  result.SecondaryResponse.StatusCode,
+				"timestamp":        result.Timestamp,
+			})
+
 			if m.app != nil && m.app.Logger() != nil {
 				m.app.Logger().Debug("Dry run comparison completed",
 					"endpoint", endpointPath,
@@ -3621,6 +3831,8 @@ func (m *ReverseProxyModule) GetRegisteredEventTypes() []string {
 		EventTypeRequestReceived,
 		EventTypeRequestProxied,
 		EventTypeRequestFailed,
+		EventTypeRequestProcessed,
+		EventTypeDryRunComparison,
 		EventTypeBackendHealthy,
 		EventTypeBackendUnhealthy,
 		EventTypeBackendAdded,

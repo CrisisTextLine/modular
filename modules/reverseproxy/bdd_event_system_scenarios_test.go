@@ -2,11 +2,7 @@ package reverseproxy
 
 import (
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"time"
-
-	"github.com/CrisisTextLine/modular"
 )
 
 // Event System BDD Step Implementations
@@ -14,89 +10,33 @@ import (
 
 // circuitBreakerBehaviorShouldBeIsolatedPerBackend validates per-backend circuit breaker isolation
 func (ctx *ReverseProxyBDDTestContext) circuitBreakerBehaviorShouldBeIsolatedPerBackend() error {
-	// Set up multiple backends with circuit breakers
-	ctx.resetContext()
+	// Use the existing configuration set up by differentBackendsFailAtDifferentRates()
+	// which should have configured failing-backend, intermittent-backend, and healthy-backend
 
-	// Create application with reverse proxy config - use ObservableApplication for event support
-	logger := &testLogger{}
-	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
-	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
-
-	// Apply per-app empty feeders to avoid mutating global modular.ConfigFeeders
-	if cfSetter, ok := ctx.app.(interface{ SetConfigFeeders([]modular.Feeder) }); ok {
-		cfSetter.SetConfigFeeders([]modular.Feeder{})
+	if ctx.service == nil {
+		return fmt.Errorf("service not available - ensure previous steps set up the service")
 	}
 
-	// Register router service
-	mockRouter := &testRouter{routes: make(map[string]http.HandlerFunc)}
-	ctx.app.RegisterService("router", mockRouter)
-
-	// Create two backend servers - one working, one failing
-	workingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("working backend"))
-	}))
-	ctx.testServers = append(ctx.testServers, workingServer)
-
-	failingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("failing backend"))
-	}))
-	ctx.testServers = append(ctx.testServers, failingServer)
-
-	// Configure reverse proxy with both backends and circuit breakers
-	ctx.config = &ReverseProxyConfig{
-		BackendServices: map[string]string{
-			"working-backend": workingServer.URL,
-			"failing-backend": failingServer.URL,
-		},
-		Routes: map[string]string{
-			"/working/*": "working-backend",
-			"/failing/*": "failing-backend",
-		},
-		DefaultBackend:       "working-backend",
-		CircuitBreakerConfig: CircuitBreakerConfig{Enabled: true, FailureThreshold: 2, OpenTimeout: 100 * time.Millisecond},
-	}
-
-	// Create and setup module
-	ctx.module = NewModule()
-	ctx.service = ctx.module
-	ctx.eventObserver = newTestEventObserver()
-
-	// Register observer before module to capture all events
-	if err := ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
-		return fmt.Errorf("failed to register test observer: %w", err)
-	}
-
-	ctx.app.RegisterModule(ctx.module)
-
-	// Register config
-	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
-	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
-
-	// Initialize and start
-	if err := ctx.app.Init(); err != nil {
-		return fmt.Errorf("failed to initialize app: %v", err)
-	}
-
-	if err := ctx.app.Start(); err != nil {
-		return fmt.Errorf("failed to start app: %v", err)
+	if ctx.eventObserver == nil {
+		return fmt.Errorf("event observer not available - ensure previous steps set up event observation")
 	}
 
 	// Clear events to focus on circuit breaker isolation test
 	ctx.eventObserver.ClearEvents()
 
 	// Make requests to failing backend to trigger its circuit breaker
-	for i := 0; i < 3; i++ {
-		resp, err := ctx.makeRequestThroughModule("GET", "/failing/test", nil)
+	// Use the routes configured by differentBackendsFailAtDifferentRates(): /api/fail -> failing-backend
+	for i := 0; i < 5; i++ { // Make 5 requests (threshold is 2, so this should trigger circuit breaker)
+		resp, err := ctx.makeRequestThroughModule("GET", "/api/fail", nil)
 		if err == nil && resp != nil {
 			resp.Body.Close()
 		}
-		time.Sleep(10 * time.Millisecond) // Small delay between requests
+		time.Sleep(20 * time.Millisecond) // Small delay between requests
 	}
 
-	// Make request to working backend (should still work)
-	resp, err := ctx.makeRequestThroughModule("GET", "/working/test", nil)
+	// Make request to healthy backend (should still work)
+	// Use /api/healthy -> healthy-backend
+	resp, err := ctx.makeRequestThroughModule("GET", "/api/healthy", nil)
 	if err == nil && resp != nil {
 		resp.Body.Close()
 	}
@@ -128,7 +68,7 @@ func (ctx *ReverseProxyBDDTestContext) circuitBreakerBehaviorShouldBeIsolatedPer
 				continue
 			}
 			backend, hasBackend := data["backend"]
-			if hasBackend && backend == "working-backend" {
+			if hasBackend && backend == "healthy-backend" {
 				workingBackendUnaffected = true
 			}
 		}
@@ -139,7 +79,7 @@ func (ctx *ReverseProxyBDDTestContext) circuitBreakerBehaviorShouldBeIsolatedPer
 	}
 
 	if !workingBackendUnaffected {
-		return fmt.Errorf("expected working-backend to remain unaffected by failing-backend's circuit breaker")
+		return fmt.Errorf("expected healthy-backend to remain unaffected by failing-backend's circuit breaker")
 	}
 
 	return nil

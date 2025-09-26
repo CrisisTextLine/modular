@@ -1240,10 +1240,22 @@ func (ctx *ReverseProxyBDDTestContext) backendRequestsExceedTheTimeout() error {
 		return fmt.Errorf("failed to setup application: %w", err)
 	}
 
+	// Debug: show configuration before making request
+	fmt.Printf("Routes: %+v\n", ctx.config.Routes)
+	fmt.Printf("BackendServices: %+v\n", ctx.config.BackendServices)
+
 	// Make a request that should timeout
 	start := time.Now()
 	resp, err := ctx.makeRequestThroughModule("GET", "/slow/endpoint", nil)
 	duration := time.Since(start)
+
+	// Debug output
+	fmt.Printf("Global timeout test - Request duration: %v, err: %v, status: %d\n", duration, err, func() int {
+		if resp != nil {
+			return resp.StatusCode
+		}
+		return 0
+	}())
 
 	// Store the error and response for verification
 	ctx.lastError = err
@@ -1254,12 +1266,17 @@ func (ctx *ReverseProxyBDDTestContext) backendRequestsExceedTheTimeout() error {
 		return fmt.Errorf("request duration %v doesn't match expected timeout of ~1s", duration)
 	}
 
-	// The request should have failed due to timeout
-	if err == nil {
+	// The request should have timed out (either with error or 504 status)
+	if err == nil && (resp == nil || resp.StatusCode != http.StatusGatewayTimeout) {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		return fmt.Errorf("request should have timed out but succeeded")
+		return fmt.Errorf("request should have timed out but succeeded with status %d", func() int {
+			if resp != nil {
+				return resp.StatusCode
+			}
+			return 0
+		}())
 	}
 
 	return nil
@@ -1267,24 +1284,36 @@ func (ctx *ReverseProxyBDDTestContext) backendRequestsExceedTheTimeout() error {
 
 func (ctx *ReverseProxyBDDTestContext) requestsShouldBeTerminatedAfterTimeout() error {
 	// Verify that requests are properly terminated after timeout
-	if ctx.lastError == nil {
-		return fmt.Errorf("expected request to timeout and be terminated, but no error was recorded")
-	}
-
-	// Check that the error indicates a timeout termination
-	errorStr := ctx.lastError.Error()
-	timeoutKeywords := []string{"timeout", "deadline exceeded", "context deadline exceeded", "i/o timeout", "canceled", "terminated"}
+	// Accept either an error OR a 504 Gateway Timeout status as valid timeout indication
 	timeoutDetected := false
 
-	for _, keyword := range timeoutKeywords {
-		if contains(strings.ToLower(errorStr), keyword) {
-			timeoutDetected = true
-			break
+	if ctx.lastError != nil {
+		// Check that the error indicates a timeout termination
+		errorStr := ctx.lastError.Error()
+		timeoutKeywords := []string{"timeout", "deadline exceeded", "context deadline exceeded", "i/o timeout", "canceled", "terminated"}
+
+		for _, keyword := range timeoutKeywords {
+			if contains(strings.ToLower(errorStr), keyword) {
+				timeoutDetected = true
+				break
+			}
 		}
+	} else if ctx.lastResponse != nil && ctx.lastResponse.StatusCode == http.StatusGatewayTimeout {
+		// 504 Gateway Timeout is a valid timeout indication
+		timeoutDetected = true
 	}
 
 	if !timeoutDetected {
-		return fmt.Errorf("request error doesn't indicate proper timeout termination: %s", errorStr)
+		if ctx.lastError != nil {
+			return fmt.Errorf("request error doesn't indicate proper timeout termination: %s", ctx.lastError.Error())
+		} else {
+			return fmt.Errorf("expected request to timeout (504 status or error), but got status %d", func() int {
+				if ctx.lastResponse != nil {
+					return ctx.lastResponse.StatusCode
+				}
+				return 0
+			}())
+		}
 	}
 
 	// Verify that any response received is not a successful completion
@@ -1312,10 +1341,15 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithPerRouteTimeoutOver
 	ctx.testServers = append(ctx.testServers, fastServer)
 
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Slow response
-		time.Sleep(300 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("slow backend response"))
+		// Slow response with context cancellation support
+		select {
+		case <-time.After(300 * time.Millisecond):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("slow backend response"))
+		case <-r.Context().Done():
+			// Request was cancelled/timed out
+			return
+		}
 	}))
 	ctx.testServers = append(ctx.testServers, slowServer)
 

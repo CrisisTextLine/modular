@@ -273,7 +273,7 @@ func (d *DebugHandler) HandleInfo(w http.ResponseWriter, r *http.Request) {
 			healthStatuses := hc.GetHealthStatus()
 			for backendID, status := range healthStatuses {
 				// Determine overall status
-				healthStatus := "unknown"
+				var healthStatus string
 				if status.HealthCheckPassing {
 					if status.CircuitBreakerOpen {
 						healthStatus = "health_check_passing_but_circuit_open"
@@ -419,7 +419,7 @@ func (d *DebugHandler) HandleHealthChecks(w http.ResponseWriter, r *http.Request
 	for _, hc := range d.healthCheckers {
 		for backendID, status := range hc.GetHealthStatus() {
 			// Extract comprehensive health status information
-			healthStatus := "unknown"
+			var healthStatus string
 			if status.HealthCheckPassing {
 				if status.CircuitBreakerOpen {
 					healthStatus = "health_check_passing_but_circuit_open"

@@ -293,13 +293,13 @@ func (ctx *ReverseProxyBDDTestContext) cloudEventsShouldShowRequestReceivedAndFa
 		eventType := event.Type()
 
 		switch eventType {
-		case "request.received":
+		case EventTypeRequestReceived:
 			requestReceivedFound = true
-		case "request.failed":
+		case EventTypeRequestFailed:
 			requestFailedFound = true
-		case "request.processed":
+		case EventTypeRequestProcessed:
 			requestProcessedFound = true
-		case "dry-run.comparison":
+		case EventTypeDryRunComparison:
 			dryRunFound = true
 		}
 	}
@@ -321,13 +321,13 @@ func (ctx *ReverseProxyBDDTestContext) cloudEventsShouldShowRequestReceivedAndFa
 			eventType := event.Type()
 
 			switch eventType {
-			case "request.received":
+			case EventTypeRequestReceived:
 				requestReceivedFound = true
-			case "request.failed":
+			case EventTypeRequestFailed:
 				requestFailedFound = true
-			case "request.processed":
+			case EventTypeRequestProcessed:
 				requestProcessedFound = true
-			case "dry-run.comparison":
+			case EventTypeDryRunComparison:
 				dryRunFound = true
 			}
 		}

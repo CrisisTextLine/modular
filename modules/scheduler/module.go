@@ -515,7 +515,7 @@ func (m *SchedulerModule) getPersistenceHandler() (PersistenceHandler, error) {
 		}
 		return m.config.PersistenceHandler, nil
 	default:
-		return nil, fmt.Errorf("unknown persistence backend: %s", m.config.PersistenceBackend)
+		return nil, fmt.Errorf("%w: %s", ErrUnknownPersistenceBackend, m.config.PersistenceBackend)
 	}
 }
 

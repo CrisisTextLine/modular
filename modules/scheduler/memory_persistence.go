@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 )
 
@@ -39,7 +40,7 @@ func (h *MemoryPersistenceHandler) Save(jobs []Job) error {
 	// Marshal to JSON
 	data, err := json.Marshal(persistedData)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal scheduler jobs to JSON: %w", err)
 	}
 
 	h.data = data
@@ -61,7 +62,7 @@ func (h *MemoryPersistenceHandler) Load() ([]Job, error) {
 	}
 
 	if err := json.Unmarshal(h.data, &persistedData); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal scheduler jobs from JSON: %w", err)
 	}
 
 	// Clear JobFunc from loaded jobs (will be reinitialized when job is resumed)

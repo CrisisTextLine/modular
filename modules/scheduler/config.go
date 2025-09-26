@@ -7,7 +7,8 @@ import (
 
 // Persistence errors
 var (
-	ErrNoPersistenceHandler = errors.New("no persistence handler configured")
+	ErrNoPersistenceHandler      = errors.New("no persistence handler configured")
+	ErrUnknownPersistenceBackend = errors.New("unknown persistence backend")
 )
 
 // PersistenceBackend defines the type of persistence backend to use

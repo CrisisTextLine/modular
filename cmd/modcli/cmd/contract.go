@@ -410,13 +410,13 @@ func formatDiffAsText(diff *contract.ContractDiff) (string, error) {
 func runGitDiffContractWithFlags(cmd *cobra.Command, args []string, outputFile, outputFormat string, ignorePositions, ignoreComments, verbose bool, baseline, versionPattern string) error {
 	// Import git helper
 	gitHelper := git.NewGitHelper(".")
-	
+
 	if verbose {
 		fmt.Fprintf(os.Stderr, "Using git diff for contract comparison\n")
 	}
 
 	var oldRef, newRef, packagePath string
-	
+
 	// Parse arguments based on how many were provided
 	switch len(args) {
 	case 0:
@@ -502,7 +502,7 @@ func runGitDiffContractWithFlags(cmd *cobra.Command, args []string, outputFile, 
 		} else {
 			newContract, err = extractor.ExtractFromPackage(targetPath)
 		}
-		
+
 		if err != nil {
 			return fmt.Errorf("failed to extract contract from working directory: %w", err)
 		}
@@ -574,7 +574,7 @@ func runListTagsWithFlags(cmd *cobra.Command, args []string, versionPattern stri
 	}
 
 	gitHelper := git.NewGitHelper(packagePath)
-	
+
 	if !gitHelper.IsGitRepository() {
 		return fmt.Errorf("not a git repository: %s", packagePath)
 	}
@@ -608,5 +608,3 @@ func runListTagsWithFlags(cmd *cobra.Command, args []string, versionPattern stri
 
 	return nil
 }
-
-

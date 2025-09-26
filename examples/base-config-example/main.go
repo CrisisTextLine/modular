@@ -11,11 +11,11 @@ import (
 
 // AppConfig represents our application configuration
 type AppConfig struct {
-	AppName    string            `yaml:"app_name"`
-	Environment string           `yaml:"environment"`
-	Database   DatabaseConfig    `yaml:"database"`
-	Features   map[string]bool   `yaml:"features"`
-	Server     ServerConfig      `yaml:"server"`
+	AppName          string                 `yaml:"app_name"`
+	Environment      string                 `yaml:"environment"`
+	Database         DatabaseConfig         `yaml:"database"`
+	Features         map[string]bool        `yaml:"features"`
+	Server           ServerConfig           `yaml:"server"`
 	ExternalServices ExternalServicesConfig `yaml:"external_services"`
 }
 
@@ -60,19 +60,19 @@ func main() {
 	fmt.Printf("Running in environment: %s\n", environment)
 	fmt.Println()
 
-	// Set up base configuration support  
+	// Set up base configuration support
 	modular.SetBaseConfig("config", environment)
 
 	// Create application configuration
 	config := &AppConfig{}
 	configProvider := modular.NewStdConfigProvider(config)
-	
+
 	// Create logger (simple console logger for this example)
 	logger := &ConsoleLogger{}
 
 	// Create and initialize the application
 	app := modular.NewStdApplication(configProvider, logger)
-	
+
 	if err := app.Init(); err != nil {
 		log.Fatalf("Failed to initialize application: %v", err)
 	}
@@ -87,7 +87,7 @@ func getEnvironment() string {
 	if len(os.Args) > 1 {
 		return os.Args[1]
 	}
-	
+
 	// Check environment variables
 	if env := os.Getenv("APP_ENVIRONMENT"); env != "" {
 		return env
@@ -98,7 +98,7 @@ func getEnvironment() string {
 	if env := os.Getenv("ENV"); env != "" {
 		return env
 	}
-	
+
 	// Default to development
 	return "dev"
 }
@@ -109,7 +109,7 @@ func displayConfiguration(config *AppConfig, environment string) {
 	fmt.Printf("App Name: %s\n", config.AppName)
 	fmt.Printf("Environment: %s\n", config.Environment)
 	fmt.Println()
-	
+
 	fmt.Println("Database:")
 	fmt.Printf("  Host: %s\n", config.Database.Host)
 	fmt.Printf("  Port: %d\n", config.Database.Port)
@@ -117,14 +117,14 @@ func displayConfiguration(config *AppConfig, environment string) {
 	fmt.Printf("  Username: %s\n", config.Database.Username)
 	fmt.Printf("  Password: %s\n", maskPassword(config.Database.Password))
 	fmt.Println()
-	
+
 	fmt.Println("Server:")
 	fmt.Printf("  Host: %s\n", config.Server.Host)
 	fmt.Printf("  Port: %d\n", config.Server.Port)
 	fmt.Printf("  Timeout: %d seconds\n", config.Server.Timeout)
 	fmt.Printf("  Max Connections: %d\n", config.Server.MaxConnections)
 	fmt.Println()
-	
+
 	fmt.Println("Features:")
 	for feature, enabled := range config.Features {
 		status := "disabled"
@@ -134,9 +134,9 @@ func displayConfiguration(config *AppConfig, environment string) {
 		fmt.Printf("  %s: %s\n", feature, status)
 	}
 	fmt.Println()
-	
+
 	fmt.Println("External Services:")
-	fmt.Printf("  Redis: %s (Host: %s:%d)\n", 
+	fmt.Printf("  Redis: %s (Host: %s:%d)\n",
 		enabledStatus(config.ExternalServices.Redis.Enabled),
 		config.ExternalServices.Redis.Host,
 		config.ExternalServices.Redis.Port)
@@ -145,7 +145,7 @@ func displayConfiguration(config *AppConfig, environment string) {
 		config.ExternalServices.RabbitMQ.Host,
 		config.ExternalServices.RabbitMQ.Port)
 	fmt.Println()
-	
+
 	// Show configuration summary
 	showConfigurationSummary(environment, config)
 }
@@ -172,7 +172,7 @@ func enabledStatus(enabled bool) string {
 func showConfigurationSummary(environment string, config *AppConfig) {
 	fmt.Println("=== Configuration Summary ===")
 	fmt.Printf("Environment: %s\n", environment)
-	
+
 	// Count enabled features
 	enabledFeatures := 0
 	for _, enabled := range config.Features {
@@ -181,7 +181,7 @@ func showConfigurationSummary(environment string, config *AppConfig) {
 		}
 	}
 	fmt.Printf("Enabled Features: %d/%d\n", enabledFeatures, len(config.Features))
-	
+
 	// Count enabled external services
 	enabledServices := 0
 	totalServices := 2
@@ -192,7 +192,7 @@ func showConfigurationSummary(environment string, config *AppConfig) {
 		enabledServices++
 	}
 	fmt.Printf("Enabled External Services: %d/%d\n", enabledServices, totalServices)
-	
+
 	fmt.Printf("Database Host: %s\n", config.Database.Host)
 	fmt.Printf("Server Port: %d\n", config.Server.Port)
 }

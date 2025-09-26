@@ -529,7 +529,7 @@ func (e *Extractor) extractCommentForPos(file *ast.File, fset *token.FileSet, po
 		if n == nil {
 			return false
 		}
-		
+
 		// Check if this node contains our position
 		if n.Pos() <= pos && pos < n.End() {
 			switch node := n.(type) {
@@ -554,7 +554,7 @@ func (e *Extractor) extractCommentForPos(file *ast.File, fset *token.FileSet, po
 		}
 		return true
 	})
-	
+
 	return strings.TrimSpace(result)
 }
 
@@ -562,14 +562,14 @@ func (e *Extractor) extractReceiverInfo(field *ast.Field) *ReceiverInfo {
 	if field == nil || field.Type == nil {
 		return nil
 	}
-	
+
 	receiverInfo := &ReceiverInfo{}
-	
+
 	// Get receiver name if available
 	if len(field.Names) > 0 {
 		receiverInfo.Name = field.Names[0].Name
 	}
-	
+
 	// Determine if it's a pointer and get the type
 	switch t := field.Type.(type) {
 	case *ast.StarExpr:
@@ -579,7 +579,7 @@ func (e *Extractor) extractReceiverInfo(field *ast.Field) *ReceiverInfo {
 		receiverInfo.Pointer = false
 		receiverInfo.Type = e.typeToString(t)
 	}
-	
+
 	return receiverInfo
 }
 
@@ -587,12 +587,12 @@ func (e *Extractor) extractParameterList(fieldList *ast.FieldList) []ParameterIn
 	if fieldList == nil {
 		return nil
 	}
-	
+
 	var parameters []ParameterInfo
-	
+
 	for _, field := range fieldList.List {
 		typeStr := e.typeToString(field.Type)
-		
+
 		if len(field.Names) > 0 {
 			// Named parameters
 			for _, name := range field.Names {
@@ -608,7 +608,7 @@ func (e *Extractor) extractParameterList(fieldList *ast.FieldList) []ParameterIn
 			})
 		}
 	}
-	
+
 	return parameters
 }
 
@@ -616,7 +616,7 @@ func (e *Extractor) typeToString(expr ast.Expr) string {
 	if expr == nil {
 		return ""
 	}
-	
+
 	switch t := expr.(type) {
 	case *ast.Ident:
 		return t.Name
@@ -668,7 +668,7 @@ func (e *Extractor) exprToString(expr ast.Expr) string {
 func (e *Extractor) funcTypeToString(ft *ast.FuncType) string {
 	var parts []string
 	parts = append(parts, "func")
-	
+
 	if ft.Params != nil {
 		var params []string
 		for _, field := range ft.Params.List {
@@ -685,7 +685,7 @@ func (e *Extractor) funcTypeToString(ft *ast.FuncType) string {
 	} else {
 		parts = append(parts, "()")
 	}
-	
+
 	if ft.Results != nil && len(ft.Results.List) > 0 {
 		var results []string
 		for _, field := range ft.Results.List {
@@ -704,7 +704,7 @@ func (e *Extractor) funcTypeToString(ft *ast.FuncType) string {
 			parts = append(parts, " ("+strings.Join(results, ", ")+")")
 		}
 	}
-	
+
 	return strings.Join(parts, "")
 }
 

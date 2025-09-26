@@ -8,11 +8,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Testing Commands
 - **Run core tests**: `go test ./... -v`
+- **Run core tests with race detection**: `go test -race -v ./...`
 - **Run module tests**: `for module in modules/*/; do [ -f "$module/go.mod" ] && (cd "$module" && go test ./... -v); done`
+- **Run module tests with race detection**: `for module in modules/*/; do [ -f "$module/go.mod" ] && (cd "$module" && go test -race -v ./...); done`
 - **Run example tests**: `for example in examples/*/; do [ -f "$example/go.mod" ] && (cd "$example" && go test ./... -v); done`
 - **Run CLI tests**: `cd cmd/modcli && go test ./... -v`
 - **Format code**: `go fmt ./...`
 - **Lint code**: `golangci-lint run`
+
+#### Enhanced Testing for test-runner Agent
+When using the test-runner agent or running comprehensive test verification, always:
+
+1. **Use race detection**: Add `-race` flag to catch race conditions
+2. **Capture full output**: Don't limit output with `head`/`tail` - analyze complete results
+3. **Look for panic indicators**:
+   - "panic:" strings in output
+   - "runtime error:" messages
+   - Stack traces with "runtime.gopanic"
+   - "WARNING:" messages indicating recovered panics
+4. **Check for systemic failures**: Multiple tests failing with same error pattern indicates structural issues
+5. **Verify BDD scenarios**: Ensure BDD tests execute logic rather than fail fast with initialization errors
+6. **Calculate pass rates**: Provide clear metrics on test health (e.g., "366 passing, 33 failing = 92% pass rate")
+7. **Distinguish infrastructure vs business logic failures**: Infrastructure panics/races are critical; business logic test failures are normal development work
+8. **Report improvement trends**: Compare current results against previous runs to show progress
 
 ### Architecture Notes
 
@@ -62,11 +80,25 @@ Always run this sequence:
 ```bash
 go fmt ./...
 golangci-lint run
-go test ./... -v
-# Test modules
-for module in modules/*/; do [ -f "$module/go.mod" ] && (cd "$module" && go test ./... -v); done
+go test -race -v ./...
+# Test modules with race detection
+for module in modules/*/; do [ -f "$module/go.mod" ] && (cd "$module" && go test -race -v ./...); done
 # Test examples
-for example in examples/*/; do [ -f "$example/go.mod" ] && (cd "$example" && go test ./... -v); done
+for example in examples/*/; do [ -f "$example/go.mod" ] && (cd "$example" && go test -race -v ./...); done
 # Test CLI
-cd cmd/modcli && go test ./... -v
+cd cmd/modcli && go test -race -v ./...
 ```
+
+#### Debugging Test Failures
+When tests fail with panics or race conditions:
+
+1. **Nil map panics**: Check for uninitialized maps in test contexts - add `make(map[...])` initialization
+2. **Nil pointer dereferences**: Verify application context and service injection in BDD tests
+3. **Router panics**: Ensure test routers properly initialize their internal maps
+4. **Race conditions**: Use `-race` flag and check for concurrent access to shared data structures
+
+Common fixes:
+- Add nil checks before map assignments: `if m == nil { m = make(map[string]string) }`
+- Initialize test contexts properly in BDD scenarios
+- Use panic recovery for external service calls in tests
+- Ensure proper cleanup in test teardown methods

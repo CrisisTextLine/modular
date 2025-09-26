@@ -1,11 +1,8 @@
 package scheduler
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -207,38 +204,27 @@ func (s *MemoryJobStore) CleanupOldExecutions(before time.Time) error {
 	return nil
 }
 
-// LoadFromFile loads jobs from a JSON file
-func (s *MemoryJobStore) LoadFromFile(filePath string) ([]Job, error) {
-	// Make sure the file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, nil // No file exists, but this is not an error
-	}
-
-	// Open and read file
-	file, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read jobs file: %w", err)
-	}
-
-	// Empty file case
-	if len(file) == 0 {
+// LoadJobs loads jobs using the configured persistence handler
+func (s *MemoryJobStore) LoadJobs(handler PersistenceHandler) ([]Job, error) {
+	if handler == nil {
 		return nil, nil
 	}
 
-	// Parse the JSON
-	var persistedData struct {
-		Jobs []Job `json:"jobs"`
+	// Load jobs from handler
+	jobs, err := handler.Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load jobs from persistence handler: %w", err)
 	}
 
-	if err := json.Unmarshal(file, &persistedData); err != nil {
-		return nil, fmt.Errorf("failed to parse jobs file: %w", err)
+	if len(jobs) == 0 {
+		return nil, nil
 	}
 
 	// Load jobs into store
 	s.jobsMutex.Lock()
 	defer s.jobsMutex.Unlock()
 
-	for _, job := range persistedData.Jobs {
+	for _, job := range jobs {
 		// Skip if job already exists
 		if _, exists := s.jobs[job.ID]; exists {
 			continue
@@ -252,45 +238,19 @@ func (s *MemoryJobStore) LoadFromFile(filePath string) ([]Job, error) {
 		s.jobs[job.ID] = job
 	}
 
-	return persistedData.Jobs, nil
+	return jobs, nil
 }
 
-// SaveToFile saves jobs to a JSON file
-func (s *MemoryJobStore) SaveToFile(jobs []Job, filePath string) error {
-	// Create data structure for persistence
-	persistedData := struct {
-		Jobs []Job `json:"jobs"`
-	}{
-		Jobs: jobs,
+// SaveJobs saves jobs using the configured persistence handler
+func (s *MemoryJobStore) SaveJobs(jobs []Job, handler PersistenceHandler) error {
+	if handler == nil {
+		return nil // No persistence handler, nothing to do
 	}
 
-	// Create parent directory if it doesn't exist (cross-platform)
-	dir := filepath.Dir(filePath)
-	if dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("failed to create directory for jobs file: %w", err)
-		}
-	}
-
-	// JobFunc can't be serialized, so we need to create a copy of jobs without it
-	jobsCopy := make([]Job, len(jobs))
-	for i, job := range jobs {
-		jobCopy := job
-		jobCopy.JobFunc = nil
-		jobsCopy[i] = jobCopy
-	}
-	persistedData.Jobs = jobsCopy
-
-	// Marshal to JSON
-	data, err := json.MarshalIndent(persistedData, "", "  ")
+	// Save jobs using the handler
+	err := handler.Save(jobs)
 	if err != nil {
-		return fmt.Errorf("failed to marshal jobs to JSON: %w", err)
-	}
-
-	// Write to file
-	err = os.WriteFile(filePath, data, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to write jobs to file: %w", err)
+		return fmt.Errorf("failed to save jobs using persistence handler: %w", err)
 	}
 
 	return nil

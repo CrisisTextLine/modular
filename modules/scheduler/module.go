@@ -141,14 +141,14 @@ func (m *SchedulerModule) RegisterConfig(app modular.Application) error {
 
 	// Register the configuration with default values
 	defaultConfig := &SchedulerConfig{
-		WorkerCount:       5,
-		QueueSize:         100,
-		ShutdownTimeout:   30 * time.Second,
-		StorageType:       "memory",
-		CheckInterval:     1 * time.Second, // Fast for unit tests
-		RetentionDays:     7,
-		PersistenceFile:   "scheduler_jobs.json",
-		EnablePersistence: false,
+		WorkerCount:        5,
+		QueueSize:          100,
+		ShutdownTimeout:    30 * time.Second,
+		StorageType:        "memory",
+		CheckInterval:      1 * time.Second, // Fast for unit tests
+		RetentionDays:      7,
+		PersistenceBackend: PersistenceBackendNone,
+		PersistenceHandler: nil,
 	}
 
 	app.RegisterConfigSection(m.Name(), modular.NewStdConfigProvider(defaultConfig))
@@ -168,13 +168,13 @@ func (m *SchedulerModule) Init(app modular.Application) error {
 
 	// Emit config loaded event
 	m.emitEvent(context.Background(), EventTypeConfigLoaded, map[string]interface{}{
-		"worker_count":       m.config.WorkerCount,
-		"queue_size":         m.config.QueueSize,
-		"shutdown_timeout":   m.config.ShutdownTimeout.String(),
-		"storage_type":       m.config.StorageType,
-		"check_interval":     m.config.CheckInterval.String(),
-		"retention_days":     m.config.RetentionDays,
-		"enable_persistence": m.config.EnablePersistence,
+		"worker_count":        m.config.WorkerCount,
+		"queue_size":          m.config.QueueSize,
+		"shutdown_timeout":    m.config.ShutdownTimeout.String(),
+		"storage_type":        m.config.StorageType,
+		"check_interval":      m.config.CheckInterval.String(),
+		"retention_days":      m.config.RetentionDays,
+		"persistence_backend": string(m.config.PersistenceBackend),
 	})
 
 	// Initialize job store based on configuration
@@ -198,10 +198,10 @@ func (m *SchedulerModule) Init(app modular.Application) error {
 	)
 
 	// Load persisted jobs if enabled
-	if m.config.EnablePersistence {
+	if m.config.PersistenceBackend != PersistenceBackendNone {
 		err := m.loadPersistedJobs()
 		if err != nil {
-			m.logger.Error("Failed to load persisted jobs", "error", err, "file", m.config.PersistenceFile)
+			m.logger.Error("Failed to load persisted jobs", "error", err, "backend", string(m.config.PersistenceBackend))
 			// Non-fatal error, continue with initialization
 		}
 	}
@@ -263,10 +263,10 @@ func (m *SchedulerModule) Stop(ctx context.Context) error {
 	defer cancel()
 
 	// Save pending jobs before stopping to ensure recovery even if jobs execute during shutdown
-	if m.config.EnablePersistence {
+	if m.config.PersistenceBackend != PersistenceBackendNone {
 		if preSaveErr := m.savePersistedJobs(); preSaveErr != nil {
 			if m.logger != nil {
-				m.logger.Warn("Pre-stop save of jobs failed", "error", preSaveErr, "file", m.config.PersistenceFile)
+				m.logger.Warn("Pre-stop save of jobs failed", "error", preSaveErr, "backend", string(m.config.PersistenceBackend))
 			}
 		}
 	}
@@ -275,10 +275,10 @@ func (m *SchedulerModule) Stop(ctx context.Context) error {
 	err := m.scheduler.Stop(shutdownCtx)
 
 	// Save pending jobs if persistence is enabled (even if stop errored)
-	if m.config.EnablePersistence {
+	if m.config.PersistenceBackend != PersistenceBackendNone {
 		if saveErr := m.savePersistedJobs(); saveErr != nil {
 			if m.logger != nil {
-				m.logger.Error("Failed to save jobs to persistence file", "error", saveErr, "file", m.config.PersistenceFile)
+				m.logger.Error("Failed to save jobs to persistence backend", "error", saveErr, "backend", string(m.config.PersistenceBackend))
 			}
 		}
 	}
@@ -291,8 +291,8 @@ func (m *SchedulerModule) Stop(ctx context.Context) error {
 
 	// Emit module stopped event
 	m.emitEvent(ctx, EventTypeModuleStopped, map[string]interface{}{
-		"worker_count": m.config.WorkerCount,
-		"jobs_saved":   m.config.EnablePersistence,
+		"worker_count":     m.config.WorkerCount,
+		"jobs_persistence": string(m.config.PersistenceBackend),
 	})
 
 	m.logger.Info("Scheduler stopped")
@@ -370,18 +370,24 @@ func (m *SchedulerModule) GetJobHistory(jobID string) ([]JobExecution, error) {
 	return m.scheduler.GetJobHistory(jobID)
 }
 
-// loadPersistedJobs loads jobs from the persistence file
+// loadPersistedJobs loads jobs from the configured persistence handler
 func (m *SchedulerModule) loadPersistedJobs() error {
-	m.logger.Info("Loading persisted jobs", "file", m.config.PersistenceFile)
+	m.logger.Info("Loading persisted jobs", "backend", string(m.config.PersistenceBackend))
+
+	// Get persistence handler based on backend configuration
+	handler, err := m.getPersistenceHandler()
+	if err != nil {
+		return fmt.Errorf("failed to get persistence handler: %w", err)
+	}
 
 	// Use the job store's persistence methods if available
 	if persistable, ok := m.jobStore.(PersistableJobStore); ok {
-		jobs, err := persistable.LoadFromFile(m.config.PersistenceFile)
+		jobs, err := persistable.LoadJobs(handler)
 		if err != nil {
-			return fmt.Errorf("failed to load jobs from persistence file: %w", err)
+			return fmt.Errorf("failed to load jobs from persistence handler: %w", err)
 		}
 		if debugEnabled() {
-			dbg("LoadPersisted: loaded %d jobs from %s", len(jobs), m.config.PersistenceFile)
+			dbg("LoadPersisted: loaded %d jobs from %s backend", len(jobs), string(m.config.PersistenceBackend))
 		}
 
 		// Reinsert all relevant jobs into the fresh job store so the dispatcher can pick them up
@@ -459,9 +465,15 @@ func (m *SchedulerModule) loadPersistedJobs() error {
 	return ErrJobStoreNotPersistable
 }
 
-// savePersistedJobs saves jobs to the persistence file
+// savePersistedJobs saves jobs to the configured persistence handler
 func (m *SchedulerModule) savePersistedJobs() error {
-	m.logger.Info("Saving jobs to persistence file", "file", m.config.PersistenceFile)
+	m.logger.Info("Saving jobs to persistence backend", "backend", string(m.config.PersistenceBackend))
+
+	// Get persistence handler based on backend configuration
+	handler, err := m.getPersistenceHandler()
+	if err != nil {
+		return fmt.Errorf("failed to get persistence handler: %w", err)
+	}
 
 	// Use the job store's persistence methods if available
 	if persistable, ok := m.jobStore.(PersistableJobStore); ok {
@@ -470,20 +482,41 @@ func (m *SchedulerModule) savePersistedJobs() error {
 			return fmt.Errorf("failed to list jobs for persistence: %w", err)
 		}
 
-		err = persistable.SaveToFile(jobs, m.config.PersistenceFile)
+		err = persistable.SaveJobs(jobs, handler)
 		if err != nil {
-			return fmt.Errorf("failed to save jobs to persistence file: %w", err)
+			return fmt.Errorf("failed to save jobs to persistence handler: %w", err)
 		}
 
-		m.logger.Info("Saved jobs to persistence file", "count", len(jobs))
+		m.logger.Info("Saved jobs to persistence backend", "count", len(jobs))
 		if debugEnabled() {
-			dbg("SavePersisted: saved %d jobs to %s", len(jobs), m.config.PersistenceFile)
+			dbg("SavePersisted: saved %d jobs to %s backend", len(jobs), string(m.config.PersistenceBackend))
 		}
 		return nil
 	}
 
 	m.logger.Warn("Job store does not support persistence")
 	return ErrJobStoreNotPersistable
+}
+
+// getPersistenceHandler returns the appropriate persistence handler based on configuration
+func (m *SchedulerModule) getPersistenceHandler() (PersistenceHandler, error) {
+	switch m.config.PersistenceBackend {
+	case PersistenceBackendNone:
+		return nil, nil
+	case PersistenceBackendMemory:
+		// Create a new memory handler if not already set
+		if m.config.PersistenceHandler == nil {
+			return NewMemoryPersistenceHandler(), nil
+		}
+		return m.config.PersistenceHandler, nil
+	case PersistenceBackendCustom:
+		if m.config.PersistenceHandler == nil {
+			return nil, ErrNoPersistenceHandler
+		}
+		return m.config.PersistenceHandler, nil
+	default:
+		return nil, fmt.Errorf("unknown persistence backend: %s", m.config.PersistenceBackend)
+	}
 }
 
 // RegisterObservers implements the ObservableModule interface.

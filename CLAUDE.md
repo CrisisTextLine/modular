@@ -31,6 +31,14 @@ When using the test-runner agent or running comprehensive test verification, alw
 6. **Calculate pass rates**: Provide clear metrics on test health (e.g., "366 passing, 33 failing = 92% pass rate")
 7. **Distinguish infrastructure vs business logic failures**: Infrastructure panics/races are critical; business logic test failures are normal development work
 8. **Report improvement trends**: Compare current results against previous runs to show progress
+9. **CRITICAL - Zero tolerance for failures**: ANY test failure must trigger immediate agent assignment for fixing
+10. **Mandatory escalation**: If any failures detected, immediately categorize and assign to specialized agents:
+    - Race conditions → multi-tenant-specialist or go-module-expert
+    - Router/service issues → dependency-resolver
+    - Configuration problems → config-validator
+    - BDD scenario failures → go-module-expert
+11. **Continuous verification**: After any fix, re-run tests to verify resolution and catch any new issues
+12. **Quality gate enforcement**: Do not consider work complete until 100% test success is achieved
 
 ### Architecture Notes
 

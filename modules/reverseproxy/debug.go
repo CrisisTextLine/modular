@@ -2,8 +2,8 @@ package reverseproxy
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -27,6 +27,7 @@ type DebugEndpointsConfig struct {
 // DebugInfo represents debugging information about the reverse proxy state.
 type DebugInfo struct {
 	Timestamp       time.Time                     `json:"timestamp"`
+	ModuleName      string                        `json:"module_name"`
 	Tenant          string                        `json:"tenant,omitempty"`
 	Environment     string                        `json:"environment"`
 	Flags           map[string]interface{}        `json:"flags,omitempty"`
@@ -38,20 +39,33 @@ type DebugInfo struct {
 
 // CircuitBreakerInfo represents circuit breaker status information.
 type CircuitBreakerInfo struct {
-	State        string    `json:"state"`
-	FailureCount int       `json:"failureCount"`
-	Failures     int       `json:"failures"` // alias field expected by tests
-	SuccessCount int       `json:"successCount"`
-	LastFailure  time.Time `json:"lastFailure,omitempty"`
-	LastAttempt  time.Time `json:"lastAttempt,omitempty"`
+	State            string    `json:"state"`
+	FailureCount     int       `json:"failureCount"`
+	Failures         int       `json:"failures"` // alias field expected by tests
+	SuccessCount     int       `json:"successCount"`
+	LastFailure      time.Time `json:"lastFailure,omitempty"`
+	LastAttempt      time.Time `json:"lastAttempt,omitempty"`
+	FailureThreshold int       `json:"failureThreshold,omitempty"`
+	ResetTimeout     string    `json:"resetTimeout,omitempty"`
 }
 
 // HealthInfo represents backend health information.
 type HealthInfo struct {
-	Status       string    `json:"status"`
-	LastCheck    time.Time `json:"lastCheck,omitempty"`
-	ResponseTime string    `json:"responseTime,omitempty"`
-	StatusCode   int       `json:"statusCode,omitempty"`
+	Status              string    `json:"status"`
+	LastCheck           time.Time `json:"lastCheck,omitempty"`
+	LastSuccess         time.Time `json:"lastSuccess,omitempty"`
+	LastError           string    `json:"lastError,omitempty"`
+	ResponseTime        string    `json:"responseTime,omitempty"`
+	StatusCode          int       `json:"statusCode,omitempty"`
+	DNSResolved         bool      `json:"dnsResolved"`
+	ResolvedIPs         []string  `json:"resolvedIPs,omitempty"`
+	TotalChecks         int64     `json:"totalChecks"`
+	SuccessfulChecks    int64     `json:"successfulChecks"`
+	ChecksSkipped       int64     `json:"checksSkipped"`
+	HealthCheckPassing  bool      `json:"healthCheckPassing"`
+	CircuitBreakerOpen  bool      `json:"circuitBreakerOpen"`
+	CircuitBreakerState string    `json:"circuitBreakerState,omitempty"`
+	CircuitFailureCount int       `json:"circuitFailureCount,omitempty"`
 }
 
 // DebugHandler handles debug endpoint requests.
@@ -137,28 +151,41 @@ func (d *DebugHandler) HandleFlags(w http.ResponseWriter, r *http.Request) {
 
 		// Try to get the current configuration to show available flags
 		if fileBasedEval, ok := d.featureFlagEval.(*FileBasedFeatureFlagEvaluator); ok {
-			config := fileBasedEval.tenantAwareConfig.GetConfigWithContext(ctx).(*ReverseProxyConfig)
-			if config != nil && config.FeatureFlags.Enabled && config.FeatureFlags.Flags != nil {
-				for flagName, flagValue := range config.FeatureFlags.Flags {
-					flags[flagName] = flagValue
+			// Defensive check for tenantAwareConfig before accessing
+			if fileBasedEval.tenantAwareConfig != nil {
+				rawConfig := fileBasedEval.tenantAwareConfig.GetConfigWithContext(ctx)
+				if config, ok := rawConfig.(*ReverseProxyConfig); ok && config != nil && config.FeatureFlags.Enabled && config.FeatureFlags.Flags != nil {
+					for flagName, flagValue := range config.FeatureFlags.Flags {
+						flags[flagName] = flagValue
+					}
+					flags["_source"] = "tenant_aware_config"
 				}
-				flags["_source"] = "tenant_aware_config"
-				flags["_tenant"] = string(tenantID)
+			} else if fileBasedEval.defaultConfigProvider != nil {
+				// Fall back to default config provider when no tenant service is available
+				rawConfig := fileBasedEval.defaultConfigProvider.GetConfig()
+				if config, ok := rawConfig.(*ReverseProxyConfig); ok && config != nil && config.FeatureFlags.Enabled && config.FeatureFlags.Flags != nil {
+					for flagName, flagValue := range config.FeatureFlags.Flags {
+						flags[flagName] = flagValue
+					}
+					flags["_source"] = "default_config"
+				}
 			}
 		}
+		flags["_tenant"] = string(tenantID)
 	}
 
-	debugInfo := DebugInfo{
-		Timestamp:       time.Now(),
-		Tenant:          string(tenantID),
-		Environment:     "local", // Could be configured
-		Flags:           flags,
-		BackendServices: d.proxyConfig.BackendServices,
-		Routes:          d.proxyConfig.Routes,
+	// For the flags endpoint, return a response structure that matches test expectations
+	flagsResponse := map[string]interface{}{
+		"timestamp":       time.Now(),
+		"tenant":          string(tenantID),
+		"environment":     "local", // Could be configured
+		"feature_flags":   flags,
+		"backendServices": d.proxyConfig.BackendServices,
+		"routes":          d.proxyConfig.Routes,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(debugInfo); err != nil {
+	if err := json.NewEncoder(w).Encode(flagsResponse); err != nil {
 		d.logger.Error("Failed to encode debug flags response", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
@@ -188,6 +215,7 @@ func (d *DebugHandler) HandleInfo(w http.ResponseWriter, r *http.Request) {
 
 	debugInfo := DebugInfo{
 		Timestamp:       time.Now(),
+		ModuleName:      "reverseproxy",
 		Tenant:          string(tenantID),
 		Environment:     "local", // Could be configured
 		Flags:           flags,
@@ -199,27 +227,82 @@ func (d *DebugHandler) HandleInfo(w http.ResponseWriter, r *http.Request) {
 	if len(d.circuitBreakers) > 0 {
 		debugInfo.CircuitBreakers = make(map[string]CircuitBreakerInfo)
 		for name, cb := range d.circuitBreakers {
-			debugInfo.CircuitBreakers[name] = CircuitBreakerInfo{
-				State:        cb.GetState().String(),
-				FailureCount: 0, // Circuit breaker doesn't expose failure count
-				SuccessCount: 0, // Circuit breaker doesn't expose success count
+			state := cb.GetState()
+			failureCount := cb.GetFailureCount()
+
+			// Create circuit breaker info with real data
+			cbInfo := CircuitBreakerInfo{
+				State:        state.String(),
+				FailureCount: failureCount,
+				Failures:     failureCount, // alias field expected by tests
+				SuccessCount: 0,            // Circuit breaker doesn't track success count directly
+				LastAttempt:  time.Now(),   // Current time as approximation
 			}
+
+			// Add additional circuit breaker details if available via reflection
+			// This is safe because we control the CircuitBreaker implementation
+			if cbVal := reflect.ValueOf(cb); cbVal.Kind() == reflect.Ptr && !cbVal.IsNil() {
+				elem := cbVal.Elem()
+				if elem.Kind() == reflect.Struct {
+					if thresholdField := elem.FieldByName("failureThreshold"); thresholdField.IsValid() && thresholdField.CanInterface() {
+						if threshold, ok := thresholdField.Interface().(int); ok {
+							cbInfo.FailureThreshold = threshold
+						}
+					}
+					if timeoutField := elem.FieldByName("resetTimeout"); timeoutField.IsValid() && timeoutField.CanInterface() {
+						if timeout, ok := timeoutField.Interface().(time.Duration); ok {
+							cbInfo.ResetTimeout = timeout.String()
+						}
+					}
+					if lastFailureField := elem.FieldByName("lastFailure"); lastFailureField.IsValid() && lastFailureField.CanInterface() {
+						if lastFailure, ok := lastFailureField.Interface().(time.Time); ok && !lastFailure.IsZero() {
+							cbInfo.LastFailure = lastFailure
+						}
+					}
+				}
+			}
+
+			debugInfo.CircuitBreakers[name] = cbInfo
 		}
 	}
 
-	// Add health check info
+	// Add health check info with comprehensive data
 	if len(d.healthCheckers) > 0 {
 		debugInfo.HealthChecks = make(map[string]HealthInfo)
-		for name, hc := range d.healthCheckers {
+		for _, hc := range d.healthCheckers {
 			healthStatuses := hc.GetHealthStatus()
-			if status, exists := healthStatuses[name]; exists {
-				debugInfo.HealthChecks[name] = HealthInfo{
-					Status:       fmt.Sprintf("healthy=%v", status.Healthy),
-					LastCheck:    status.LastCheck,
-					ResponseTime: status.ResponseTime.String(),
-					StatusCode:   0, // HealthStatus doesn't expose status code directly
+			for backendID, status := range healthStatuses {
+				// Determine overall status
+				healthStatus := "unknown"
+				if status.HealthCheckPassing {
+					if status.CircuitBreakerOpen {
+						healthStatus = "health_check_passing_but_circuit_open"
+					} else {
+						healthStatus = "healthy"
+					}
+				} else {
+					healthStatus = "unhealthy"
+				}
+
+				debugInfo.HealthChecks[backendID] = HealthInfo{
+					Status:              healthStatus,
+					LastCheck:           status.LastCheck,
+					LastSuccess:         status.LastSuccess,
+					LastError:           status.LastError,
+					ResponseTime:        status.ResponseTime.String(),
+					StatusCode:          0, // HTTP status code not tracked in current HealthStatus
+					DNSResolved:         status.DNSResolved,
+					ResolvedIPs:         status.ResolvedIPs,
+					TotalChecks:         status.TotalChecks,
+					SuccessfulChecks:    status.SuccessfulChecks,
+					ChecksSkipped:       status.ChecksSkipped,
+					HealthCheckPassing:  status.HealthCheckPassing,
+					CircuitBreakerOpen:  status.CircuitBreakerOpen,
+					CircuitBreakerState: status.CircuitBreakerState,
+					CircuitFailureCount: status.CircuitFailureCount,
 				}
 			}
+			break // Only process the first health checker
 		}
 	}
 
@@ -278,31 +361,48 @@ func (d *DebugHandler) HandleCircuitBreakers(w http.ResponseWriter, r *http.Requ
 	// that iterate over all top-level values looking for maps with these fields.
 	response := map[string]CircuitBreakerInfo{}
 	for name, cb := range d.circuitBreakers {
-		response[name] = CircuitBreakerInfo{
-			State:        cb.GetState().String(),
-			FailureCount: cb.GetFailureCount(),
-			Failures:     cb.GetFailureCount(),
-			SuccessCount: 0,
-		}
-	}
+		state := cb.GetState()
+		failureCount := cb.GetFailureCount()
 
-	// If no circuit breakers were registered (possible in early lifecycle when
-	// the debug endpoint is hit before the module sets them, or if circuit breaker
-	// config is enabled but none have yet been created), synthesize placeholder
-	// entries for each configured backend so BDD tests still observe metrics.
-	if len(response) == 0 && d.proxyConfig != nil {
-		for backend := range d.proxyConfig.BackendServices {
-			response[backend] = CircuitBreakerInfo{
-				State:        "closed",
-				FailureCount: 0,
-				Failures:     0,
-				SuccessCount: 0,
+		// Create detailed circuit breaker response
+		cbInfo := CircuitBreakerInfo{
+			State:        state.String(),
+			FailureCount: failureCount,
+			Failures:     failureCount, // alias field expected by tests
+			SuccessCount: 0,            // Circuit breaker doesn't track success count directly
+		}
+
+		// Add internal details via reflection for comprehensive debugging
+		if cbVal := reflect.ValueOf(cb); cbVal.Kind() == reflect.Ptr && !cbVal.IsNil() {
+			elem := cbVal.Elem()
+			if elem.Kind() == reflect.Struct {
+				if thresholdField := elem.FieldByName("failureThreshold"); thresholdField.IsValid() && thresholdField.CanInterface() {
+					if threshold, ok := thresholdField.Interface().(int); ok {
+						cbInfo.FailureThreshold = threshold
+					}
+				}
+				if timeoutField := elem.FieldByName("resetTimeout"); timeoutField.IsValid() && timeoutField.CanInterface() {
+					if timeout, ok := timeoutField.Interface().(time.Duration); ok {
+						cbInfo.ResetTimeout = timeout.String()
+					}
+				}
+				if lastFailureField := elem.FieldByName("lastFailure"); lastFailureField.IsValid() && lastFailureField.CanInterface() {
+					if lastFailure, ok := lastFailureField.Interface().(time.Time); ok && !lastFailure.IsZero() {
+						cbInfo.LastFailure = lastFailure
+					}
+				}
 			}
 		}
+
+		response[name] = cbInfo
 	}
 
+	// If no circuit breakers are available yet, return empty response
+	// rather than placeholder data that doesn't reflect actual system state
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	circuitBreakerResponse := map[string]interface{}{"circuit_breakers": response}
+	if err := json.NewEncoder(w).Encode(circuitBreakerResponse); err != nil {
 		d.logger.Error("Failed to encode circuit breakers response", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
@@ -314,35 +414,50 @@ func (d *DebugHandler) HandleHealthChecks(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Flat JSON object: backendID -> health info (status, lastCheck, etc.) aligning with BDD iteration.
+	// Flat JSON object: backendID -> health info with real data from health checker
 	response := map[string]HealthInfo{}
 	for _, hc := range d.healthCheckers {
 		for backendID, status := range hc.GetHealthStatus() {
+			// Extract comprehensive health status information
+			healthStatus := "unknown"
+			if status.HealthCheckPassing {
+				if status.CircuitBreakerOpen {
+					healthStatus = "health_check_passing_but_circuit_open"
+				} else {
+					healthStatus = "healthy"
+				}
+			} else {
+				healthStatus = "unhealthy"
+			}
+
+			// Create comprehensive health info with real data
 			response[backendID] = HealthInfo{
-				Status:       fmt.Sprintf("healthy=%v", status.Healthy),
-				LastCheck:    status.LastCheck,
-				ResponseTime: status.ResponseTime.String(),
-				StatusCode:   0,
+				Status:              healthStatus,
+				LastCheck:           status.LastCheck,
+				LastSuccess:         status.LastSuccess,
+				LastError:           status.LastError,
+				ResponseTime:        status.ResponseTime.String(),
+				StatusCode:          0, // HTTP status code not tracked in current HealthStatus
+				DNSResolved:         status.DNSResolved,
+				ResolvedIPs:         status.ResolvedIPs,
+				TotalChecks:         status.TotalChecks,
+				SuccessfulChecks:    status.SuccessfulChecks,
+				ChecksSkipped:       status.ChecksSkipped,
+				HealthCheckPassing:  status.HealthCheckPassing,
+				CircuitBreakerOpen:  status.CircuitBreakerOpen,
+				CircuitBreakerState: status.CircuitBreakerState,
+				CircuitFailureCount: status.CircuitFailureCount,
 			}
 		}
 		break
 	}
 
-	// If health checks are enabled but we have no statuses yet (checker not run),
-	// create placeholder entries so BDD test sees non-empty map with required fields.
-	if len(response) == 0 && d.proxyConfig != nil && d.proxyConfig.HealthCheck.Enabled {
-		for backend := range d.proxyConfig.BackendServices {
-			response[backend] = HealthInfo{
-				Status:       "healthy=false", // unknown yet; mark as not healthy
-				LastCheck:    time.Time{},     // zero time; still serialized
-				ResponseTime: "0s",
-				StatusCode:   0,
-			}
-		}
-	}
+	// If health checks are enabled but we have no statuses yet, return empty response
+	// rather than placeholder data that doesn't reflect actual system state
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	healthCheckResponse := map[string]interface{}{"health_checks": response}
+	if err := json.NewEncoder(w).Encode(healthCheckResponse); err != nil {
 		d.logger.Error("Failed to encode health checks response", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}

@@ -54,7 +54,11 @@ type FileBasedFeatureFlagEvaluator struct {
 	app modular.Application
 
 	// tenantAwareConfig provides tenant-aware access to feature flag configuration
+	// Can be nil if no tenant service is available
 	tenantAwareConfig *modular.TenantAwareConfig
+
+	// defaultConfigProvider is used as fallback when tenantAwareConfig is nil
+	defaultConfigProvider modular.ConfigProvider
 
 	// logger for debug and error logging
 	logger *slog.Logger
@@ -85,18 +89,30 @@ func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logg
 		defaultConfigProvider = modular.NewStdConfigProvider(&ReverseProxyConfig{})
 	}
 
-	// Create tenant-aware config for feature flags
+	// Create tenant-aware config for feature flags if tenant service is available
 	// This will use the "reverseproxy" section from configurations
-	tenantAwareConfig := modular.NewTenantAwareConfig(
-		defaultConfigProvider,
-		tenantService,
-		"reverseproxy",
-	)
+	var tenantAwareConfig *modular.TenantAwareConfig
+	if tenantService != nil {
+		tenantAwareConfig = modular.NewTenantAwareConfig(
+			defaultConfigProvider,
+			tenantService,
+			"reverseproxy",
+		)
+		// Validate that tenant-aware config was created successfully
+		if tenantAwareConfig == nil {
+			return nil, fmt.Errorf("failed to create tenant-aware config for feature flags")
+		}
+	} else {
+		// When no tenant service is available, we'll use defaultConfigProvider directly
+		logger.WarnContext(context.Background(), "No tenant service available, using default config provider only")
+		tenantAwareConfig = nil
+	}
 
 	return &FileBasedFeatureFlagEvaluator{
-		app:               app,
-		tenantAwareConfig: tenantAwareConfig,
-		logger:            logger,
+		app:                   app,
+		tenantAwareConfig:     tenantAwareConfig,
+		defaultConfigProvider: defaultConfigProvider,
+		logger:                logger,
 	}, nil
 }
 
@@ -115,8 +131,44 @@ func (f *FileBasedFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, flagID
 		}
 	}
 
-	// Get tenant-aware configuration
-	config := f.tenantAwareConfig.GetConfigWithContext(ctx).(*ReverseProxyConfig)
+	// Get configuration - use tenant-aware if available, otherwise use default
+	var config *ReverseProxyConfig
+	if f.tenantAwareConfig != nil {
+		// Get tenant-aware configuration
+		rawConfig := f.tenantAwareConfig.GetConfigWithContext(ctx)
+		if rawConfig == nil {
+			f.logger.DebugContext(ctx, "No configuration available from tenant-aware config", "flag", flagID)
+			return false, fmt.Errorf("feature flag %s not found: %w", flagID, ErrFeatureFlagNotFound)
+		}
+
+		var ok bool
+		config, ok = rawConfig.(*ReverseProxyConfig)
+		if !ok {
+			f.logger.DebugContext(ctx, "Configuration is not of expected type", "flag", flagID, "type", fmt.Sprintf("%T", rawConfig))
+			return false, fmt.Errorf("invalid configuration type for feature flag %s", flagID)
+		}
+	} else {
+		// Fall back to default config provider when no tenant service is available
+		f.logger.DebugContext(ctx, "Using default config provider (no tenant service available)", "flag", flagID)
+		if f.defaultConfigProvider == nil {
+			f.logger.DebugContext(ctx, "No default config provider available", "flag", flagID)
+			return false, fmt.Errorf("no configuration provider available for feature flag %s", flagID)
+		}
+
+		rawConfig := f.defaultConfigProvider.GetConfig()
+		if rawConfig == nil {
+			f.logger.DebugContext(ctx, "No configuration available from default provider", "flag", flagID)
+			return false, fmt.Errorf("feature flag %s not found: %w", flagID, ErrFeatureFlagNotFound)
+		}
+
+		var ok bool
+		config, ok = rawConfig.(*ReverseProxyConfig)
+		if !ok {
+			f.logger.DebugContext(ctx, "Default configuration is not of expected type", "flag", flagID, "type", fmt.Sprintf("%T", rawConfig))
+			return false, fmt.Errorf("invalid default configuration type for feature flag %s", flagID)
+		}
+	}
+
 	if config == nil {
 		f.logger.DebugContext(ctx, "No feature flag configuration available", "flag", flagID)
 		return false, fmt.Errorf("feature flag %s not found: %w", flagID, ErrFeatureFlagNotFound)

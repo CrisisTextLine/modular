@@ -418,14 +418,37 @@ func (m *ReverseProxyModule) createFeatureFlagAwareCompositeHandlerFunc(routeCon
 			// Feature flag is disabled, use alternative backend if available
 			alternativeBackend := m.getAlternativeBackend(routeConfig.AlternativeBackend)
 			if alternativeBackend != "" {
-				// Route to alternative backend instead of composite route
-				m.app.Logger().Debug("Composite route feature flag disabled, using alternative backend",
-					"route", routeConfig.Pattern, "alternative", alternativeBackend, "flagID", routeConfig.FeatureFlagID)
+				// Check if dry-run mode is enabled for this scenario
+				effectiveConfig := m.getEffectiveConfigForRequest(r)
+				isDryRunEnabled := (effectiveConfig != nil && effectiveConfig.DryRun.Enabled) ||
+					(m.config != nil && m.config.DryRun.Enabled)
 
-				// Create a simple proxy handler for the alternative backend
-				altHandler := m.createBackendProxyHandler(alternativeBackend)
-				altHandler(w, r)
-				return
+				if isDryRunEnabled {
+					// Use dry-run handler to compare composite vs alternative
+					m.app.Logger().Debug("Feature flag disabled with dry-run enabled, comparing composite vs alternative",
+						"route", routeConfig.Pattern, "alternative", alternativeBackend, "flagID", routeConfig.FeatureFlagID)
+
+					// Create a mock RouteConfig for dry-run handling
+					mockRouteConfig := RouteConfig{
+						FeatureFlagID:      routeConfig.FeatureFlagID,
+						AlternativeBackend: alternativeBackend,
+						DryRun:             true,
+						DryRunBackend:      "composite", // Compare against composite
+					}
+
+					// Handle dry-run comparison: alternative (returned) vs composite (compared)
+					m.handleDryRunRequest(r.Context(), w, r, mockRouteConfig, alternativeBackend, "composite")
+					return
+				} else {
+					// Route to alternative backend instead of composite route
+					m.app.Logger().Debug("Composite route feature flag disabled, using alternative backend",
+						"route", routeConfig.Pattern, "alternative", alternativeBackend, "flagID", routeConfig.FeatureFlagID)
+
+					// Create a simple proxy handler for the alternative backend
+					altHandler := m.createBackendProxyHandler(alternativeBackend)
+					altHandler(w, r)
+					return
+				}
 			} else {
 				// No alternative, return 404
 				m.app.Logger().Debug("Composite route feature flag disabled, no alternative available",

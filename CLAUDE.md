@@ -39,6 +39,17 @@ When using the test-runner agent or running comprehensive test verification, alw
     - BDD scenario failures → go-module-expert
 11. **Continuous verification**: After any fix, re-run tests to verify resolution and catch any new issues
 12. **Quality gate enforcement**: Do not consider work complete until 100% test success is achieved
+13. **BDD-specific requirements**: For modules with BDD tests (e.g., reverseproxy), always:
+    - Run BDD tests specifically: `go test -race -v . -run TestModuleBDD`
+    - Check BDD summary line: "X scenarios (Y passed, Z failed)" - Z must be 0
+    - Verify no "DATA RACE" warnings appear in output
+    - If BDD failures found, immediately delegate to go-module-expert or multi-tenant-specialist
+    - Never accept partial BDD success - all scenarios must pass
+14. **Race condition detection**: If "WARNING: DATA RACE" appears anywhere in output:
+    - This is CRITICAL and must be fixed immediately
+    - Delegate to multi-tenant-specialist for event/concurrency issues
+    - Never ignore race conditions as they indicate production safety issues
+15. **Module-specific testing**: For each module in modules/*, run: `cd modules/MODULENAME && go test -race -v ./...`
 
 ### Architecture Notes
 

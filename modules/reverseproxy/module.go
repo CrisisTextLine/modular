@@ -338,9 +338,9 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 		)
 
 		// Set up event emitter for health checker
-		m.healthChecker.eventEmitter = func(eventType string, data map[string]interface{}) {
+		m.healthChecker.SetEventEmitter(func(eventType string, data map[string]interface{}) {
 			m.emitEvent(context.Background(), eventType, data) //nolint:contextcheck // module-level health events are not tied to a request context
-		}
+		})
 
 		// Set up circuit breaker provider for health checker
 		m.healthChecker.SetCircuitBreakerProvider(func(backendID string) *HealthCircuitBreakerInfo {
@@ -391,13 +391,7 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 		app.Logger().Info("Circuit breakers initialized", "backends", len(m.circuitBreakers))
 	}
 
-	// After creating health checker (if enabled) set event emitter
-	if m.healthChecker != nil {
-		m.healthChecker.SetEventEmitter(func(eventType string, data map[string]interface{}) {
-			// Use background context; health check events are operational
-			m.emitEvent(context.Background(), eventType, data) //nolint:contextcheck // health checker emits operational telemetry without request context
-		})
-	}
+	// Event emitter already set during health checker initialization above
 
 	// Emit config loaded event
 	m.emitEvent(context.Background(), EventTypeConfigLoaded, map[string]interface{}{ //nolint:contextcheck // configuration lifecycle events have no request context
@@ -1149,6 +1143,15 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 					}
 				}
 
+				// Debug backend resolution
+				if m.app != nil && m.app.Logger() != nil {
+					m.app.Logger().Info("Using primary backend for route",
+						"path", r.URL.Path,
+						"route", routePath,
+						"original_backend", backendID,
+						"resolved_backend", resolvedBackendID)
+				}
+
 				// Use primary backend (feature flag enabled or no feature flag)
 				primaryHandler := m.createBackendProxyHandler(resolvedBackendID)
 				primaryHandler(w, r)
@@ -1214,8 +1217,13 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 			}
 
 			// Fallback to default backend
-			h := m.createBackendProxyHandler(m.defaultBackend)
-			h(w, r)
+			if m.defaultBackend != "" {
+				h := m.createBackendProxyHandler(m.defaultBackend)
+				h(w, r)
+			} else {
+				// No default backend configured, return 404
+				http.NotFound(w, r)
+			}
 		}
 
 		m.safeHandleFunc("/*", handler)
@@ -1551,7 +1559,7 @@ func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backe
 			http.Error(w, "Backend service unavailable", http.StatusBadGateway)
 		} else if strings.Contains(err.Error(), "context deadline exceeded") ||
 			strings.Contains(err.Error(), "timeout") {
-			http.Error(w, "Gateway timeout", http.StatusGatewayTimeout)
+			http.Error(w, "Gateway timeout", http.StatusBadGateway)
 		} else {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
@@ -1713,11 +1721,11 @@ func (m *ReverseProxyModule) selectBackendFromGroup(group string) (string, int, 
 		})
 		// Round-robin specific event includes rotation information
 		m.emitEvent(context.Background(), EventTypeLoadBalanceRoundRobin, map[string]interface{}{ //nolint:contextcheck // load balancer metrics sample outside request handling
-			"group":   group,
-			"backend": selected,
-			"index":   idx,
-			"total":   len(backends),
-			"time":    time.Now().UTC().Format(time.RFC3339Nano),
+			"group":         group,
+			"backend":       selected,
+			"current_index": idx,
+			"total":         len(backends),
+			"time":          time.Now().UTC().Format(time.RFC3339Nano),
 		})
 	}
 
@@ -1930,12 +1938,17 @@ type statusCapturingResponseWriter struct {
 	http.ResponseWriter
 	status      int
 	wroteHeader bool
+	mu          sync.Mutex
 }
 
 func (w *statusCapturingResponseWriter) WriteHeader(code int) {
-	w.status = code
-	w.wroteHeader = true
-	w.ResponseWriter.WriteHeader(code)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.wroteHeader {
+		w.status = code
+		w.wroteHeader = true
+		w.ResponseWriter.WriteHeader(code)
+	}
 }
 
 // createBackendProxyHandler creates an http.HandlerFunc that handles proxying requests
@@ -1952,11 +1965,13 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 
 		// Apply timeout configuration - check for route-specific timeout first
 		var requestTimeout time.Duration
+		var timeoutSource string
 		if m.config.RouteConfigs != nil {
 			// Find matching route config by checking all patterns
 			for routePattern, routeConfig := range m.config.RouteConfigs {
 				if m.matchesRoute(r.URL.Path, routePattern) && routeConfig.Timeout > 0 {
 					requestTimeout = routeConfig.Timeout
+					timeoutSource = fmt.Sprintf("route %s", routePattern)
 					break
 				}
 			}
@@ -1966,11 +1981,23 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 		if requestTimeout == 0 {
 			if m.config.GlobalTimeout > 0 {
 				requestTimeout = m.config.GlobalTimeout
+				timeoutSource = "global"
 			} else if m.config.RequestTimeout > 0 {
 				requestTimeout = m.config.RequestTimeout
+				timeoutSource = "request"
 			} else {
 				requestTimeout = 30 * time.Second // Default fallback
+				timeoutSource = "default"
 			}
+		}
+
+		// Debug timeout configuration
+		if m.app != nil && m.app.Logger() != nil {
+			m.app.Logger().Info("Request timeout configuration",
+				"path", r.URL.Path,
+				"backend", backend,
+				"timeout", requestTimeout,
+				"timeout_source", timeoutSource)
 		}
 
 		// Create context with timeout
@@ -2150,13 +2177,52 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 					}
 					return
 				} else if cbErr != nil {
-					// Some other error occurred
-					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					// Some other error occurred - emit failed event before returning
+					if sw != nil {
+						m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+							"backend": backend,
+							"method":  r.Method,
+							"path":    r.URL.Path,
+							"status":  sw.status,
+							"error":   cbErr.Error(),
+						})
+					}
+					// Only write error response if headers haven't been written yet
+					if sw == nil || !sw.wroteHeader {
+						http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					}
 					return
 				}
 			case <-r.Context().Done():
 				// Request timed out
-				http.Error(w, "Request timeout", http.StatusGatewayTimeout)
+				// Emit request failed event for timeout
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"error":   "request timeout",
+				})
+				// Use proper synchronization to prevent race conditions
+				if sw != nil {
+					sw.mu.Lock()
+					if !sw.wroteHeader {
+						sw.wroteHeader = true
+						sw.status = http.StatusGatewayTimeout
+						sw.mu.Unlock()
+						w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+						w.Header().Set("X-Content-Type-Options", "nosniff")
+						w.WriteHeader(http.StatusGatewayTimeout)
+						fmt.Fprintln(w, "Request timeout")
+					} else {
+						sw.mu.Unlock()
+					}
+				} else {
+					// Fallback when sw is nil
+					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					w.Header().Set("X-Content-Type-Options", "nosniff")
+					w.WriteHeader(http.StatusGatewayTimeout)
+					fmt.Fprintln(w, "Request timeout")
+				}
 				return
 			}
 
@@ -2224,7 +2290,34 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 				// Request completed successfully
 			case <-r.Context().Done():
 				// Request timed out
-				http.Error(w, "Request timeout", http.StatusGatewayTimeout)
+				// Emit request failed event for timeout
+				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+					"backend": backend,
+					"method":  r.Method,
+					"path":    r.URL.Path,
+					"error":   "request timeout",
+				})
+				// Use proper synchronization to prevent race conditions
+				if sw != nil {
+					sw.mu.Lock()
+					if !sw.wroteHeader {
+						sw.wroteHeader = true
+						sw.status = http.StatusGatewayTimeout
+						sw.mu.Unlock()
+						w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+						w.Header().Set("X-Content-Type-Options", "nosniff")
+						w.WriteHeader(http.StatusGatewayTimeout)
+						fmt.Fprintln(w, "Request timeout")
+					} else {
+						sw.mu.Unlock()
+					}
+				} else {
+					// Fallback when sw is nil
+					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					w.Header().Set("X-Content-Type-Options", "nosniff")
+					w.WriteHeader(http.StatusGatewayTimeout)
+					fmt.Fprintln(w, "Request timeout")
+				}
 				return
 			}
 
@@ -3791,6 +3884,13 @@ func (m *ReverseProxyModule) EmitEvent(ctx context.Context, event cloudevents.Ev
 // This centralizes the event creation logic and ensures consistent event formatting.
 // If no subject is available for event emission, it silently skips the event emission
 func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+	// Lazily bind to application's subject if not already set, so events emitted
+	// during Init/early lifecycle still reach observers when using ObservableApplication.
+	if m.subject == nil && m.app != nil {
+		if subj, ok := any(m.app).(modular.Subject); ok {
+			m.subject = subj
+		}
+	}
 	// Skip event emission if no subject is available (non-observable application)
 	if m.subject == nil {
 		return

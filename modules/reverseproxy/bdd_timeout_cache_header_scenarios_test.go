@@ -112,11 +112,25 @@ func (ctx *ReverseProxyBDDTestContext) timeoutBehaviorShouldBeAppliedPerRoute() 
 
 	// The slow route should timeout because server takes 2s but route timeout is 500ms
 	// Accept either an error or a 504 Gateway Timeout status as valid timeout behavior
+
+	// Debug the timeout detection logic
+	fmt.Printf("Timeout detection: err=%v, slowResp=%v, status=%d\n", err, slowResp != nil, func() int {
+		if slowResp != nil {
+			return slowResp.StatusCode
+		}
+		return 0
+	}())
+
 	if err == nil && (slowResp == nil || (slowResp.StatusCode != http.StatusGatewayTimeout && slowResp.StatusCode == http.StatusOK)) {
 		if slowResp != nil {
 			slowResp.Body.Close()
 		}
-		return fmt.Errorf("slow route should have timed out due to per-route override")
+		return fmt.Errorf("slow route should have timed out due to per-route override (err=%v, status=%d)", err, func() int {
+			if slowResp != nil {
+				return slowResp.StatusCode
+			}
+			return 0
+		}())
 	}
 
 	// Verify timeout occurred around the per-route timeout (500ms), not global (2s)
@@ -154,31 +168,49 @@ func (ctx *ReverseProxyBDDTestContext) timeoutBehaviorShouldBeAppliedPerRoute() 
 	}
 
 	// Verify that the slow route actually timed out due to per-route override
-	if ctx.lastError == nil {
-		return fmt.Errorf("expected slow route to timeout due to per-route override, but no error was recorded")
+	// Accept either an error OR a 504 Gateway Timeout status as valid timeout indication
+	timeoutOccurred := false
+	if ctx.lastError != nil {
+		timeoutOccurred = true
+	} else if ctx.lastResponse != nil && ctx.lastResponse.StatusCode == http.StatusGatewayTimeout {
+		timeoutOccurred = true
 	}
 
-	// Check that the error indicates a timeout
-	errorStr := ctx.lastError.Error()
-	timeoutKeywords := []string{"timeout", "deadline exceeded", "context deadline exceeded", "i/o timeout"}
-	timeoutDetected := false
+	if !timeoutOccurred {
+		return fmt.Errorf("expected slow route to timeout due to per-route override, but no error was recorded (error=%v, status=%d)", ctx.lastError, func() int {
+			if ctx.lastResponse != nil {
+				return ctx.lastResponse.StatusCode
+			}
+			return 0
+		}())
+	}
 
-	for _, keyword := range timeoutKeywords {
-		if strings.Contains(strings.ToLower(errorStr), keyword) {
-			timeoutDetected = true
-			break
+	// Check that the error indicates a timeout (if there's an error)
+	if ctx.lastError != nil {
+		errorStr := ctx.lastError.Error()
+		timeoutKeywords := []string{"timeout", "deadline exceeded", "context deadline exceeded", "i/o timeout"}
+		timeoutDetected := false
+
+		for _, keyword := range timeoutKeywords {
+			if strings.Contains(strings.ToLower(errorStr), keyword) {
+				timeoutDetected = true
+				break
+			}
 		}
-	}
 
-	if !timeoutDetected {
-		// Also check for connection errors that might indicate timeout
-		if strings.Contains(strings.ToLower(errorStr), "connection") {
-			timeoutDetected = true
+		if !timeoutDetected {
+			// Also check for connection errors that might indicate timeout
+			if strings.Contains(strings.ToLower(errorStr), "connection") {
+				timeoutDetected = true
+			}
 		}
-	}
 
-	if !timeoutDetected {
-		return fmt.Errorf("slow route error doesn't appear to be a timeout: %s", errorStr)
+		if !timeoutDetected {
+			return fmt.Errorf("slow route error doesn't appear to be a timeout: %s", errorStr)
+		}
+	} else {
+		// No error but we have a 504 status - this is valid timeout behavior
+		// (Proxy successfully returned a timeout response)
 	}
 
 	return nil

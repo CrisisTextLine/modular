@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -971,14 +973,40 @@ func (tr *testRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if tr.routes == nil {
 		tr.routes = make(map[string]http.HandlerFunc)
 	}
+
+	// Try exact path match first
 	if handler, ok := tr.routes[r.URL.Path]; ok {
 		handler(w, r)
 		return
 	}
+
+	// Try wildcard pattern matching - use deterministic order
+	var patterns []string
+	for pattern := range tr.routes {
+		if strings.HasSuffix(pattern, "/*") {
+			patterns = append(patterns, pattern)
+		}
+	}
+	// Sort patterns to ensure deterministic matching (longer patterns first for more specific matches)
+	sort.Slice(patterns, func(i, j int) bool {
+		return len(patterns[i]) > len(patterns[j])
+	})
+
+	for _, pattern := range patterns {
+		handler := tr.routes[pattern]
+		prefix := strings.TrimSuffix(pattern, "/*")
+		if strings.HasPrefix(r.URL.Path, prefix+"/") || r.URL.Path == prefix {
+			handler(w, r)
+			return
+		}
+	}
+
+	// Try global wildcard
 	if handler, ok := tr.routes["/*"]; ok {
 		handler(w, r)
 		return
 	}
+
 	http.NotFound(w, r)
 }
 

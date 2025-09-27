@@ -503,9 +503,9 @@ func (hc *HealthChecker) updateHealthStatus(backendID string, healthy bool, resp
 	// After computing status.Healthy, emit events on transitions
 	if hc.eventEmitter != nil && prevHealthy != status.Healthy {
 		if status.Healthy {
-			hc.eventEmitter(EventTypeBackendHealthy, map[string]interface{}{"backend": backendID})
+			hc.eventEmitter(EventTypeBackendHealthy, map[string]interface{}{"backend_id": backendID})
 		} else {
-			hc.eventEmitter(EventTypeBackendUnhealthy, map[string]interface{}{"backend": backendID, "error": status.LastError})
+			hc.eventEmitter(EventTypeBackendUnhealthy, map[string]interface{}{"backend_id": backendID, "error": status.LastError})
 		}
 	}
 }

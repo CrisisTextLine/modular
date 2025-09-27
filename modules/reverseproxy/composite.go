@@ -29,6 +29,7 @@ type CompositeHandler struct {
 	responseTimeout time.Duration
 	circuitBreakers map[string]*CircuitBreaker
 	responseCache   *responseCache
+	eventEmitter    func(eventType string, data map[string]interface{})
 }
 
 // NewCompositeHandler creates a new composite handler with the given backends.
@@ -49,6 +50,11 @@ func NewCompositeHandler(backends []*Backend, parallel bool, responseTimeout tim
 	}
 }
 
+// SetEventEmitter sets the event emitter function for the composite handler.
+func (h *CompositeHandler) SetEventEmitter(emitter func(eventType string, data map[string]interface{})) {
+	h.eventEmitter = emitter
+}
+
 // ConfigureCircuitBreakers sets up circuit breakers for each backend using the provided configuration
 func (h *CompositeHandler) ConfigureCircuitBreakers(globalConfig CircuitBreakerConfig, backendConfigs map[string]CircuitBreakerConfig) {
 	for _, backend := range h.backends {
@@ -56,14 +62,18 @@ func (h *CompositeHandler) ConfigureCircuitBreakers(globalConfig CircuitBreakerC
 		if backendConfig, exists := backendConfigs[backend.ID]; exists {
 			// Use backend-specific configuration if it exists
 			if backendConfig.Enabled {
-				h.circuitBreakers[backend.ID] = NewCircuitBreaker(backend.ID, nil)
+				cb := NewCircuitBreakerWithConfig(backend.ID, backendConfig, nil)
+				cb.eventEmitter = h.eventEmitter
+				h.circuitBreakers[backend.ID] = cb
 			} else {
 				// Circuit breaker is explicitly disabled for this backend
 				h.circuitBreakers[backend.ID] = nil
 			}
 		} else if globalConfig.Enabled {
 			// Use global configuration
-			h.circuitBreakers[backend.ID] = NewCircuitBreaker(backend.ID, nil)
+			cb := NewCircuitBreakerWithConfig(backend.ID, globalConfig, nil)
+			cb.eventEmitter = h.eventEmitter
+			h.circuitBreakers[backend.ID] = cb
 		} else {
 			// Circuit breaker is disabled globally
 			h.circuitBreakers[backend.ID] = nil
@@ -387,11 +397,26 @@ func (m *ReverseProxyModule) createCompositeHandler(routeConfig CompositeRoute, 
 	// Create and configure the handler
 	handler := NewCompositeHandler(backends, true, responseTimeout)
 
-	// Configure circuit breakers
-	if m.circuitBreakers != nil {
-		for backendID, cb := range m.circuitBreakers {
-			handler.circuitBreakers[backendID] = cb
+	// Set event emitter for circuit breaker events
+	handler.SetEventEmitter(func(eventType string, data map[string]interface{}) {
+		m.emitEvent(context.Background(), eventType, data)
+	})
+
+	// Configure circuit breakers using the module's configuration
+	if m.config != nil {
+		// Use tenant config if available, otherwise use global config
+		config := m.config
+		if tenantConfig != nil {
+			config = tenantConfig
 		}
+
+		globalCBConfig := config.CircuitBreakerConfig
+		backendCBConfigs := make(map[string]CircuitBreakerConfig)
+		if config.BackendCircuitBreakers != nil {
+			backendCBConfigs = config.BackendCircuitBreakers
+		}
+
+		handler.ConfigureCircuitBreakers(globalCBConfig, backendCBConfigs)
 	}
 
 	// Set response cache if available
@@ -420,8 +445,7 @@ func (m *ReverseProxyModule) createFeatureFlagAwareCompositeHandlerFunc(routeCon
 			if alternativeBackend != "" {
 				// Check if dry-run mode is enabled for this scenario
 				effectiveConfig := m.getEffectiveConfigForRequest(r)
-				isDryRunEnabled := (effectiveConfig != nil && effectiveConfig.DryRun.Enabled) ||
-					(m.config != nil && m.config.DryRun.Enabled)
+				isDryRunEnabled := (effectiveConfig != nil && effectiveConfig.DryRun.Enabled)
 
 				if isDryRunEnabled {
 					// Use dry-run handler to compare composite vs alternative

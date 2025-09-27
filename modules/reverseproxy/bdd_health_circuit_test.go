@@ -383,8 +383,24 @@ func (ctx *ReverseProxyBDDTestContext) requestsShouldBeHandledGracefully() error
 // Backend health event observation
 
 func (ctx *ReverseProxyBDDTestContext) aBackendHealthyEventShouldBeEmitted() error {
+	// Debug: Check observer state
+	if ctx.eventObserver == nil {
+		return fmt.Errorf("event observer is nil")
+	}
+
 	events := ctx.eventObserver.GetEvents()
 	foundHealthyEvent := false
+
+	// Debug: Log observer details
+	if ctx.app != nil && ctx.app.Logger() != nil {
+		ctx.app.Logger().Info("Checking for backend healthy events", "observer_id", ctx.eventObserver.ObserverID(), "event_count", len(events))
+	}
+
+	// Debug: list all captured events
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
 
 	for _, event := range events {
 		if event.Type() == EventTypeBackendHealthy {
@@ -394,7 +410,7 @@ func (ctx *ReverseProxyBDDTestContext) aBackendHealthyEventShouldBeEmitted() err
 	}
 
 	if !foundHealthyEvent {
-		return fmt.Errorf("no backend healthy events found")
+		return fmt.Errorf("no backend healthy events found. Captured events: %v", eventTypes)
 	}
 
 	return nil

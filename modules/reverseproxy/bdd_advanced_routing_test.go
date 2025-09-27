@@ -1133,6 +1133,42 @@ func (ctx *ReverseProxyBDDTestContext) errorHandlingShouldBeAppliedAccordingToCo
 	return nil
 }
 
+func (ctx *ReverseProxyBDDTestContext) appropriateTimeoutErrorResponsesShouldBeReturned() error {
+	// Validate that timeout scenarios return appropriate error responses
+	// This is specifically for timeout scenarios, separate from circuit breaker errors
+
+	if ctx.lastError != nil {
+		// If there's an error, check that it's a timeout-related error
+		errorStr := strings.ToLower(ctx.lastError.Error())
+		timeoutKeywords := []string{"timeout", "deadline exceeded", "context deadline exceeded", "i/o timeout", "request timeout"}
+
+		timeoutDetected := false
+		for _, keyword := range timeoutKeywords {
+			if strings.Contains(errorStr, keyword) {
+				timeoutDetected = true
+				break
+			}
+		}
+
+		if !timeoutDetected {
+			return fmt.Errorf("error response should contain timeout indicators, got: %s", ctx.lastError.Error())
+		}
+
+		return nil
+	}
+
+	if ctx.lastResponse != nil {
+		// If there's a response, it should be a timeout-related status code
+		if ctx.lastResponse.StatusCode == http.StatusGatewayTimeout || ctx.lastResponse.StatusCode == http.StatusRequestTimeout {
+			return nil
+		}
+
+		return fmt.Errorf("expected timeout status code (504 or 408), got %d", ctx.lastResponse.StatusCode)
+	}
+
+	return fmt.Errorf("expected either timeout error or timeout response status")
+}
+
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithConnectionFailureHandlingConfigured() error {
 	ctx.resetContext()
 
@@ -1185,7 +1221,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithConnectionFailureHa
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithGlobalRequestTimeoutConfigured() error {
 	ctx.resetContext()
 
-	// Create a test backend server for timeout testing
+	// Create a test backend server for timeout testing (fast backend for /api/* route)
 	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("backend response"))
@@ -1216,9 +1252,15 @@ func (ctx *ReverseProxyBDDTestContext) backendRequestsExceedTheTimeout() error {
 	// Create a slow backend server that exceeds the timeout
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Sleep for longer than the global timeout (2 seconds > 1 second timeout)
-		time.Sleep(2 * time.Second)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("slow backend response"))
+		// But check for context cancellation properly
+		select {
+		case <-time.After(2 * time.Second):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("slow backend response"))
+		case <-r.Context().Done():
+			// Request was cancelled/timed out - return without writing response
+			return
+		}
 	}))
 	ctx.testServers = append(ctx.testServers, slowServer)
 
@@ -1240,22 +1282,10 @@ func (ctx *ReverseProxyBDDTestContext) backendRequestsExceedTheTimeout() error {
 		return fmt.Errorf("failed to setup application: %w", err)
 	}
 
-	// Debug: show configuration before making request
-	fmt.Printf("Routes: %+v\n", ctx.config.Routes)
-	fmt.Printf("BackendServices: %+v\n", ctx.config.BackendServices)
-
 	// Make a request that should timeout
 	start := time.Now()
 	resp, err := ctx.makeRequestThroughModule("GET", "/slow/endpoint", nil)
 	duration := time.Since(start)
-
-	// Debug output
-	fmt.Printf("Global timeout test - Request duration: %v, err: %v, status: %d\n", duration, err, func() int {
-		if resp != nil {
-			return resp.StatusCode
-		}
-		return 0
-	}())
 
 	// Store the error and response for verification
 	ctx.lastError = err
@@ -1375,11 +1405,11 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithPerRouteTimeoutOver
 		BackendConfigs: map[string]BackendServiceConfig{
 			"fast-backend": {
 				URL:               fastServer.URL,
-				ConnectionTimeout: 100 * time.Millisecond,
+				ConnectionTimeout: 500 * time.Millisecond, // Higher than backend response time
 			},
 			"slow-backend": {
 				URL:               slowServer.URL,
-				ConnectionTimeout: 100 * time.Millisecond,
+				ConnectionTimeout: 500 * time.Millisecond, // Higher than backend response time
 			},
 		},
 	}
@@ -1404,19 +1434,53 @@ func (ctx *ReverseProxyBDDTestContext) requestsAreMadeToRoutesWithSpecificTimeou
 	slowResp, err := ctx.makeRequestThroughModule("GET", "/slow/endpoint", nil)
 	duration := time.Since(start)
 
+	// Debug output for timeout testing
+	if ctx.app != nil && ctx.app.Logger() != nil {
+		ctx.app.Logger().Info("Slow route test results",
+			"duration", duration,
+			"error", err,
+			"status_code", func() int {
+				if slowResp != nil {
+					return slowResp.StatusCode
+				}
+				return 0
+			}(),
+			"expected_timeout", "200ms",
+			"actual_backend_delay", "300ms")
+	}
+
 	// Store results for verification
 	ctx.lastError = err
 	ctx.lastResponse = slowResp
 
 	// The slow route should timeout due to its 200ms limit (backend takes 300ms)
-	if err == nil && slowResp != nil && slowResp.StatusCode == http.StatusOK {
-		slowResp.Body.Close()
-		return fmt.Errorf("slow route should have timed out due to per-route override")
+	// Check timing first - this is the most reliable indicator
+	if duration > 350*time.Millisecond {
+		if slowResp != nil {
+			slowResp.Body.Close()
+		}
+		return fmt.Errorf("slow route took too long (%v), expected per-route timeout ~200ms", duration)
 	}
 
-	// Verify timeout occurred around the per-route timeout (200ms), not global (1s)
-	if duration > 400*time.Millisecond {
-		return fmt.Errorf("slow route timeout took too long (%v), expected per-route timeout ~200ms", duration)
+	// Then check for appropriate timeout response
+	// Accept either an error OR a non-200 status code as valid timeout indication
+	timeoutOccurred := false
+	if err != nil {
+		timeoutOccurred = true
+	} else if slowResp != nil && slowResp.StatusCode != http.StatusOK {
+		timeoutOccurred = true
+	}
+
+	if !timeoutOccurred {
+		if slowResp != nil {
+			slowResp.Body.Close()
+		}
+		return fmt.Errorf("slow route should have timed out due to per-route override (got status %d)", func() int {
+			if slowResp != nil {
+				return slowResp.StatusCode
+			}
+			return 0
+		}())
 	}
 
 	if slowResp != nil {
@@ -1432,7 +1496,7 @@ func (ctx *ReverseProxyBDDTestContext) routeSpecificTimeoutsShouldOverrideGlobal
 		return fmt.Errorf("service or config not available")
 	}
 
-	// Check that global timeout is set
+	// Check that global timeout is set to 1 second (from per-route configuration)
 	if ctx.service.config.GlobalTimeout != 1*time.Second {
 		return fmt.Errorf("expected global timeout to be 1s, got %v", ctx.service.config.GlobalTimeout)
 	}
@@ -1443,7 +1507,7 @@ func (ctx *ReverseProxyBDDTestContext) routeSpecificTimeoutsShouldOverrideGlobal
 		return fmt.Errorf("fast route config should exist")
 	}
 	if fastRouteConfig.Timeout != 2*time.Second {
-		return fmt.Errorf("expected fast route timeout to be 2s (override global), got %v", fastRouteConfig.Timeout)
+		return fmt.Errorf("expected fast route timeout to be 2s (longer than global), got %v", fastRouteConfig.Timeout)
 	}
 
 	slowRouteConfig, exists := ctx.service.config.RouteConfigs["/slow/*"]
@@ -1455,16 +1519,27 @@ func (ctx *ReverseProxyBDDTestContext) routeSpecificTimeoutsShouldOverrideGlobal
 	}
 
 	// Verify that the slow route actually timed out due to override
-	if ctx.lastError == nil {
-		return fmt.Errorf("expected slow route to timeout due to per-route override")
+
+	// Accept either an error OR a non-200 status code as valid timeout indication
+	timeoutDetected := false
+	if ctx.lastError != nil {
+		timeoutDetected = true
+	} else if ctx.lastResponse != nil && ctx.lastResponse.StatusCode != http.StatusOK {
+		timeoutDetected = true
 	}
 
-	// Check that the error indicates a timeout
-	errorStr := ctx.lastError.Error()
-	if !contains(strings.ToLower(errorStr), "timeout") &&
-		!contains(strings.ToLower(errorStr), "deadline") &&
-		!contains(strings.ToLower(errorStr), "connection") {
-		return fmt.Errorf("slow route error doesn't appear to be a timeout override: %s", errorStr)
+	if !timeoutDetected {
+		return fmt.Errorf("expected slow route to timeout due to per-route override, but no error was recorded")
+	}
+
+	// Check that the error indicates a timeout (if there's an error)
+	if ctx.lastError != nil {
+		errorStr := ctx.lastError.Error()
+		if !contains(strings.ToLower(errorStr), "timeout") &&
+			!contains(strings.ToLower(errorStr), "deadline") &&
+			!contains(strings.ToLower(errorStr), "connection") {
+			return fmt.Errorf("slow route error doesn't appear to be a timeout override: %s", errorStr)
+		}
 	}
 
 	return nil

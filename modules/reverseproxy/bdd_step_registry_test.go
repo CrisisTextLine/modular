@@ -377,6 +377,9 @@ func registerAllStepDefinitions(s *godog.ScenarioContext, ctx *ReverseProxyBDDTe
 	s.When(`^I make a request to the composite route$`, ctx.iMakeARequestToTheCompositeRoute)
 	s.Then(`^the response should come from the alternative backend$`, ctx.theResponseShouldComeFromTheAlternativeBackend)
 
+	// Timeout-related scenario steps (removing duplicate to avoid ambiguity)
+	s.Then(`^appropriate timeout error responses should be returned$`, ctx.appropriateTimeoutErrorResponsesShouldBeReturned)
+
 	// Note: Most comprehensive step implementations are already in existing BDD files
 	// Only add new steps here for scenarios that are completely missing implementations
 }

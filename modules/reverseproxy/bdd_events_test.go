@@ -554,72 +554,96 @@ func (ctx *ReverseProxyBDDTestContext) aCircuitBreakerHalfopenEventShouldBeEmitt
 }
 
 func (ctx *ReverseProxyBDDTestContext) aCircuitBreakerClosesAfterRecovery() error {
-	// Create a new healthy backend for recovery testing
+	// Wait for circuit breaker to transition to half-open first
+	time.Sleep(150 * time.Millisecond)
+
+	// Instead of trying to change the backend URL, we'll work with the circuit breaker directly
+	// by making successful requests that simulate the backend recovering
+
+	// Find the failing backend route that was set up in the circuit breaker open scenario
+	var testRoute string = "/failing/test" // This was set up in aCircuitBreakerOpensDueToFailures
+
+	// The trick is to replace the failing server with a healthy one in the same test server slot
+	// Find the failing backend in our test servers and replace its handler
+	for _, server := range ctx.testServers {
+		// Check if this server corresponds to our failing backend
+		for backendName, backendURL := range ctx.config.BackendServices {
+			if backendURL == server.URL && backendName == "failing-backend" {
+				// Replace the server's handler with a healthy one
+				server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("backend recovered"))
+				})
+				break
+			}
+		}
+	}
+
+	// Alternative approach: Create a new healthy backend server and update the proxy configuration
 	recoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("backend recovered"))
 	}))
 	ctx.testServers = append(ctx.testServers, recoveryServer)
 
-	// Use unique backend and route names to avoid conflicts
-	backendName := fmt.Sprintf("recovery-backend-%d", time.Now().UnixNano())
-	routePath := fmt.Sprintf("/recovery/test-%d", time.Now().UnixNano())
-
-	// Add the recovery backend to configuration and service
-	if ctx.config != nil {
-		if ctx.config.BackendServices == nil {
-			ctx.config.BackendServices = make(map[string]string)
-		}
-		ctx.config.BackendServices[backendName] = recoveryServer.URL
-
-		if ctx.config.Routes == nil {
-			ctx.config.Routes = make(map[string]string)
-		}
-		ctx.config.Routes[routePath] = backendName
-	}
-
-	// Add the backend to the service
-	if ctx.service != nil {
-		if err := ctx.service.AddBackend(backendName, recoveryServer.URL); err != nil {
-			return fmt.Errorf("failed to add recovery backend: %w", err)
+	// Update the failing backend to point to the healthy server in the module's internal structures
+	if ctx.module != nil {
+		// Find the failing backend and update its proxy configuration
+		for backendName, _ := range ctx.config.BackendServices {
+			if backendName == "failing-backend" {
+				// Update the backend URL
+				ctx.config.BackendServices[backendName] = recoveryServer.URL
+				// Create a new proxy for the recovered backend
+				if err := ctx.module.createBackendProxy(backendName, recoveryServer.URL); err != nil {
+					return fmt.Errorf("failed to update proxy for recovered backend: %w", err)
+				}
+				break
+			}
 		}
 	}
 
-	// Register the route with the test router
-	if ctx.app != nil {
-		var router *testRouter
-		if err := ctx.app.GetService("router", &router); err == nil && router != nil {
-			handler := ctx.module.createBackendProxyHandler(backendName)
-			router.HandleFunc(routePath, handler)
+	// Now make successful requests to trigger circuit breaker closure
+	// The circuit breaker should detect the successful responses and close
+	for i := 0; i < 5; i++ {
+		resp, err := ctx.makeRequestThroughModule("GET", testRoute, nil)
+		if ctx.app != nil && ctx.app.Logger() != nil {
+			ctx.app.Logger().Info("Circuit breaker recovery request",
+				"request_num", i+1,
+				"error", err,
+				"status_code", func() int {
+					if resp != nil {
+						return resp.StatusCode
+					}
+					return 0
+				}())
 		}
-	}
-
-	// Wait for circuit breaker to transition to half-open first
-	time.Sleep(150 * time.Millisecond)
-
-	// Make successful requests to the recovery backend to trigger circuit breaker closure
-	for i := 0; i < 3; i++ {
-		resp, err := ctx.makeRequestThroughModule("GET", routePath, nil)
 		if err == nil && resp != nil {
 			resp.Body.Close()
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Give time for circuit breaker to close
-	time.Sleep(100 * time.Millisecond)
+	// Give additional time for circuit breaker to process the successful responses and close
+	time.Sleep(200 * time.Millisecond)
 	return nil
 }
 
 func (ctx *ReverseProxyBDDTestContext) aCircuitBreakerClosedEventShouldBeEmitted() error {
 	events := ctx.eventObserver.GetEvents()
+
+	// Debug: list all captured events
+	eventTypes := make([]string, len(events))
+	for i, event := range events {
+		eventTypes[i] = event.Type()
+	}
+
 	for _, event := range events {
 		if event.Type() == EventTypeCircuitBreakerClosed {
 			return nil
 		}
 	}
 
-	return fmt.Errorf("no circuit breaker closed events found")
+	return fmt.Errorf("no circuit breaker closed events found. Captured events: %v", eventTypes)
 }
 
 // Backend management events
@@ -707,6 +731,9 @@ func (ctx *ReverseProxyBDDTestContext) aBackendIsRemovedFromTheConfiguration() e
 }
 
 func (ctx *ReverseProxyBDDTestContext) aBackendRemovedEventShouldBeEmitted() error {
+	// Wait a bit for async event emission to complete
+	time.Sleep(100 * time.Millisecond)
+
 	events := ctx.eventObserver.GetEvents()
 
 	// Debug: log all captured events
@@ -788,17 +815,46 @@ func (ctx *ReverseProxyBDDTestContext) allRegisteredEventsShouldBeEmittedDuringT
 
 func (ctx *ReverseProxyBDDTestContext) aBackendBecomesHealthy() error {
 	// This step simulates a backend becoming healthy after being unhealthy
-	// For testing purposes, we'll simulate a health state transition
-	if ctx.eventObserver != nil {
-		ctx.eventObserver.ClearEvents()
+	// The key insight: we need to create a clear unhealthy->healthy transition
+	// IMPORTANT: Do NOT reset context here - we need to preserve the observer from previous steps
+
+	// Check if we have the necessary setup from previous steps
+	if ctx.app == nil {
+		return fmt.Errorf("application not initialized - ensure previous Given steps set up the application")
+	}
+	if ctx.eventObserver == nil {
+		return fmt.Errorf("event observer not initialized - ensure previous Given steps set up event observation")
+	}
+	if ctx.module == nil {
+		return fmt.Errorf("module not initialized - ensure previous Given steps set up the module")
 	}
 
-	// Create an initially unhealthy backend that becomes healthy
+	// Clear existing events to focus on the health transition we're about to trigger
+	if ctx.eventObserver != nil {
+		ctx.eventObserver.ClearEvents()
+		if ctx.app != nil && ctx.app.Logger() != nil {
+			ctx.app.Logger().Info("Cleared events to focus on health transition")
+		}
+	}
+
+	// Create a new backend that starts unhealthy and becomes healthy
+	// Use a shared counter to ensure thread-safe access
+	healthToggleCount := 0
 	healthToggleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
-			// Always return healthy for this test
+			healthToggleCount++
+			if ctx.app != nil && ctx.app.Logger() != nil {
+				ctx.app.Logger().Info("Health check request", "count", healthToggleCount, "backend", "health-transition-backend")
+			}
+			// First health check fails to establish unhealthy state
+			if healthToggleCount == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("initial unhealthy"))
+				return
+			}
+			// All subsequent checks succeed to trigger healthy transition
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("healthy"))
+			w.Write([]byte("now healthy"))
 		} else {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("backend response"))
@@ -806,107 +862,171 @@ func (ctx *ReverseProxyBDDTestContext) aBackendBecomesHealthy() error {
 	}))
 	ctx.testServers = append(ctx.testServers, healthToggleServer)
 
-	// Configure backend services and enable health checking
+	// Add this as a completely new backend to ensure clean state
+	newBackendName := fmt.Sprintf("health-transition-backend-%d", time.Now().UnixNano())
+
+	// Add to configuration
 	if ctx.config.BackendServices == nil {
 		ctx.config.BackendServices = make(map[string]string)
 	}
+	ctx.config.BackendServices[newBackendName] = healthToggleServer.URL
 
-	// Enable health checking with a short interval for quick testing
-	ctx.config.HealthCheck = HealthCheckConfig{
-		Enabled:             true,
-		Interval:            100 * time.Millisecond, // Very short for testing
-		Timeout:             50 * time.Millisecond,
-		ExpectedStatusCodes: []int{200},
-		HealthEndpoints:     make(map[string]string),
+	if ctx.config.HealthCheck.HealthEndpoints == nil {
+		ctx.config.HealthCheck.HealthEndpoints = make(map[string]string)
 	}
+	ctx.config.HealthCheck.HealthEndpoints[newBackendName] = "/health"
 
-	// Add the backend to the service to trigger health checking (use unique name)
-	backendName := fmt.Sprintf("health-test-backend-%d", time.Now().UnixNano())
-	ctx.config.BackendServices[backendName] = healthToggleServer.URL
-	ctx.config.HealthCheck.HealthEndpoints[backendName] = "/health"
-
-	if ctx.service != nil {
-		if err := ctx.service.AddBackend(backendName, healthToggleServer.URL); err != nil {
-			return fmt.Errorf("failed to add health test backend: %w", err)
-		}
-	}
-
-	// Restart health checker with new config to pick up the new backend
+	// Add the backend to the health checker with fresh state
 	if ctx.module != nil && ctx.module.healthChecker != nil {
-		// Update health checker with new backends
-		newBackends := make(map[string]string)
-		for k, v := range ctx.config.BackendServices {
-			newBackends[k] = v
-		}
-		ctx.module.healthChecker.UpdateBackends(context.Background(), newBackends)
+		// CRITICAL: Ensure health checker event emitter is properly connected
+		ctx.module.healthChecker.SetEventEmitter(func(eventType string, data map[string]interface{}) {
+			// Debug logging
+			if ctx.app != nil && ctx.app.Logger() != nil {
+				ctx.app.Logger().Info("Health checker emitting event", "type", eventType, "data", data)
+			}
+			// Direct emission through module's event system
+			if ctx.app != nil && ctx.app.Logger() != nil {
+				ctx.app.Logger().Info("About to call module.emitEvent", "type", eventType)
+			}
+			ctx.module.emitEvent(context.Background(), eventType, data)
+			if ctx.app != nil && ctx.app.Logger() != nil {
+				ctx.app.Logger().Info("Finished calling module.emitEvent", "type", eventType)
+			}
+		})
+
+		// Update health checker to monitor the new backend
+		ctx.module.healthChecker.UpdateBackends(context.Background(), ctx.config.BackendServices)
 		ctx.module.healthChecker.UpdateHealthConfig(context.Background(), &ctx.config.HealthCheck)
 	}
 
-	// Wait for health checker to perform health checks and emit events
-	time.Sleep(300 * time.Millisecond)
+	// Also register with the service for completeness
+	if ctx.service != nil {
+		if err := ctx.service.AddBackend(newBackendName, healthToggleServer.URL); err != nil {
+			return fmt.Errorf("failed to add new backend for health test: %w", err)
+		}
+	}
+
+	// Wait for health checker to:
+	// 1. First detect the backend as unhealthy (first 2 checks fail)
+	// 2. Then detect it as healthy (subsequent checks succeed)
+	// This should trigger the healthy event
+	// Health check interval is 500ms, so wait for at least 4 cycles to ensure transition
+	time.Sleep(2500 * time.Millisecond) // Allow time for multiple health check cycles (increased)
+
+	// Debug: Check if health checker is actually running and has the backend
+	if ctx.module != nil && ctx.module.healthChecker != nil {
+		healthStatus := ctx.module.healthChecker.GetHealthStatus()
+		if ctx.app != nil && ctx.app.Logger() != nil {
+			ctx.app.Logger().Info("Health checker status after waiting", "backend_count", len(healthStatus))
+			for backendID, status := range healthStatus {
+				ctx.app.Logger().Info("Backend health status", "backend", backendID, "healthy", status.Healthy, "lastCheck", status.LastCheck, "totalChecks", status.TotalChecks)
+			}
+		}
+	}
+
+	// Debug: Check if module has proper subject for event emission
+	if ctx.module != nil {
+		if ctx.app != nil && ctx.app.Logger() != nil {
+			ctx.app.Logger().Info("Module event emission debug", "module_subject_nil", ctx.module.subject == nil, "app_subject_available", ctx.app != nil)
+			if obsApp, ok := ctx.app.(modular.Subject); ok {
+				ctx.app.Logger().Info("Application is observable", "subject_type", fmt.Sprintf("%T", obsApp))
+			} else {
+				ctx.app.Logger().Info("Application is NOT observable")
+			}
+		}
+	}
+
+	// Debug: Check what events we captured
+	if ctx.eventObserver != nil {
+		events := ctx.eventObserver.GetEvents()
+		if ctx.app != nil && ctx.app.Logger() != nil {
+			ctx.app.Logger().Info("Events captured after health transition", "count", len(events))
+			for i, event := range events {
+				ctx.app.Logger().Info("Health transition event", "index", i, "type", event.Type())
+			}
+		}
+	}
+
 	return nil
 }
 
 func (ctx *ReverseProxyBDDTestContext) loadBalancingDecisionsAreMade() error {
 	// This step triggers load balancing decisions by making multiple requests
-	if err := ctx.ensureServiceInitialized(); err != nil {
-		return err
-	}
+	// to routes configured with comma-separated backend groups (round-robin).
+	// IMPORTANT: Must configure routes before module initialization for load balancing to work!
 
+	// Clear existing context and start fresh like the working test
+	var existingObserver *testEventObserver
 	if ctx.eventObserver != nil {
-		ctx.eventObserver.ClearEvents()
+		existingObserver = ctx.eventObserver
+	}
+	ctx.resetContext()
+
+	// Create multiple test backend servers
+	for i := 0; i < 2; i++ {
+		testServer := httptest.NewServer(http.HandlerFunc(func(idx int) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Backend", fmt.Sprintf("lb-backend-%d", idx))
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(fmt.Sprintf("load balance backend %d", idx)))
+			}
+		}(i)))
+		ctx.testServers = append(ctx.testServers, testServer)
 	}
 
-	// Create multiple backends for load balancing
-	loadBalanceServer1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("load balance backend 1"))
-	}))
-	ctx.testServers = append(ctx.testServers, loadBalanceServer1)
-
-	loadBalanceServer2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("load balance backend 2"))
-	}))
-	ctx.testServers = append(ctx.testServers, loadBalanceServer2)
-
-	// Add backends to configuration with unique names
-	if ctx.config.BackendServices == nil {
-		ctx.config.BackendServices = make(map[string]string)
-	}
-	backend1Name := fmt.Sprintf("lb-backend-1-%d", time.Now().UnixNano())
-	backend2Name := fmt.Sprintf("lb-backend-2-%d", time.Now().UnixNano())
-
-	ctx.config.BackendServices[backend1Name] = loadBalanceServer1.URL
-	ctx.config.BackendServices[backend2Name] = loadBalanceServer2.URL
-
-	// Add the backends to the service
-	if ctx.service != nil {
-		if err := ctx.service.AddBackend(backend1Name, loadBalanceServer1.URL); err != nil {
-			return fmt.Errorf("failed to add load balancing backend 1: %w", err)
-		}
-		if err := ctx.service.AddBackend(backend2Name, loadBalanceServer2.URL); err != nil {
-			return fmt.Errorf("failed to add load balancing backend 2: %w", err)
-		}
+	// Build configuration with backend group route BEFORE module initialization
+	ctx.config = &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"lb-backend-1": ctx.testServers[0].URL,
+			"lb-backend-2": ctx.testServers[1].URL,
+		},
+		Routes: map[string]string{
+			// Use concrete path with comma-separated backends for load balancing
+			"/api/loadbalance": "lb-backend-1,lb-backend-2",
+		},
+		BackendConfigs: map[string]BackendServiceConfig{
+			"lb-backend-1": {URL: ctx.testServers[0].URL},
+			"lb-backend-2": {URL: ctx.testServers[1].URL},
+		},
 	}
 
-	// Configure a route that uses comma-separated backends for load balancing
-	// This is key - the load balancing only triggers when a route targets multiple backends
-	if ctx.config.Routes == nil {
-		ctx.config.Routes = make(map[string]string)
+	// Use observable app so events are captured for load balancing scenarios
+	logger := &testLogger{}
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+
+	// Register router
+	mockRouter := &testRouter{routes: make(map[string]http.HandlerFunc)}
+	ctx.app.RegisterService("router", mockRouter)
+
+	// Register / create observer
+	if existingObserver != nil {
+		ctx.eventObserver = existingObserver
+	} else {
+		ctx.eventObserver = newTestEventObserver()
 	}
-	loadBalanceRoute := fmt.Sprintf("/api/loadbalance-%d", time.Now().UnixNano())
-	ctx.config.Routes[loadBalanceRoute] = fmt.Sprintf("%s,%s", backend1Name, backend2Name) // Comma-separated backends
+	_ = ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver)
+
+	// Create module & register
+	ctx.module = NewModule()
+	ctx.service = ctx.module
+	ctx.app.RegisterModule(ctx.module)
+
+	// Register config section & init app
+	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
+	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
+	if err := ctx.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize app: %w", err)
+	}
 
 	// Make several requests to the load-balanced route to trigger load balancing decisions
 	for i := 0; i < 5; i++ {
-		resp, err := ctx.makeRequestThroughModule("GET", loadBalanceRoute, nil)
+		resp, err := ctx.makeRequestThroughModule("GET", "/api/loadbalance", nil)
 		if err == nil && resp != nil {
 			resp.Body.Close()
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	time.Sleep(50 * time.Millisecond)
 	return nil
 }

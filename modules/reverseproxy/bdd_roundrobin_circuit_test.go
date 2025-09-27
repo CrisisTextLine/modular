@@ -238,9 +238,7 @@ func (ctx *ReverseProxyBDDTestContext) loadBalanceRoundRobinEventsShouldFire() e
 
 	for _, event := range events {
 		eventType := event.Type()
-		if eventType == "reverseproxy.load-balance.round-robin" ||
-			eventType == "reverseproxy.loadbalance.roundrobin" ||
-			eventType == "loadbalance.roundrobin" {
+		if eventType == EventTypeLoadBalanceRoundRobin {
 			foundRoundRobinEvent = true
 
 			// Verify event contains rotation details

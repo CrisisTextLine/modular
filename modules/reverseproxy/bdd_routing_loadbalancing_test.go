@@ -49,7 +49,32 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyConfiguredWithASingleBa
 		CacheEnabled: false,
 	}
 
-	return ctx.setupApplicationWithConfig()
+	// Create application directly like the multiple backend scenario
+	logger := &testLogger{}
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+
+	// Register router
+	mockRouter := &testRouter{routes: make(map[string]http.HandlerFunc)}
+	ctx.app.RegisterService("router", mockRouter)
+
+	// Create observer for consistency with other scenarios
+	ctx.eventObserver = newTestEventObserver()
+	_ = ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver)
+
+	// Create module & register
+	ctx.module = NewModule()
+	ctx.service = ctx.module
+	ctx.app.RegisterModule(ctx.module)
+
+	// Register config section directly & init app
+	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
+	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
+	if err := ctx.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize app: %w", err)
+	}
+
+	return nil
 }
 
 func (ctx *ReverseProxyBDDTestContext) iSendARequestToTheProxy() error {
@@ -445,7 +470,7 @@ func (ctx *ReverseProxyBDDTestContext) roundRobinEventsShouldBeEmitted() error {
 	foundRoundRobinEvent := false
 
 	for _, event := range events {
-		if event.Type() == "reverseproxy.load-balance.round-robin" {
+		if event.Type() == EventTypeLoadBalanceRoundRobin {
 			foundRoundRobinEvent = true
 			break
 		}
@@ -462,7 +487,7 @@ func (ctx *ReverseProxyBDDTestContext) theEventsShouldContainRotationDetails() e
 	events := ctx.eventObserver.GetEvents()
 
 	for _, event := range events {
-		if event.Type() == "reverseproxy.load-balance.round-robin" {
+		if event.Type() == EventTypeLoadBalanceRoundRobin {
 			// Check for rotation details
 			var eventData map[string]interface{}
 			if err := event.DataAs(&eventData); err != nil {

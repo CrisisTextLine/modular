@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/feeders"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
@@ -33,6 +32,9 @@ type ReverseProxyBDDTestContext struct {
 	featureFlagService    *FileBasedFeatureFlagEvaluator
 	dryRunEnabled         bool
 	controlledFailureMode *bool // For controlling backend failure in tests
+	// Health status control for testing
+	healthyBackendHealthy   *bool
+	unhealthyBackendHealthy *bool
 	// HTTP testing support
 	httpRecorder     *httptest.ResponseRecorder
 	lastResponseBody []byte
@@ -74,9 +76,13 @@ func newTestEventObserver() *testEventObserver {
 }
 
 func (t *testEventObserver) OnEvent(ctx context.Context, event cloudevents.Event) error {
+	// Debug logging for event capture
+	fmt.Printf("DEBUG: testEventObserver.OnEvent called with event type: %s\n", event.Type())
 	t.mu.Lock()
 	t.events = append(t.events, event.Clone())
+	eventCount := len(t.events)
 	t.mu.Unlock()
+	fmt.Printf("DEBUG: Event stored, total events now: %d\n", eventCount)
 	return nil
 }
 
@@ -260,13 +266,30 @@ func (ctx *ReverseProxyBDDTestContext) preserveApplicationWithFreshConfiguration
 	// Get the current logger to preserve it
 	logger := ctx.app.Logger()
 
-	// Create a new application with the same logger
-	app, err := modular.NewApplication(
-		modular.WithLogger(logger),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create preserved application: %w", err)
+	// Check if the current app is observable
+	var app modular.Application
+	var err error
+	if _, isObservable := ctx.app.(modular.Subject); isObservable {
+		// Create new observable application to preserve event handling
+		mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+		app = modular.NewObservableApplication(mainConfigProvider, logger)
+
+		// Re-register the event observer if it exists
+		if ctx.eventObserver != nil {
+			if err := app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+				return fmt.Errorf("failed to re-register event observer: %w", err)
+			}
+		}
+	} else {
+		// Create a regular application
+		app, err = modular.NewApplication(
+			modular.WithLogger(logger),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create preserved application: %w", err)
+		}
 	}
+
 	if app == nil {
 		return fmt.Errorf("NewApplication returned nil during preservation")
 	}
@@ -315,23 +338,28 @@ func (ctx *ReverseProxyBDDTestContext) makeRequestThroughModuleWithHeaders(metho
 func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyModuleConfigured() error {
 	ctx.resetContext()
 
-	// Create basic application configuration
-	app, err := modular.NewApplication(
-		modular.WithLogger(&testLogger{}),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create application: %w", err)
-	}
-	if app == nil {
-		return fmt.Errorf("NewApplication returned nil")
-	}
+	// Create a default test backend for basic scenarios
+	defaultTestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("default backend response"))
+	}))
+	ctx.testServers = append(ctx.testServers, defaultTestServer)
 
-	// Set up basic reverse proxy configuration
+	// Set up basic reverse proxy configuration with a default backend
 	ctx.config = &ReverseProxyConfig{
-		BackendServices: make(map[string]string),
-		Routes:          make(map[string]string),
-		BackendConfigs:  make(map[string]BackendServiceConfig),
-		RouteConfigs:    make(map[string]RouteConfig),
+		BackendServices: map[string]string{
+			"default-backend": defaultTestServer.URL,
+		},
+		Routes: map[string]string{
+			"/test": "default-backend",
+		},
+		BackendConfigs: map[string]BackendServiceConfig{
+			"default-backend": {
+				URL: defaultTestServer.URL,
+			},
+		},
+		RouteConfigs:   make(map[string]RouteConfig),
+		DefaultBackend: "default-backend",
 		HealthCheck: HealthCheckConfig{
 			Enabled:  false,
 			Interval: 30 * time.Second,
@@ -343,21 +371,32 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAModularApplicationWithReverseProxyM
 		CacheEnabled: false,
 	}
 
-	// Add config feeder with proper tenant context simulation
-	configFeeders := []modular.Feeder{
-		feeders.NewEnvFeeder(),
-		&mockConfigFeeder{
-			configs: map[string]interface{}{
-				"reverseproxy": ctx.config,
-			},
-		},
-	}
-	if stdApp, ok := app.(*modular.StdApplication); ok {
-		stdApp.SetConfigFeeders(configFeeders)
+	// Create application directly like the working single backend scenario
+	logger := &testLogger{}
+	mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+	ctx.app = modular.NewObservableApplication(mainConfigProvider, logger)
+
+	// Register router
+	mockRouter := &testRouter{routes: make(map[string]http.HandlerFunc)}
+	ctx.app.RegisterService("router", mockRouter)
+
+	// Create observer for consistency with other scenarios
+	ctx.eventObserver = newTestEventObserver()
+	_ = ctx.app.(modular.Subject).RegisterObserver(ctx.eventObserver)
+
+	// Create module & register
+	ctx.module = NewModule()
+	ctx.service = ctx.module
+	ctx.app.RegisterModule(ctx.module)
+
+	// Register config section directly & init app
+	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
+	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
+	if err := ctx.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize app: %w", err)
 	}
 
-	ctx.app = app
-	return ctx.setupApplicationWithConfig()
+	return nil
 }
 
 func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
@@ -378,11 +417,24 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 
 	// Create a fresh application if we don't have one or it doesn't have MockLogger
 	if ctx.app == nil {
-		app, err := modular.NewApplication(
-			modular.WithLogger(&testLogger{}),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create application: %w", err)
+		// Check if we need an observable application based on whether we have an event observer
+		var app modular.Application
+		var err error
+		if ctx.eventObserver != nil {
+			// Create an observable application and register the event observer
+			mainConfigProvider := modular.NewStdConfigProvider(struct{}{})
+			app = modular.NewObservableApplication(mainConfigProvider, &testLogger{})
+			if err := app.(modular.Subject).RegisterObserver(ctx.eventObserver); err != nil {
+				return fmt.Errorf("failed to register event observer in fresh observable app: %w", err)
+			}
+		} else {
+			// Create a regular application
+			app, err = modular.NewApplication(
+				modular.WithLogger(&testLogger{}),
+			)
+			if err != nil {
+				return fmt.Errorf("failed to create application: %w", err)
+			}
 		}
 		if app == nil {
 			return fmt.Errorf("NewApplication returned nil")
@@ -394,17 +446,9 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 		return fmt.Errorf("configuration not set: config is nil")
 	}
 
-	// Apply configuration using config feeders
-	configFeeders := []modular.Feeder{
-		&mockConfigFeeder{
-			configs: map[string]interface{}{
-				"reverseproxy": ctx.config,
-			},
-		},
-	}
-	if stdApp, ok := ctx.app.(*modular.StdApplication); ok {
-		stdApp.SetConfigFeeders(configFeeders)
-	}
+	// Register config section directly (like the working scenarios)
+	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
+	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
 
 	// Register services used by reverse proxy
 	if err := ctx.app.RegisterService("logger", &testLogger{}); err != nil {
@@ -428,6 +472,9 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 	if err := ctx.app.RegisterService("tenantService", tenantService); err != nil {
 		return fmt.Errorf("failed to register tenant service: %w", err)
 	}
+
+	// Do not register any feature flag evaluator - let the module handle its own setup
+	// This should restore the original behavior before the regression
 
 	// Create and register event observer
 	ctx.eventObserver = newTestEventObserver()
@@ -455,6 +502,8 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 	services := map[string]any{
 		"router": router,
 	}
+
+	// Don't inject feature flag evaluator - let the module handle its own setup
 
 	constructedModule, err := constructor(ctx.app, services)
 	if err != nil {
@@ -676,55 +725,21 @@ func (ctx *ReverseProxyBDDTestContext) iHaveMultipleBackendsConfigured() error {
 	return ctx.setupApplicationWithConfig()
 }
 
-func (ctx *ReverseProxyBDDTestContext) iHaveBackendsWithHealthCheckingEnabled() error {
-	ctx.resetContext()
-
-	// Create test backend servers
-	backend1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("backend1 healthy"))
-	}))
-	backend2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("backend2 healthy"))
-	}))
-	ctx.testServers = append(ctx.testServers, backend1, backend2)
-
-	app, err := modular.NewApplication(modular.WithLogger(&testLogger{}))
-	if err != nil {
-		return fmt.Errorf("failed to create application: %w", err)
-	}
-	ctx.app = app
-
-	// Configure reverse proxy with health checks enabled
-	ctx.config = &ReverseProxyConfig{
-		BackendServices: map[string]string{
-			"backend-1": backend1.URL,
-			"backend-2": backend2.URL,
-		},
-		Routes: map[string]string{
-			"/api/test": "backend-1",
-		},
-		DefaultBackend: "backend-1",
-		HealthCheck: HealthCheckConfig{
-			Enabled:             true,
-			Interval:            100 * time.Millisecond, // Fast interval for testing
-			Timeout:             1 * time.Second,
-			HealthEndpoints:     map[string]string{"backend-1": "/health", "backend-2": "/health"},
-			ExpectedStatusCodes: []int{200, 204},
-		},
-	}
-
-	return ctx.setupApplicationWithConfig()
-}
-
 // Test logger implementation for BDD tests
 type testLogger struct{}
 
-func (l *testLogger) Debug(msg string, keysAndValues ...interface{})   {}
-func (l *testLogger) Info(msg string, keysAndValues ...interface{})    {}
-func (l *testLogger) Warn(msg string, keysAndValues ...interface{})    {}
-func (l *testLogger) Error(msg string, keysAndValues ...interface{})   {}
+func (l *testLogger) Debug(msg string, keysAndValues ...interface{}) {
+	fmt.Printf("DEBUG: %s %v\n", msg, keysAndValues)
+}
+func (l *testLogger) Info(msg string, keysAndValues ...interface{}) {
+	fmt.Printf("INFO: %s %v\n", msg, keysAndValues)
+}
+func (l *testLogger) Warn(msg string, keysAndValues ...interface{}) {
+	fmt.Printf("WARN: %s %v\n", msg, keysAndValues)
+}
+func (l *testLogger) Error(msg string, keysAndValues ...interface{}) {
+	fmt.Printf("ERROR: %s %v\n", msg, keysAndValues)
+}
 func (l *testLogger) With(keysAndValues ...interface{}) modular.Logger { return l }
 
 // Test helper types
@@ -791,4 +806,32 @@ func (e *testEventBus) NotifyObservers(ctx context.Context, event cloudevents.Ev
 		}
 	}
 	return nil
+}
+
+// TestFeatureFlagEvaluator implements FeatureFlagEvaluator for testing with configurable flags
+type TestFeatureFlagEvaluator struct {
+	flags map[string]bool
+}
+
+func (t *TestFeatureFlagEvaluator) Weight() int {
+	return 100 // High priority for test evaluator
+}
+
+func (t *TestFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, flagID string, tenantID modular.TenantID, req *http.Request) (bool, error) {
+	if t.flags == nil {
+		return false, ErrNoDecision // Let default value handling work properly
+	}
+	enabled, exists := t.flags[flagID]
+	if !exists {
+		return false, ErrNoDecision // Flag not found, use default value
+	}
+	return enabled, nil
+}
+
+func (t *TestFeatureFlagEvaluator) EvaluateFlagWithDefault(ctx context.Context, flagID string, tenantID modular.TenantID, req *http.Request, defaultValue bool) bool {
+	result, err := t.EvaluateFlag(ctx, flagID, tenantID, req)
+	if err != nil {
+		return defaultValue
+	}
+	return result
 }

@@ -2247,9 +2247,15 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 			}
 		} else {
 			// No circuit breaker, use the proxy directly but capture status and apply timeout
-			// Ensure the proxy's transport is configured with the specific request timeout
-			if proxy.Transport != nil {
-				if transport, ok := proxy.Transport.(*http.Transport); ok {
+			// Create a request-specific proxy to avoid race conditions on shared Transport field
+			proxyForRequest := &httputil.ReverseProxy{
+				Director:  proxy.Director,
+				Transport: proxy.Transport, // Start with the original transport
+			}
+			
+			// Configure request-specific timeout transport without modifying shared proxy
+			if proxyForRequest.Transport != nil {
+				if transport, ok := proxyForRequest.Transport.(*http.Transport); ok {
 					// Clone the transport and update timeout settings for this request
 					transportCopy := transport.Clone()
 					transportCopy.ResponseHeaderTimeout = requestTimeout
@@ -2257,11 +2263,11 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 						Timeout:   requestTimeout,
 						KeepAlive: 30 * time.Second,
 					}).DialContext
-					proxy.Transport = transportCopy
+					proxyForRequest.Transport = transportCopy
 				}
 			} else {
 				// Set a timeout-aware transport if none exists
-				proxy.Transport = &http.Transport{
+				proxyForRequest.Transport = &http.Transport{
 					DialContext: (&net.Dialer{
 						Timeout:   requestTimeout,
 						KeepAlive: 30 * time.Second,
@@ -2281,7 +2287,7 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 			go func() {
 				defer close(done)
 				sw = &statusCapturingResponseWriter{ResponseWriter: w, status: http.StatusOK}
-				proxy.ServeHTTP(sw, r)
+				proxyForRequest.ServeHTTP(sw, r)
 			}()
 
 			// Wait for either completion or timeout

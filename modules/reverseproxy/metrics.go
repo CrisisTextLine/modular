@@ -157,8 +157,15 @@ func (m *MetricsCollector) GetMetrics() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	// Calculate total requests across all backends
+	totalRequests := 0
+	for _, count := range m.requestCounts {
+		totalRequests += count
+	}
+
 	metrics := map[string]interface{}{
 		"uptime_seconds": time.Since(m.startTime).Seconds(),
+		"total_requests": totalRequests,
 		"backends":       make(map[string]interface{}),
 	}
 

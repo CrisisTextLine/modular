@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -407,6 +408,7 @@ type Module struct {
 	connections map[string]*sql.DB
 	services    map[string]DatabaseService
 	subject     modular.Subject // For event observation
+	subjectMu   sync.RWMutex    // Protects subject field from race conditions
 	logger      modular.Logger  // For structured logging
 }
 
@@ -772,7 +774,9 @@ func (m *Module) initializeConnections(app modular.Application) error {
 // RegisterObservers implements the ObservableModule interface.
 // This allows the database module to register as an observer for events it's interested in.
 func (m *Module) RegisterObservers(subject modular.Subject) error {
+	m.subjectMu.Lock()
 	m.subject = subject
+	m.subjectMu.Unlock()
 	// The database module currently does not need to observe other events,
 	// but this method stores the subject for event emission.
 	return nil
@@ -781,13 +785,17 @@ func (m *Module) RegisterObservers(subject modular.Subject) error {
 // EmitEvent implements the ObservableModule interface.
 // This allows the database module to emit events to registered observers.
 func (m *Module) EmitEvent(ctx context.Context, event cloudevents.Event) error {
-	if m.subject == nil {
+	m.subjectMu.RLock()
+	subject := m.subject
+	m.subjectMu.RUnlock()
+
+	if subject == nil {
 		return ErrNoSubjectForEventEmission
 	}
 
 	// Use a goroutine to prevent blocking database operations with event emission
 	go func() {
-		if err := m.subject.NotifyObservers(ctx, event); err != nil {
+		if err := subject.NotifyObservers(ctx, event); err != nil {
 			// Log error but don't fail the operation
 			// This ensures event emission issues don't affect database functionality
 			m.logger.Error("Failed to notify observers", "event_type", event.Type(), "error", err)
@@ -802,7 +810,11 @@ func (m *Module) EmitEvent(ctx context.Context, event cloudevents.Event) error {
 // to avoid noisy error messages in tests and non-observable applications.
 func (m *Module) emitEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	// Skip event emission if no subject is available (non-observable application)
-	if m.subject == nil {
+	m.subjectMu.RLock()
+	subject := m.subject
+	m.subjectMu.RUnlock()
+
+	if subject == nil {
 		return
 	}
 

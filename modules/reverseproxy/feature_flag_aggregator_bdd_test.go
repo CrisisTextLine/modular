@@ -83,6 +83,12 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveAModularApplicationWithReve
 	mockRouter := &MockBDDRouter{}
 	ctx.app.RegisterService("router", mockRouter)
 
+	// Register TenantService to support feature flag functionality
+	tenantService := &MockTenantService{
+		Configs: make(map[modular.TenantID]map[string]modular.ConfigProvider),
+	}
+	ctx.app.RegisterService("tenantService", tenantService)
+
 	// Create reverse proxy module
 	ctx.module = NewModule()
 	ctx.app.RegisterModule(ctx.module)

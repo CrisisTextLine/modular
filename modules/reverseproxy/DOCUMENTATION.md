@@ -7,8 +7,14 @@
 3. [Installation](#installation)
 4. [Configuration](#configuration)
    - [Configuration File Options](#configuration-file-options)
+   - [Backend Configuration](#backend-configuration)
+   - [Route Configuration](#route-configuration)
    - [CompositeRoute Configuration](#compositeroute-configuration)
    - [Circuit Breaker Configuration](#circuit-breaker-configuration)
+   - [Health Check Configuration](#health-check-configuration)
+   - [Feature Flag Configuration](#feature-flag-configuration)
+   - [Dry Run Configuration](#dry-run-configuration)
+   - [Debug Configuration](#debug-configuration)
 5. [Basic Usage](#basic-usage)
    - [Simple Backend Routing](#simple-backend-routing)
    - [Default Routing](#default-routing)
@@ -17,25 +23,50 @@
    - [Response Transformation](#response-transformation)
    - [Custom Endpoint Mapping](#custom-endpoint-mapping)
    - [Tenant-Specific Routing](#tenant-specific-routing)
-   - [Header Forwarding and Modification](#header-forwarding-and-modification)
+   - [Header Management](#header-management)
+   - [Path Rewriting](#path-rewriting)
+   - [Feature Flag Controlled Routing](#feature-flag-controlled-routing)
+   - [Dry Run Mode](#dry-run-mode)
+   - [Health Checking and Circuit Breakers](#health-checking-and-circuit-breakers)
+   - [Response Caching](#response-caching)
+   - [Load Balancing](#load-balancing)
    - [Error Handling](#error-handling)
    - [Timeout Management](#timeout-management)
    - [Redirect Handling](#redirect-handling)
-7. [API Reference](#api-reference)
+7. [Complex Scenarios](#complex-scenarios)
+   - [Multi-Feature Interaction](#multi-feature-interaction)
+   - [Tenant-Specific Feature Overrides](#tenant-specific-feature-overrides)
+   - [Cascading Failures and Recovery](#cascading-failures-and-recovery)
+8. [New Features and Enhancements](#new-features-and-enhancements)
+   - [Enhanced Tenant Header Enforcement](#enhanced-tenant-header-enforcement)
+   - [Tenant-Aware Response Caching](#tenant-aware-response-caching)
+   - [Improved Debug Authentication](#improved-debug-authentication)
+   - [Round-Robin Load Balancing](#round-robin-load-balancing)
+   - [Feature Flag Integration](#feature-flag-integration)
+9. [Observability](#observability)
+   - [Metrics](#metrics)
+   - [Debug Endpoints](#debug-endpoints)
+   - [Event Notifications](#event-notifications)
+10. [API Reference](#api-reference)
    - [Module Methods](#module-methods)
    - [Handler Types](#handler-types)
    - [Response Combiners](#response-combiners)
    - [Response Transformers](#response-transformers)
-8. [Examples](#examples)
-   - [API Gateway Example](#api-gateway-example)
-   - [Response Aggregation Example](#response-aggregation-example)
-   - [Custom Transformation Example](#custom-transformation-example)
-   - [Error Handling Example](#error-handling-example)
-   - [Partial Response Example](#partial-response-example)
-9. [Performance Considerations](#performance-considerations)
-10. [Security Best Practices](#security-best-practices)
-11. [Troubleshooting](#troubleshooting)
-12. [FAQ](#faq)
+   - [Feature Flag Evaluators](#feature-flag-evaluators)
+10. [Examples](#examples)
+    - [API Gateway Example](#api-gateway-example)
+    - [Response Aggregation Example](#response-aggregation-example)
+    - [Custom Transformation Example](#custom-transformation-example)
+    - [Feature Flag Routing Example](#feature-flag-routing-example)
+    - [Path Rewriting Example](#path-rewriting-example)
+    - [Health Check Example](#health-check-example)
+    - [Dry Run Testing Example](#dry-run-testing-example)
+    - [Error Handling Example](#error-handling-example)
+    - [Partial Response Example](#partial-response-example)
+11. [Performance Considerations](#performance-considerations)
+12. [Security Best Practices](#security-best-practices)
+13. [Troubleshooting](#troubleshooting)
+14. [FAQ](#faq)
 
 ## Introduction
 
@@ -46,12 +77,21 @@ The Reverse Proxy module is a powerful and flexible API gateway component that r
 * **Multi-Backend Routing**: Route HTTP requests to different backend services based on URL patterns
 * **Response Aggregation**: Combine responses from multiple services into a unified response
 * **Custom Response Transformers**: Create custom functions to transform and combine backend responses
-* **Tenant Awareness**: Support for multi-tenant environments with tenant-specific routing
-* **Header Management**: Forward, add, or modify headers when routing to backend services
-* **Error Handling**: Graceful handling of errors from backend services
-* **Timeout Management**: Handle timeouts with configurable strategies
+* **Tenant Awareness**: Support for multi-tenant environments with tenant-specific routing and configuration
+* **Feature Flag Controlled Routing**: Dynamically route requests based on feature flag evaluation
+* **Path Rewriting**: Modify request paths before forwarding to backend services
+* **Header Management**: Comprehensive header manipulation including forwarding, adding, removing, and rewriting
+* **Health Checking**: Automatic backend health monitoring with configurable intervals and thresholds
+* **Circuit Breakers**: Fault tolerance with automatic circuit breaking for failing backends
+* **Response Caching**: Cache backend responses for improved performance
+* **Dry Run Mode**: Test routing changes safely by comparing responses from different backends
+* **Load Balancing**: Simple round-robin load balancing across multiple backend instances
+* **Metrics Collection**: Comprehensive metrics for monitoring and alerting
+* **Debug Endpoints**: Built-in debug endpoints for troubleshooting and monitoring
+* **Error Handling**: Graceful handling of errors with retry mechanisms
+* **Timeout Management**: Configurable timeouts at global, route, and backend levels
 * **Redirect Support**: Smart handling of redirects from backend services
-* **Flexible Configuration**: Multiple options for configuring routing behavior
+* **Event Notifications**: CloudEvents-based notifications for backend lifecycle events
 
 ## Architecture
 
@@ -63,8 +103,22 @@ The Reverse Proxy module consists of the following main components:
 4. **EndpointMapping**: Maps frontend endpoints to backend endpoints with response transformation
 5. **Response Combiners**: Functions that combine responses from multiple backends into a single response
 6. **Response Transformers**: Custom functions that transform backend responses into the desired format
+7. **CircuitBreaker**: Per-backend circuit breakers that prevent cascading failures
+8. **HealthChecker**: Monitors backend health and adjusts routing accordingly
+9. **FeatureFlagEvaluator**: Interface for evaluating feature flags to control routing behavior
+10. **DryRunHandler**: Handles dry-run requests for safe testing of routing changes
+11. **MetricsCollector**: Collects detailed metrics about proxy operations
+12. **DebugHandler**: Provides runtime information through debug endpoints
 
-The module works by registering HTTP handlers with the router for specified patterns. When a request comes in, it determines which backend service(s) to route the request to, executes the request(s), and returns the response directly or combines multiple responses according to the configured strategy.
+The module works by:
+1. Registering HTTP handlers with the router for specified patterns
+2. Evaluating feature flags and routing rules when requests arrive
+3. Checking backend health and circuit breaker states
+4. Applying path rewriting and header manipulation rules
+5. Forwarding requests to appropriate backend(s)
+6. Caching responses when configured
+7. Combining or transforming responses as needed
+8. Collecting metrics and emitting events throughout the process
 
 ## Installation
 
@@ -87,65 +141,220 @@ reverseproxy:
     api: "http://api.example.com"
     auth: "http://auth.example.com"
     data: "http://data-service.example.com"
-  
+
   # The default backend to route to if no specific route is matched
   default_backend: "api"
-  
-  # URL for an optional feature flag service
-  feature_flag_service_url: "http://featureflags.example.com"
-  
+
   # Header to use for tenant ID in multi-tenant environments
   tenant_id_header: "X-Tenant-ID"
-  
-  # Whether to require a tenant ID for requests
+
+  # Whether to require a tenant ID for requests (NEW: Enhanced enforcement)
   require_tenant_id: false
-  
+
+  # Enable response caching (NEW: Tenant-aware caching with overrides)
+  cache_enabled: true
+  cache_ttl: "5m"
+
+  # Global request timeout
+  request_timeout: "30s"
+  global_timeout: "30s"
+
+  # Simple route mapping (path to backend)
+  routes:
+    "/api/users": "api"
+    "/api/auth": "auth"
+
+  # Advanced route configuration with feature flags
+  route_configs:
+    "/api/users":
+      feature_flag_id: "new_user_service"
+      alternative_backend: "legacy_api"
+      timeout: "10s"
+      dry_run: false
+    "/api/experimental":
+      feature_flag: "experimental_features"
+      alternative_backends: ["stable_api", "fallback_api"]
+      path_rewrite: "/api/stable"
+
   # Configuration for routes that combine responses from multiple backends
   composite_routes:
-    "/api/users/{id}":
-      pattern: "/api/users/{id}"
+    "/api/user-profile/{id}":
+      pattern: "/api/user-profile/{id}"
       backends: ["api", "data"]
       strategy: "merge"
-  
-  # Global timeout for backend requests (in seconds)
-  timeout: 10
-  
-  # Headers to forward to backend services by default
-  forward_headers:
-    - "Authorization"
-    - "User-Agent"
-    - "X-Request-ID"
-    
+      feature_flag_id: "composite_user_data"
+      alternative_backend: "api"
+
+  # Per-backend detailed configurations
+  backend_configs:
+    api:
+      url: "http://api.example.com"
+      path_rewriting:
+        strip_base_path: "/v1"
+        base_path_rewrite: "/v2"
+        endpoint_rewrites:
+          "/old-path":
+            pattern: "/old-path"
+            replacement: "/new-path"
+            strip_query_params: true
+      header_rewriting:
+        hostname_handling: "use_backend"
+        custom_hostname: "internal-api.local"
+        set_headers:
+          "X-Source": "gateway"
+          "X-Version": "2.0"
+        remove_headers:
+          - "X-Internal-Token"
+      health_check:
+        enabled: true
+        interval: "30s"
+        timeout: "5s"
+        endpoint: "/health"
+        expected_status_codes: [200, 204]
+      circuit_breaker:
+        enabled: true
+        failure_threshold: 5
+        recovery_timeout: "60s"
+      max_retries: 3
+      retry_delay: "1s"
+      max_connections: 100
+      connection_timeout: "5s"
+      idle_timeout: "30s"
+      queue_size: 1000
+      queue_timeout: "10s"
+
   # Global circuit breaker configuration
   circuit_breaker:
     enabled: true
     failure_threshold: 5
-    reset_timeout_seconds: 30
-    
+    success_threshold: 3
+    open_timeout: "30s"
+    half_open_allowed_requests: 5
+    window_size: 100
+    success_rate_threshold: 0.7
+
   # Per-backend circuit breaker configuration
   backend_circuit_breakers:
     api:
       enabled: true
-      failure_threshold: 3  # more sensitive threshold for API backend
+      failure_threshold: 3
       reset_timeout_seconds: 15
     auth:
-      enabled: false  # disable circuit breaker for auth backend
+      enabled: false
+
+  # Health checking configuration
+  health_check:
+    enabled: true
+    interval: "30s"
+    timeout: "5s"
+    recent_request_threshold: "60s"
+    health_endpoints:
+      api: "/health"
+      auth: "/status"
+    expected_status_codes: [200]
+    backend_health_check_config:
+      api:
+        enabled: true
+        endpoint: "/health/detailed"
+        interval: "15s"
+        timeout: "3s"
+        expected_status_codes: [200, 204]
+
+  # Metrics configuration
+  metrics_enabled: true
+  metrics_config:
+    enabled: true
+    endpoint: "/metrics"
+
+  # Debug endpoints configuration
+  debug_endpoints:
+    enabled: true
+    base_path: "/debug"
+    require_auth: false
+    auth_token: ""
+  debug_config:
+    enabled: true
+    info_endpoint: "/debug/info"
+    backends_endpoint: "/debug/backends"
+    flags_endpoint: "/debug/flags"
+    circuit_breakers_endpoint: "/debug/circuit-breakers"
+    health_checks_endpoint: "/debug/health-checks"
+
+  # Dry run configuration for testing changes
+  dry_run:
+    enabled: false
+  dry_run_config:
+    enabled: false
+    log_responses: false
+    max_response_size: 1048576  # 1MB
+    compare_headers: ["Content-Type", "Content-Length"]
+    ignore_headers: ["Date", "X-Request-ID"]
+    default_response_backend: "primary"
+
+  # Built-in feature flags
+  feature_flags:
+    enabled: true
+    flags:
+      new_user_service: true
+      experimental_features: false
+      composite_user_data: true
+
+  # Global header management
+  header_config:
+    set_headers:
+      "X-Gateway": "reverse-proxy"
+      "X-Forwarded-Proto": "https"
+    remove_headers:
+      - "X-Internal-Auth"
+      - "X-Debug-Info"
+
+  # Error handling configuration
+  error_handling:
+    enable_custom_pages: false
+    retry_attempts: 3
+    connection_retries: 2
+    retry_delay: "1s"
 ```
 
 #### Configuration Options
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
+| **Core Configuration** |
 | backend_services | map[string]string | Yes | - | Map of backend service identifiers to their base URLs |
 | default_backend | string | No | First defined backend | The identifier of the default backend service to route to |
-| feature_flag_service_url | string | No | - | URL for an optional feature flag service |
 | tenant_id_header | string | No | X-Tenant-ID | Header to use for tenant ID in multi-tenant environments |
 | require_tenant_id | bool | No | false | Whether to require a tenant ID for requests |
-| composite_routes | map[string]CompositeRoute | No | - | Configuration for routes that combine responses from multiple backends |
-| timeout | int | No | 30 | Global timeout for backend requests in seconds |
-| forward_headers | []string | No | [] | List of headers to forward to backend services by default |
-| circuit_breaker | CircuitBreakerConfig | No | See default values | Global circuit breaker configuration for all backends |
-| backend_circuit_breakers | map[string]CircuitBreakerConfig | No | - | Per-backend circuit breaker configurations |
+| **Routing Configuration** |
+| routes | map[string]string | No | {} | Simple path-to-backend mapping |
+| route_configs | map[string]RouteConfig | No | {} | Advanced per-route configuration with feature flags |
+| composite_routes | map[string]CompositeRoute | No | {} | Configuration for routes that combine responses from multiple backends |
+| **Performance & Caching** |
+| cache_enabled | bool | No | false | Enable response caching |
+| cache_ttl | time.Duration | No | 5m | Default cache time-to-live |
+| request_timeout | time.Duration | No | 30s | Timeout for individual backend requests |
+| global_timeout | time.Duration | No | 30s | Global timeout for all operations |
+| **Backend Configuration** |
+| backend_configs | map[string]BackendServiceConfig | No | {} | Detailed per-backend configurations |
+| **Circuit Breaker Configuration** |
+| circuit_breaker | CircuitBreakerConfig | No | See defaults | Global circuit breaker configuration |
+| backend_circuit_breakers | map[string]CircuitBreakerConfig | No | {} | Per-backend circuit breaker overrides |
+| **Health Checking** |
+| health_check | HealthCheckConfig | No | disabled | Health checking configuration for all backends |
+| **Metrics & Monitoring** |
+| metrics_enabled | bool | No | false | Enable metrics collection |
+| metrics_config | MetricsConfig | No | {} | Metrics configuration |
+| **Debug & Development** |
+| debug_endpoints | DebugEndpointsConfig | No | disabled | Debug endpoint configuration |
+| debug_config | DebugConfig | No | {} | Debug endpoint paths and settings |
+| dry_run | DryRunConfig | No | disabled | Dry-run mode for testing changes |
+| dry_run_config | DryRunConfig | No | {} | Detailed dry-run configuration |
+| **Feature Flags** |
+| feature_flags | FeatureFlagsConfig | No | disabled | Built-in feature flag evaluator configuration |
+| **Header Management** |
+| header_config | HeaderConfig | No | {} | Global header manipulation rules |
+| **Error Handling** |
+| error_handling | ErrorHandlingConfig | No | {} | Error handling and retry configuration |
 
 ### CompositeRoute Configuration
 
@@ -613,6 +822,224 @@ Returns the first successful response from the provided responses.
 #### `ResponseTransformerFunc(ctx context.Context, req *http.Request, responses map[string]*http.Response) (*CompositeResponse, error)`
 
 Type definition for response transformer functions.
+
+## New Features and Enhancements
+
+### Enhanced Tenant Header Enforcement
+
+The reverse proxy now provides comprehensive tenant header enforcement across all route types:
+
+#### Configuration
+
+```yaml
+reverseproxy:
+  tenant_id_header: "X-Tenant-ID"
+  require_tenant_id: true  # Enables strict tenant enforcement
+  backend_services:
+    api: "http://api.example.com"
+  routes:
+    "/api/users": "api"
+```
+
+#### Behavior
+
+When `require_tenant_id: true` is set:
+
+- **All Routes**: Explicit routes, composite routes, and default backend routes enforce tenant header requirement
+- **HTTP 400 Response**: Requests missing the required tenant header receive `HTTP 400 Bad Request`
+- **Consistent Enforcement**: All routing scenarios enforce the requirement uniformly
+- **Error Message**: Clear error message indicating the required header: `Header X-Tenant-ID is required`
+
+#### Example Usage
+
+```bash
+# Request without tenant header - returns HTTP 400
+curl http://localhost:8080/api/users
+
+# Request with valid tenant header - routes correctly
+curl -H "X-Tenant-ID: tenant-1" http://localhost:8080/api/users
+```
+
+### Tenant-Aware Response Caching
+
+The caching system now supports tenant-specific cache configurations and isolation:
+
+#### Configuration
+
+**Global Configuration (cache disabled):**
+```yaml
+reverseproxy:
+  cache_enabled: false
+  cache_ttl: "5m"
+  tenant_id_header: "X-Tenant-ID"
+```
+
+**Tenant-Specific Override (cache enabled):**
+```go
+// Tenant configuration overrides global settings
+tenantConfig := &ReverseProxyConfig{
+    CacheEnabled: true,
+    CacheTTL:     2 * time.Second, // Short TTL for testing
+    BackendServices: map[string]string{
+        "api": "http://tenant-specific-api.example.com",
+    },
+}
+```
+
+#### Features
+
+- **Tenant Isolation**: Cache keys include tenant ID to prevent cross-tenant cache pollution
+- **Tenant Overrides**: Individual tenants can enable caching even when globally disabled
+- **TTL Control**: Per-tenant cache TTL configuration
+- **Cache Headers**: Responses include `X-Cache: HIT` or `X-Cache: MISS` headers
+- **Automatic Expiration**: Cache entries expire based on tenant-specific TTL settings
+
+#### Example Behavior
+
+```bash
+# Tenant A (caching enabled) - first request caches response
+curl -H "X-Tenant-ID: tenant-cache" http://localhost:8080/api/data
+# Response: X-Cache: MISS
+
+# Tenant A - subsequent request served from cache
+curl -H "X-Tenant-ID: tenant-cache" http://localhost:8080/api/data
+# Response: X-Cache: HIT
+
+# Tenant B (caching disabled) - always hits backend
+curl -H "X-Tenant-ID: tenant-no-cache" http://localhost:8080/api/data
+# Response: No X-Cache header, always fresh
+```
+
+### Improved Debug Authentication
+
+Debug endpoints now support secure authentication with configurable access control:
+
+#### Configuration
+
+```yaml
+reverseproxy:
+  debug_endpoints:
+    enabled: true
+    base_path: "/debug"
+    require_auth: true
+    auth_token: "secure-debug-token"
+```
+
+#### Features
+
+- **Authentication Required**: When `require_auth: true`, all debug endpoints require authentication
+- **Bearer Token Auth**: Uses `Authorization: Bearer <token>` header for authentication
+- **HTTP 401/403 Responses**: Unauthenticated requests receive appropriate error responses
+- **Tenant-Specific Data**: Debug endpoints show tenant-specific routing and configuration
+- **Circuit Breaker State**: Debug endpoints expose circuit breaker states and metrics
+
+#### Available Endpoints
+
+With authentication enabled:
+
+```bash
+# Unauthenticated request - returns HTTP 401
+curl http://localhost:8080/debug/info
+
+# Authenticated request - returns debug information
+curl -H "Authorization: Bearer secure-debug-token" http://localhost:8080/debug/info
+
+# Available endpoints:
+# /debug/info - General proxy information
+# /debug/backends - Backend service configuration
+# /debug/flags - Feature flag states
+# /debug/circuit-breakers - Circuit breaker status
+# /debug/health-checks - Health check information
+```
+
+### Round-Robin Load Balancing
+
+Enhanced load balancing with circuit breaker integration:
+
+#### Configuration
+
+```yaml
+reverseproxy:
+  backend_services:
+    api-group: "http://api1.example.com,http://api2.example.com,http://api3.example.com"
+  routes:
+    "/api/users": "api-group"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 3
+    open_timeout: "10s"
+```
+
+#### Features
+
+- **Comma-Separated Backends**: Specify multiple backends in a single service definition
+- **Round-Robin Distribution**: Requests are distributed evenly across healthy backends
+- **Circuit Breaker Integration**: Unhealthy backends are automatically excluded from rotation
+- **Automatic Recovery**: Failed backends are re-included when circuit breakers close
+- **Load Balancing Events**: Emits `loadbalance.roundrobin` CloudEvents for monitoring
+
+#### Behavior
+
+```bash
+# First request goes to api1.example.com
+curl http://localhost:8080/api/users
+
+# Second request goes to api2.example.com
+curl http://localhost:8080/api/users
+
+# Third request goes to api3.example.com
+curl http://localhost:8080/api/users
+
+# If api2.example.com fails, rotation continues with api1 and api3 only
+```
+
+### Feature Flag Integration
+
+Enhanced feature flag evaluation with dry-run comparison capabilities:
+
+#### Configuration
+
+```yaml
+reverseproxy:
+  feature_flags:
+    enabled: true
+    flags:
+      composite-feature-enabled: false
+  routes:
+    "/api/composite": "primary-backend"
+  route_configs:
+    "/api/composite":
+      feature_flag_id: "composite-feature-enabled"
+      alternative_backend: "alternative-backend"
+      dry_run: true
+      dry_run_backend: "primary-backend"
+  dry_run:
+    enabled: true
+    log_responses: true
+```
+
+#### Features
+
+- **Route-Level Feature Flags**: Individual routes can be controlled by feature flags
+- **Alternative Backend Fallback**: When flags are disabled, requests route to alternative backends
+- **Dry-Run Comparison**: Compare responses between primary and alternative backends
+- **Comparison Logging**: Log differences between backend responses for analysis
+- **CloudEvents Integration**: Emits `request.received` and `request.failed` events
+
+#### Example Behavior
+
+When feature flag is **disabled**:
+1. Request routes to alternative backend (response returned to client)
+2. Dry-run handler also queries primary backend for comparison
+3. Response differences are logged for analysis
+4. CloudEvents are emitted for both backends
+
+```bash
+# Feature flag disabled - uses alternative backend but compares with primary
+curl http://localhost:8080/api/composite
+# Returns: alternative backend response
+# Logs: Comparison diff between alternative and primary backends
+```
 
 ## Examples
 

@@ -13,9 +13,13 @@ const (
 	EventTypeProxyStopped = "com.modular.reverseproxy.proxy.stopped"
 
 	// Request events
-	EventTypeRequestReceived = "com.modular.reverseproxy.request.received"
-	EventTypeRequestProxied  = "com.modular.reverseproxy.request.proxied"
-	EventTypeRequestFailed   = "com.modular.reverseproxy.request.failed"
+	EventTypeRequestReceived  = "com.modular.reverseproxy.request.received"
+	EventTypeRequestProxied   = "com.modular.reverseproxy.request.proxied"
+	EventTypeRequestFailed    = "com.modular.reverseproxy.request.failed"
+	EventTypeRequestProcessed = "com.modular.reverseproxy.request.processed"
+
+	// Dry-run events
+	EventTypeDryRunComparison = "com.modular.reverseproxy.dryrun.comparison"
 
 	// Backend events
 	EventTypeBackendHealthy   = "com.modular.reverseproxy.backend.healthy"

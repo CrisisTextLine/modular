@@ -9,6 +9,9 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -908,18 +911,52 @@ func TestTenantConfigMerging(t *testing.T) {
 
 // Simple test router implementation for tests
 type testRouter struct {
+	mu     sync.RWMutex
 	routes map[string]http.HandlerFunc
 }
 
 func (tr *testRouter) Handle(pattern string, handler http.Handler) {
+	if tr == nil {
+		panic("testRouter is nil")
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	if tr.routes == nil {
+		tr.routes = make(map[string]http.HandlerFunc)
+	}
+	if handler == nil {
+		panic(fmt.Sprintf("handler is nil for pattern '%s'", pattern))
+	}
 	tr.routes[pattern] = handler.ServeHTTP
 }
 
 func (tr *testRouter) HandleFunc(pattern string, handler http.HandlerFunc) {
+	if tr == nil {
+		panic("testRouter is nil")
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	if tr.routes == nil {
+		tr.routes = make(map[string]http.HandlerFunc)
+	}
+	if handler == nil {
+		panic(fmt.Sprintf("handler is nil for pattern '%s'", pattern))
+	}
 	tr.routes[pattern] = handler
 }
 
 func (tr *testRouter) Mount(pattern string, h http.Handler) {
+	if tr == nil {
+		panic("testRouter is nil")
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	if tr.routes == nil {
+		tr.routes = make(map[string]http.HandlerFunc)
+	}
+	if h == nil {
+		panic(fmt.Sprintf("handler is nil for pattern '%s'", pattern))
+	}
 	tr.routes[pattern] = h.ServeHTTP
 }
 
@@ -928,13 +965,134 @@ func (tr *testRouter) Use(middlewares ...func(http.Handler) http.Handler) {
 }
 
 func (tr *testRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if tr == nil {
+		panic("testRouter is nil")
+	}
+	tr.mu.RLock()
+	defer tr.mu.RUnlock()
+	if tr.routes == nil {
+		tr.routes = make(map[string]http.HandlerFunc)
+	}
+
+	// Try exact path match first
 	if handler, ok := tr.routes[r.URL.Path]; ok {
 		handler(w, r)
 		return
 	}
+
+	// Try wildcard pattern matching - use deterministic order
+	var patterns []string
+	for pattern := range tr.routes {
+		if strings.HasSuffix(pattern, "/*") {
+			patterns = append(patterns, pattern)
+		}
+	}
+	// Sort patterns to ensure deterministic matching (longer patterns first for more specific matches)
+	sort.Slice(patterns, func(i, j int) bool {
+		return len(patterns[i]) > len(patterns[j])
+	})
+
+	for _, pattern := range patterns {
+		handler := tr.routes[pattern]
+		prefix := strings.TrimSuffix(pattern, "/*")
+		if strings.HasPrefix(r.URL.Path, prefix+"/") || r.URL.Path == prefix {
+			handler(w, r)
+			return
+		}
+	}
+
+	// Try global wildcard
 	if handler, ok := tr.routes["/*"]; ok {
 		handler(w, r)
 		return
 	}
+
 	http.NotFound(w, r)
+}
+
+// TestSetupResponseCacheWithTenantOverrides tests that cache is initialized
+// when any tenant has caching enabled, even if global caching is disabled
+func TestSetupResponseCacheWithTenantOverrides(t *testing.T) {
+	tests := []struct {
+		name                     string
+		globalCacheEnabled       bool
+		tenantCacheEnabled       map[string]bool
+		expectedCacheInitialized bool
+	}{
+		{
+			name:                     "Global cache enabled, no tenants",
+			globalCacheEnabled:       true,
+			tenantCacheEnabled:       map[string]bool{},
+			expectedCacheInitialized: true,
+		},
+		{
+			name:                     "Global cache disabled, no tenants",
+			globalCacheEnabled:       false,
+			tenantCacheEnabled:       map[string]bool{},
+			expectedCacheInitialized: false,
+		},
+		{
+			name:               "Global cache disabled, one tenant has cache enabled",
+			globalCacheEnabled: false,
+			tenantCacheEnabled: map[string]bool{
+				"tenant1": true,
+			},
+			expectedCacheInitialized: true,
+		},
+		{
+			name:               "Global cache disabled, multiple tenants mixed settings",
+			globalCacheEnabled: false,
+			tenantCacheEnabled: map[string]bool{
+				"tenant1": false,
+				"tenant2": true,
+				"tenant3": false,
+			},
+			expectedCacheInitialized: true,
+		},
+		{
+			name:               "Global cache disabled, all tenants have cache disabled",
+			globalCacheEnabled: false,
+			tenantCacheEnabled: map[string]bool{
+				"tenant1": false,
+				"tenant2": false,
+			},
+			expectedCacheInitialized: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create module
+			module := NewModule()
+
+			// Set up global config
+			module.config = &ReverseProxyConfig{
+				CacheEnabled: tt.globalCacheEnabled,
+				CacheTTL:     60 * time.Second,
+			}
+
+			// Set up tenant configs
+			module.tenants = make(map[modular.TenantID]*ReverseProxyConfig)
+			for tenantID, cacheEnabled := range tt.tenantCacheEnabled {
+				module.tenants[modular.TenantID(tenantID)] = &ReverseProxyConfig{
+					CacheEnabled: cacheEnabled,
+					CacheTTL:     30 * time.Second,
+				}
+			}
+
+			// Set app to nil - setupResponseCache handles nil app gracefully
+			module.app = nil
+
+			// Call setupResponseCache
+			err := module.setupResponseCache()
+			require.NoError(t, err)
+
+			// Verify cache initialization
+			if tt.expectedCacheInitialized {
+				assert.NotNil(t, module.responseCache, "Cache should be initialized")
+			} else {
+				assert.Nil(t, module.responseCache, "Cache should not be initialized")
+			}
+		})
+	}
 }

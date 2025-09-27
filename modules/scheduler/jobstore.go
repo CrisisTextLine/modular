@@ -40,13 +40,13 @@ type JobStore interface {
 	CleanupOldExecutions(before time.Time) error
 }
 
-// PersistableJobStore extends JobStore with persistence capabilities
+// PersistableJobStore extends JobStore with configurable persistence capabilities
 type PersistableJobStore interface {
 	JobStore
 
-	// LoadFromFile loads jobs from a file
-	LoadFromFile(filePath string) ([]Job, error)
+	// LoadJobs loads jobs using the configured persistence handler
+	LoadJobs(handler PersistenceHandler) ([]Job, error)
 
-	// SaveToFile saves jobs to a file
-	SaveToFile(jobs []Job, filePath string) error
+	// SaveJobs saves jobs using the configured persistence handler
+	SaveJobs(jobs []Job, handler PersistenceHandler) error
 }

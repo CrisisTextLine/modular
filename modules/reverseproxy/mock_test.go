@@ -96,6 +96,16 @@ func (m *MockApplication) GetService(name string, target interface{}) error {
 			*ptr = evaluator
 			return nil
 		}
+	case **ReverseProxyModule:
+		if reverseProxy, ok := service.(*ReverseProxyModule); ok {
+			*ptr = reverseProxy
+			return nil
+		}
+	case **testRouter:
+		if testRouter, ok := service.(*testRouter); ok {
+			*ptr = testRouter
+			return nil
+		}
 	case *interface{}:
 		*ptr = service
 		return nil
@@ -391,4 +401,9 @@ func (m *MockLogger) GetErrorMessages() []string {
 	out := make([]string, len(m.ErrorMessages))
 	copy(out, m.ErrorMessages)
 	return out
+}
+
+// With returns the same logger instance (simplified for testing)
+func (m *MockLogger) With(keysAndValues ...interface{}) modular.Logger {
+	return m
 }

@@ -34,7 +34,7 @@ func TestGitHelper_IsGitRepository_NonExistentPath(t *testing.T) {
 func TestGitHelper_ExtractContractFromRef_InvalidRef(t *testing.T) {
 	// Create a temporary directory with a simple go file
 	tempDir := t.TempDir()
-	
+
 	// Create a simple go file
 	goFile := filepath.Join(tempDir, "test.go")
 	content := `package test
@@ -51,7 +51,7 @@ type TestInterface interface {
 
 	helper := NewGitHelper(tempDir)
 	extractor := contract.NewExtractor()
-	
+
 	// Should fail since tempDir is not a git repository
 	_, err = helper.ExtractContractFromRef("invalid-ref", ".", extractor)
 	if err == nil {
@@ -70,7 +70,7 @@ func TestGitHelper_FindLatestVersionTag_NoTags(t *testing.T) {
 func TestGitHelper_GetAvailableRefs_NonGitRepo(t *testing.T) {
 	helper := NewGitHelper("/tmp/non-git")
 	refs, err := helper.GetAvailableRefs()
-	
+
 	// Should not fail but return empty refs since git commands will fail
 	if err != nil {
 		t.Logf("Expected behavior - git commands failed: %v", err)
@@ -126,10 +126,10 @@ func TestVersionPatternMatching(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Invalid pattern: %v", err)
 			}
-			
+
 			result := regex.MatchString(tc.tag)
 			if result != tc.expected {
-				t.Errorf("Pattern '%s' matching tag '%s': expected %v, got %v", 
+				t.Errorf("Pattern '%s' matching tag '%s': expected %v, got %v",
 					tc.pattern, tc.tag, tc.expected, result)
 			}
 		})

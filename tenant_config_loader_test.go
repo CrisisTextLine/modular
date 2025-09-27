@@ -230,13 +230,25 @@ func TestLoadTenantConfigurationsNonExistentDirectory(t *testing.T) {
 	app := NewStdApplication(nil, slog.Default())
 	tenantService := NewMockTenantService()
 
+	// Create a temporary directory path that we can ensure doesn't exist
+	tempDir, err := os.MkdirTemp("", "non_existent_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	nonExistentDir := filepath.Join(tempDir, "this", "path", "should", "not", "exist")
+
+	// Clean up the temp directory to ensure it doesn't exist
+	if err := os.RemoveAll(tempDir); err != nil {
+		t.Fatalf("Failed to remove temp directory: %v", err)
+	}
+
 	params := TenantConfigParams{
 		ConfigNameRegex: regexp.MustCompile(`^tenant\d+\.json$`),
-		ConfigDir:       "/this/directory/should/not/exist",
+		ConfigDir:       nonExistentDir,
 	}
 	loader := NewFileBasedTenantConfigLoader(params)
 
-	err := loader.LoadTenantConfigurations(app, tenantService)
+	err = loader.LoadTenantConfigurations(app, tenantService)
 
 	// Should error with non-existent directory
 	if err == nil {

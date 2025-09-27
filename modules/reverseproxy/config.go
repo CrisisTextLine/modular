@@ -32,6 +32,24 @@ type ReverseProxyConfig struct {
 
 	// Feature flag configuration
 	FeatureFlags FeatureFlagsConfig `json:"feature_flags" yaml:"feature_flags" toml:"feature_flags"`
+
+	// Global timeout configuration
+	GlobalTimeout time.Duration `json:"global_timeout" yaml:"global_timeout" toml:"global_timeout" env:"GLOBAL_TIMEOUT"`
+
+	// Metrics configuration
+	MetricsConfig MetricsConfig `json:"metrics_config" yaml:"metrics_config" toml:"metrics_config"`
+
+	// Debug configuration
+	DebugConfig DebugConfig `json:"debug_config" yaml:"debug_config" toml:"debug_config"`
+
+	// Dry run configuration
+	DryRunConfig DryRunConfig `json:"dry_run_config" yaml:"dry_run_config" toml:"dry_run_config"`
+
+	// Header management
+	HeaderConfig HeaderConfig `json:"header_config" yaml:"header_config" toml:"header_config"`
+
+	// Error handling configuration
+	ErrorHandling ErrorHandlingConfig `json:"error_handling" yaml:"error_handling" toml:"error_handling"`
 }
 
 // RouteConfig defines feature flag-controlled routing configuration for specific routes.
@@ -41,9 +59,24 @@ type RouteConfig struct {
 	// If specified and the feature flag evaluates to false, requests will be routed to the alternative backend
 	FeatureFlagID string `json:"feature_flag_id" yaml:"feature_flag_id" toml:"feature_flag_id" env:"FEATURE_FLAG_ID"`
 
+	// FeatureFlag is an alternative name for FeatureFlagID
+	FeatureFlag string `json:"feature_flag" yaml:"feature_flag" toml:"feature_flag" env:"FEATURE_FLAG"`
+
 	// AlternativeBackend specifies the backend to use when the feature flag is disabled
 	// If FeatureFlagID is specified and evaluates to false, requests will be routed to this backend instead
 	AlternativeBackend string `json:"alternative_backend" yaml:"alternative_backend" toml:"alternative_backend" env:"ALTERNATIVE_BACKEND"`
+
+	// AlternativeBackends is a list of alternative backends
+	AlternativeBackends []string `json:"alternative_backends" yaml:"alternative_backends" toml:"alternative_backends" env:"ALTERNATIVE_BACKENDS"`
+
+	// CompositeBackends defines multiple backends for composite responses
+	CompositeBackends []string `json:"composite_backends" yaml:"composite_backends" toml:"composite_backends" env:"COMPOSITE_BACKENDS"`
+
+	// PathRewrite defines path rewriting for this route
+	PathRewrite string `json:"path_rewrite" yaml:"path_rewrite" toml:"path_rewrite" env:"PATH_REWRITE"`
+
+	// Timeout defines a custom timeout for this route
+	Timeout time.Duration `json:"timeout" yaml:"timeout" toml:"timeout" env:"TIMEOUT"`
 
 	// DryRun enables dry-run mode for this route, sending requests to both backends and comparing responses
 	// When true, requests are sent to both the primary and alternative backends, but only the alternative backend's response is returned
@@ -104,8 +137,17 @@ type BackendServiceConfig struct {
 	// PathRewriting defines path rewriting rules specific to this backend
 	PathRewriting PathRewritingConfig `json:"path_rewriting" yaml:"path_rewriting" toml:"path_rewriting"`
 
+	// Simple path rewrite for backwards compatibility
+	PathRewrite string `json:"path_rewrite" yaml:"path_rewrite" toml:"path_rewrite" env:"PATH_REWRITE"`
+
 	// HeaderRewriting defines header rewriting rules specific to this backend
 	HeaderRewriting HeaderRewritingConfig `json:"header_rewriting" yaml:"header_rewriting" toml:"header_rewriting"`
+
+	// Hostname handling mode for this backend
+	HostnameHandling string `json:"hostname_handling" yaml:"hostname_handling" toml:"hostname_handling" env:"HOSTNAME_HANDLING"`
+
+	// Custom hostname to use for this backend
+	CustomHostname string `json:"custom_hostname" yaml:"custom_hostname" toml:"custom_hostname" env:"CUSTOM_HOSTNAME"`
 
 	// Endpoints defines endpoint-specific configurations
 	Endpoints map[string]EndpointConfig `json:"endpoints" yaml:"endpoints" toml:"endpoints"`
@@ -114,9 +156,35 @@ type BackendServiceConfig struct {
 	// If specified and the feature flag evaluates to false, requests to this backend will fail or use alternative
 	FeatureFlagID string `json:"feature_flag_id" yaml:"feature_flag_id" toml:"feature_flag_id" env:"FEATURE_FLAG_ID"`
 
+	// FeatureFlag is an alternative name for FeatureFlagID
+	FeatureFlag string `json:"feature_flag" yaml:"feature_flag" toml:"feature_flag" env:"FEATURE_FLAG"`
+
 	// AlternativeBackend specifies an alternative backend to use when the feature flag is disabled
 	// If FeatureFlagID is specified and evaluates to false, requests will be routed to this backend instead
 	AlternativeBackend string `json:"alternative_backend" yaml:"alternative_backend" toml:"alternative_backend" env:"ALTERNATIVE_BACKEND"`
+
+	// AlternativeBackends is a list of alternative backends
+	AlternativeBackends []string `json:"alternative_backends" yaml:"alternative_backends" toml:"alternative_backends" env:"ALTERNATIVE_BACKENDS"`
+
+	// Health check configuration
+	HealthCheck    BackendHealthCheckConfig `json:"health_check" yaml:"health_check" toml:"health_check"`
+	HealthEndpoint string                   `json:"health_endpoint" yaml:"health_endpoint" toml:"health_endpoint" env:"HEALTH_ENDPOINT"`
+
+	// Circuit breaker configuration
+	CircuitBreaker BackendCircuitBreakerConfig `json:"circuit_breaker" yaml:"circuit_breaker" toml:"circuit_breaker"`
+
+	// Retry configuration
+	MaxRetries int           `json:"max_retries" yaml:"max_retries" toml:"max_retries" env:"MAX_RETRIES"`
+	RetryDelay time.Duration `json:"retry_delay" yaml:"retry_delay" toml:"retry_delay" env:"RETRY_DELAY"`
+
+	// Connection pool configuration
+	MaxConnections    int           `json:"max_connections" yaml:"max_connections" toml:"max_connections" env:"MAX_CONNECTIONS"`
+	ConnectionTimeout time.Duration `json:"connection_timeout" yaml:"connection_timeout" toml:"connection_timeout" env:"CONNECTION_TIMEOUT"`
+	IdleTimeout       time.Duration `json:"idle_timeout" yaml:"idle_timeout" toml:"idle_timeout" env:"IDLE_TIMEOUT"`
+
+	// Queue configuration
+	QueueSize    int           `json:"queue_size" yaml:"queue_size" toml:"queue_size" env:"QUEUE_SIZE"`
+	QueueTimeout time.Duration `json:"queue_timeout" yaml:"queue_timeout" toml:"queue_timeout" env:"QUEUE_TIMEOUT"`
 }
 
 // EndpointConfig defines configuration for a specific endpoint within a backend service.
@@ -242,4 +310,49 @@ type FeatureFlagsConfig struct {
 
 	// Flags defines default values for feature flags. Tenant-specific overrides come from tenant config files.
 	Flags map[string]bool `json:"flags" yaml:"flags" toml:"flags" desc:"Default values for feature flags"`
+}
+
+// MetricsConfig provides configuration for metrics collection.
+type MetricsConfig struct {
+	Enabled  bool   `json:"enabled" yaml:"enabled" toml:"enabled" env:"ENABLED" default:"false" desc:"Enable metrics collection"`
+	Endpoint string `json:"endpoint" yaml:"endpoint" toml:"endpoint" env:"ENDPOINT" default:"/metrics" desc:"Metrics endpoint path"`
+}
+
+// DebugConfig provides configuration for debug endpoints.
+type DebugConfig struct {
+	Enabled                 bool   `json:"enabled" yaml:"enabled" toml:"enabled" env:"ENABLED" default:"false" desc:"Enable debug endpoints"`
+	InfoEndpoint            string `json:"info_endpoint" yaml:"info_endpoint" toml:"info_endpoint" env:"INFO_ENDPOINT" default:"/debug/info" desc:"Debug info endpoint path"`
+	BackendsEndpoint        string `json:"backends_endpoint" yaml:"backends_endpoint" toml:"backends_endpoint" env:"BACKENDS_ENDPOINT" default:"/debug/backends" desc:"Debug backends endpoint path"`
+	FlagsEndpoint           string `json:"flags_endpoint" yaml:"flags_endpoint" toml:"flags_endpoint" env:"FLAGS_ENDPOINT" default:"/debug/flags" desc:"Debug feature flags endpoint path"`
+	CircuitBreakersEndpoint string `json:"circuit_breakers_endpoint" yaml:"circuit_breakers_endpoint" toml:"circuit_breakers_endpoint" env:"CIRCUIT_BREAKERS_ENDPOINT" default:"/debug/circuit-breakers" desc:"Debug circuit breakers endpoint path"`
+	HealthChecksEndpoint    string `json:"health_checks_endpoint" yaml:"health_checks_endpoint" toml:"health_checks_endpoint" env:"HEALTH_CHECKS_ENDPOINT" default:"/debug/health-checks" desc:"Debug health checks endpoint path"`
+}
+
+// HeaderConfig provides configuration for header management.
+type HeaderConfig struct {
+	SetHeaders    map[string]string `json:"set_headers" yaml:"set_headers" toml:"set_headers" desc:"Headers to set on requests"`
+	RemoveHeaders []string          `json:"remove_headers" yaml:"remove_headers" toml:"remove_headers" desc:"Headers to remove from requests"`
+}
+
+// ErrorHandlingConfig provides configuration for error handling.
+type ErrorHandlingConfig struct {
+	EnableCustomPages bool          `json:"enable_custom_pages" yaml:"enable_custom_pages" toml:"enable_custom_pages" env:"ENABLE_CUSTOM_PAGES" default:"false" desc:"Enable custom error pages"`
+	RetryAttempts     int           `json:"retry_attempts" yaml:"retry_attempts" toml:"retry_attempts" env:"RETRY_ATTEMPTS" default:"0" desc:"Number of retry attempts for failed requests"`
+	ConnectionRetries int           `json:"connection_retries" yaml:"connection_retries" toml:"connection_retries" env:"CONNECTION_RETRIES" default:"0" desc:"Number of connection retry attempts"`
+	RetryDelay        time.Duration `json:"retry_delay" yaml:"retry_delay" toml:"retry_delay" env:"RETRY_DELAY" default:"1s" desc:"Delay between retry attempts"`
+}
+
+// BackendHealthCheckConfig provides per-backend health check configuration.
+type BackendHealthCheckConfig struct {
+	Enabled             bool          `json:"enabled" yaml:"enabled" toml:"enabled" env:"ENABLED" default:"true" desc:"Enable health checking for this backend"`
+	Interval            time.Duration `json:"interval" yaml:"interval" toml:"interval" env:"INTERVAL" desc:"Health check interval"`
+	Timeout             time.Duration `json:"timeout" yaml:"timeout" toml:"timeout" env:"TIMEOUT" desc:"Health check timeout"`
+	ExpectedStatusCodes []int         `json:"expected_status_codes" yaml:"expected_status_codes" toml:"expected_status_codes" env:"EXPECTED_STATUS_CODES" desc:"Expected status codes for health check"`
+}
+
+// BackendCircuitBreakerConfig provides per-backend circuit breaker configuration.
+type BackendCircuitBreakerConfig struct {
+	Enabled          bool          `json:"enabled" yaml:"enabled" toml:"enabled" env:"ENABLED" default:"false" desc:"Enable circuit breaker for this backend"`
+	FailureThreshold int           `json:"failure_threshold" yaml:"failure_threshold" toml:"failure_threshold" env:"FAILURE_THRESHOLD" default:"5" desc:"Number of failures before opening circuit"`
+	RecoveryTimeout  time.Duration `json:"recovery_timeout" yaml:"recovery_timeout" toml:"recovery_timeout" env:"RECOVERY_TIMEOUT" default:"60s" desc:"Time to wait before attempting recovery"`
 }

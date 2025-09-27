@@ -37,24 +37,24 @@ func TestAWSIAMTokenProviderGetToken(t *testing.T) {
 			currentToken: "cached-token",
 			tokenExpiry:  time.Now().Add(5 * time.Minute),
 		}
-		
+
 		token, err := provider.GetToken(context.Background(), "test-endpoint:5432")
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, "cached-token", token)
 	})
 }
 
-// TestAWSIAMTokenProviderBuildDSNWithIAMToken tests the BuildDSNWithIAMToken method  
+// TestAWSIAMTokenProviderBuildDSNWithIAMToken tests the BuildDSNWithIAMToken method
 func TestAWSIAMTokenProviderBuildDSNWithIAMToken(t *testing.T) {
 	t.Run("builds_dsn_with_cached_token", func(t *testing.T) {
 		provider := &AWSIAMTokenProvider{
 			currentToken: "iam-token-12345",
 			tokenExpiry:  time.Now().Add(5 * time.Minute),
 		}
-		
+
 		dsn, err := provider.BuildDSNWithIAMToken(context.Background(), "postgres://user:oldpassword@host.example.com:5432/dbname")
-		
+
 		assert.NoError(t, err)
 		assert.Equal(t, "postgres://user:iam-token-12345@host.example.com:5432/dbname", dsn)
 	})
@@ -64,9 +64,9 @@ func TestAWSIAMTokenProviderBuildDSNWithIAMToken(t *testing.T) {
 			currentToken: "iam-token-12345",
 			tokenExpiry:  time.Now().Add(5 * time.Minute),
 		}
-		
+
 		_, err := provider.BuildDSNWithIAMToken(context.Background(), "invalid-dsn-format")
-		
+
 		assert.Error(t, err)
 	})
 }
@@ -94,11 +94,11 @@ func TestRefreshTokenWithCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Use mock provider for easier testing
 			provider := NewMockIAMTokenProviderWithExpiry("initial-token", 1*time.Hour)
-			
+
 			var mutex sync.Mutex
 			var callbackCalled bool
 			var callbackToken string
-			
+
 			if tt.setupCallback {
 				callback := func(token, endpoint string) {
 					mutex.Lock()
@@ -108,22 +108,22 @@ func TestRefreshTokenWithCallback(t *testing.T) {
 				}
 				provider.SetTokenRefreshCallback(callback)
 			}
-			
+
 			// Trigger refresh
 			err := provider.RefreshToken()
 			assert.NoError(t, err)
-			
+
 			// Give callback time to run (it's in a goroutine)
 			if tt.setupCallback {
 				time.Sleep(50 * time.Millisecond)
 			}
-			
+
 			// Read callback results with mutex protection
 			mutex.Lock()
 			actualCallbackCalled := callbackCalled
 			actualCallbackToken := callbackToken
 			mutex.Unlock()
-			
+
 			if tt.expectCallbackRun {
 				assert.True(t, actualCallbackCalled, "Callback should have been called")
 				assert.Equal(t, "refreshed-token-1", actualCallbackToken)

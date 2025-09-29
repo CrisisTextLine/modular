@@ -770,6 +770,54 @@ type configInfo struct {
 }
 
 // createTempConfig creates a temporary config for feeding values
+// deepCopyValue creates a deep copy of a reflect.Value, handling maps, slices, and nested structures
+func deepCopyValue(dst, src reflect.Value) {
+	switch src.Kind() {
+	case reflect.Map:
+		if src.IsNil() {
+			return
+		}
+		// Create a new map with the same type
+		dst.Set(reflect.MakeMap(src.Type()))
+		// Copy all key-value pairs
+		for _, key := range src.MapKeys() {
+			srcVal := src.MapIndex(key)
+			// For map values, we need to create new values for proper deep copy
+			dstVal := reflect.New(srcVal.Type()).Elem()
+			deepCopyValue(dstVal, srcVal)
+			dst.SetMapIndex(key, dstVal)
+		}
+	case reflect.Slice:
+		if src.IsNil() {
+			return
+		}
+		// Create a new slice with the same length and capacity
+		dst.Set(reflect.MakeSlice(src.Type(), src.Len(), src.Cap()))
+		for i := 0; i < src.Len(); i++ {
+			deepCopyValue(dst.Index(i), src.Index(i))
+		}
+	case reflect.Ptr:
+		if src.IsNil() {
+			return
+		}
+		// Create a new pointer to the same type
+		dst.Set(reflect.New(src.Elem().Type()))
+		deepCopyValue(dst.Elem(), src.Elem())
+	case reflect.Struct:
+		// Copy each field of the struct
+		for i := 0; i < src.NumField(); i++ {
+			if dst.Field(i).CanSet() {
+				deepCopyValue(dst.Field(i), src.Field(i))
+			}
+		}
+	default:
+		// For basic types, just set the value
+		if dst.CanSet() {
+			dst.Set(src)
+		}
+	}
+}
+
 func createTempConfig(cfg any) (interface{}, configInfo, error) {
 	if cfg == nil {
 		return nil, configInfo{}, ErrConfigNil
@@ -793,9 +841,9 @@ func createTempConfig(cfg any) (interface{}, configInfo, error) {
 
 	tempCfgValue := reflect.New(targetType)
 
-	// Copy existing values from the original config to the temp config
-	// This preserves any values that were already set (e.g., by tests)
-	tempCfgValue.Elem().Set(sourceValue)
+	// Deep copy existing values from the original config to the temp config
+	// This ensures maps and slices are properly cloned for each tenant
+	deepCopyValue(tempCfgValue.Elem(), sourceValue)
 
 	return tempCfgValue.Interface(), configInfo{
 		originalVal: cfgValue,

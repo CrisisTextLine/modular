@@ -85,12 +85,18 @@ func (t *testEventObserver) ClearEvents() {
 func (ctx *HTTPServerBDDTestContext) resetContext() {
 	// Stop any running server before resetting
 	if ctx.service != nil {
-		ctx.service.Stop(context.Background()) // Stop the server first
+		if err := ctx.service.Stop(context.Background()); err != nil {
+			// Log the error but continue cleanup - test context should be reset regardless
+			fmt.Printf("Warning: Failed to stop HTTP server during test cleanup: %v\n", err)
+		}
 		// Give some time for the port to be released
 		time.Sleep(100 * time.Millisecond)
 	}
 	if ctx.app != nil {
-		ctx.app.Stop() // Stop the application
+		if err := ctx.app.Stop(); err != nil {
+			// Log the error but continue cleanup - test context should be reset regardless
+			fmt.Printf("Warning: Failed to stop application during test cleanup: %v\n", err)
+		}
 		// Give some time for cleanup
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -147,11 +153,17 @@ func (ctx *HTTPServerBDDTestContext) iHaveAModularApplicationWithHTTPServerModul
 	router := http.NewServeMux()
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			// Log write error but continue - test handler should not fail silently
+			fmt.Printf("Warning: Failed to write health response: %v\n", err)
+		}
 	})
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test response"))
+		if _, err := w.Write([]byte("test response")); err != nil {
+			// Log write error but continue - test handler should not fail silently
+			fmt.Printf("Warning: Failed to write test response: %v\n", err)
+		}
 	})
 
 	// Register the router service
@@ -234,10 +246,8 @@ func (ctx *HTTPServerBDDTestContext) iHaveAnHTTPServerConfiguration() error {
 }
 
 func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
-	// Debug: check TLS config at start of setupApplicationWithConfig
-	if ctx.serverConfig.TLS != nil {
-	} else {
-	}
+	// Debug: TLS config available at start of setupApplicationWithConfig
+	_ = ctx.serverConfig.TLS // TLS config check (previously empty debug branch)
 
 	logger := &testLogger{}
 
@@ -281,11 +291,17 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 	router := http.NewServeMux()
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			// Log write error but continue - test handler should not fail silently
+			fmt.Printf("Warning: Failed to write health response: %v\n", err)
+		}
 	})
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test response"))
+		if _, err := w.Write([]byte("test response")); err != nil {
+			// Log write error but continue - test handler should not fail silently
+			fmt.Printf("Warning: Failed to write test response: %v\n", err)
+		}
 	})
 
 	// Register the router service
@@ -303,10 +319,8 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 	// Register the module
 	ctx.app.RegisterModule(ctx.module)
 
-	// Debug: check TLS config before app.Init()
-	if ctx.serverConfig.TLS != nil {
-	} else {
-	}
+	// Debug: TLS config available before app.Init()
+	_ = ctx.serverConfig.TLS // TLS config check (previously empty debug branch)
 
 	// Initialize
 	err = ctx.app.Init()
@@ -315,18 +329,14 @@ func (ctx *HTTPServerBDDTestContext) setupApplicationWithConfig() error {
 		return err
 	}
 
-	// Debug: check TLS config after app.Init()
-	if ctx.serverConfig.TLS != nil {
-	} else {
-	}
+	// Debug: TLS config available after app.Init()
+	_ = ctx.serverConfig.TLS // TLS config check (previously empty debug branch)
 
 	// The HTTP server module doesn't provide services, so we access it directly
 	ctx.service = ctx.module
 
-	// Debug: check module's config
-	if ctx.service.config.TLS != nil {
-	} else {
-	}
+	// Debug: module's TLS config available
+	_ = ctx.service.config.TLS // TLS config check (previously empty debug branch)
 
 	return nil
 }

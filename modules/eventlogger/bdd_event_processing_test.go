@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
 
@@ -23,7 +22,7 @@ func (ctx *EventLoggerBDDTestContext) iEmitATestEventWithTypeAndData(eventType, 
 	event.SetID("test-id")
 	event.SetType(eventType)
 	event.SetSource("test-source")
-	event.SetData(cloudevents.ApplicationJSON, data)
+	_ = event.SetData(cloudevents.ApplicationJSON, data)
 	event.SetTime(time.Now())
 
 	// Emit event through the observer
@@ -90,7 +89,7 @@ func (ctx *EventLoggerBDDTestContext) iEmitAnEventWithMetadata() error {
 	event.SetID("meta-test-id")
 	event.SetType("metadata.test")
 	event.SetSource("test-source")
-	event.SetData(cloudevents.ApplicationJSON, "test-data")
+	_ = event.SetData(cloudevents.ApplicationJSON, "test-data")
 	event.SetTime(time.Now())
 
 	// Add custom extensions (metadata)
@@ -160,36 +159,6 @@ func (ctx *EventLoggerBDDTestContext) iHaveAnEventLoggerWithPendingEvents() erro
 		if err != nil {
 			return err
 		}
-	}
-
-	return nil
-}
-
-// Event validation step - ensures all registered events are emitted during testing
-func (ctx *EventLoggerBDDTestContext) allRegisteredEventsShouldBeEmittedDuringTesting() error {
-	// Get all registered event types from the module
-	registeredEvents := ctx.module.GetRegisteredEventTypes()
-
-	// Create event validation observer
-	validator := modular.NewEventValidationObserver("event-validator", registeredEvents)
-	_ = validator // Use validator to avoid unused variable error
-
-	// Check which events were emitted during testing
-	emittedEvents := make(map[string]bool)
-	for _, event := range ctx.eventObserver.GetEvents() {
-		emittedEvents[event.Type()] = true
-	}
-
-	// Check for missing events
-	var missingEvents []string
-	for _, eventType := range registeredEvents {
-		if !emittedEvents[eventType] {
-			missingEvents = append(missingEvents, eventType)
-		}
-	}
-
-	if len(missingEvents) > 0 {
-		return fmt.Errorf("the following registered events were not emitted during testing: %v", missingEvents)
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package chimux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"sync"
@@ -9,6 +10,15 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+)
+
+// Static errors for bdd_core_test.go
+var (
+	errFailedToInitializeApp          = errors.New("failed to initialize app")
+	errFailedToGetRouterService       = errors.New("failed to get router service")
+	errFailedToGetChimuxRouterService = errors.New("failed to get chimux router service")
+	errUnderlyingAppNoObservers       = errors.New("underlying application does not support observers")
+	errTenantConfigNotFound           = errors.New("tenant config not found")
 )
 
 // ChiMux BDD Test Context
@@ -137,7 +147,7 @@ func (ctx *ChiMuxBDDTestContext) iHaveAModularApplicationWithChimuxModuleConfigu
 
 	// Initialize
 	if err := mockTenantApp.Init(); err != nil {
-		return fmt.Errorf("failed to initialize app: %v", err)
+		return fmt.Errorf("%w: %w", errFailedToInitializeApp, err)
 	}
 
 	ctx.app = mockTenantApp
@@ -152,7 +162,7 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsInitialized() error {
 func (ctx *ChiMuxBDDTestContext) theRouterServiceShouldBeAvailable() error {
 	var routerService *ChiMuxModule
 	if err := ctx.app.GetService("router", &routerService); err != nil {
-		return fmt.Errorf("failed to get router service: %v", err)
+		return fmt.Errorf("%w: %w", errFailedToGetRouterService, err)
 	}
 
 	ctx.routerService = routerService
@@ -162,7 +172,7 @@ func (ctx *ChiMuxBDDTestContext) theRouterServiceShouldBeAvailable() error {
 func (ctx *ChiMuxBDDTestContext) theChiRouterServiceShouldBeAvailable() error {
 	var chiService *ChiMuxModule
 	if err := ctx.app.GetService("chimux.router", &chiService); err != nil {
-		return fmt.Errorf("failed to get chimux router service: %v", err)
+		return fmt.Errorf("%w: %w", errFailedToGetChimuxRouterService, err)
 	}
 
 	ctx.chiService = chiService
@@ -199,23 +209,32 @@ type mockTenantApplication struct {
 
 func (mta *mockTenantApplication) RegisterObserver(observer modular.Observer, eventTypes ...string) error {
 	if subject, ok := mta.Application.(modular.Subject); ok {
-		return subject.RegisterObserver(observer, eventTypes...)
+		if err := subject.RegisterObserver(observer, eventTypes...); err != nil {
+			return fmt.Errorf("register observer failed: %w", err)
+		}
+		return nil
 	}
-	return fmt.Errorf("underlying application does not support observers")
+	return errUnderlyingAppNoObservers
 }
 
 func (mta *mockTenantApplication) UnregisterObserver(observer modular.Observer) error {
 	if subject, ok := mta.Application.(modular.Subject); ok {
-		return subject.UnregisterObserver(observer)
+		if err := subject.UnregisterObserver(observer); err != nil {
+			return fmt.Errorf("unregister observer failed: %w", err)
+		}
+		return nil
 	}
-	return fmt.Errorf("underlying application does not support observers")
+	return errUnderlyingAppNoObservers
 }
 
 func (mta *mockTenantApplication) NotifyObservers(ctx context.Context, event cloudevents.Event) error {
 	if subject, ok := mta.Application.(modular.Subject); ok {
-		return subject.NotifyObservers(ctx, event)
+		if err := subject.NotifyObservers(ctx, event); err != nil {
+			return fmt.Errorf("notify observers failed: %w", err)
+		}
+		return nil
 	}
-	return fmt.Errorf("underlying application does not support observers")
+	return errUnderlyingAppNoObservers
 }
 
 func (mta *mockTenantApplication) GetObservers() []modular.ObserverInfo {
@@ -235,7 +254,7 @@ func (mts *mockTenantService) GetTenantConfig(tenantID modular.TenantID, section
 			return config, nil
 		}
 	}
-	return nil, fmt.Errorf("tenant config not found")
+	return nil, errTenantConfigNotFound
 }
 
 func (mts *mockTenantService) GetTenants() []modular.TenantID {

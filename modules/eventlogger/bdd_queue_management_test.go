@@ -78,7 +78,7 @@ func (ctx *EventLoggerBDDTestContext) iEmitEventsBeforeTheEventloggerStarts() er
 		event.SetID("pre-start-" + evt.data)
 		event.SetType(evt.eventType)
 		event.SetSource("test-source")
-		event.SetData(cloudevents.ApplicationJSON, evt.data)
+		_ = event.SetData(cloudevents.ApplicationJSON, evt.data)
 		event.SetTime(time.Now())
 
 		// Store for later verification
@@ -269,7 +269,7 @@ func (ctx *EventLoggerBDDTestContext) iEmitMoreEventsThanTheQueueCanHoldBeforeSt
 		event.SetID(fmt.Sprintf("overflow-test-%d", i))
 		event.SetType(fmt.Sprintf("queue.overflow.event%d", i))
 		event.SetSource("test-source")
-		event.SetData(cloudevents.ApplicationJSON, fmt.Sprintf("data%d", i))
+		_ = event.SetData(cloudevents.ApplicationJSON, fmt.Sprintf("data%d", i))
 		event.SetTime(time.Now())
 
 		// Store for later verification

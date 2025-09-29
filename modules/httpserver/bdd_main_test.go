@@ -6,6 +6,24 @@ import (
 	"github.com/cucumber/godog"
 )
 
+// setupCommonBDDScenarios sets up common BDD scenarios that are shared across multiple test files
+// This reduces code duplication by centralizing common scenario registrations
+func setupCommonBDDScenarios(ctx *godog.ScenarioContext, testCtx *HTTPServerBDDTestContext) {
+	// Background step - shared across all scenarios
+	ctx.Given(`^I have a modular application with httpserver module configured$`, testCtx.iHaveAModularApplicationWithHTTPServerModuleConfigured)
+
+	// Basic HTTP server configuration scenarios
+	ctx.Given(`^I have an HTTP server configuration$`, testCtx.iHaveAnHTTPServerConfiguration)
+	ctx.When(`^the httpserver module is initialized$`, testCtx.theHTTPServerModuleIsInitialized)
+	ctx.Then(`^the HTTP server service should be available$`, testCtx.theHTTPServerServiceShouldBeAvailable)
+	ctx.Then(`^the server should be configured with default settings$`, testCtx.theServerShouldBeConfiguredWithDefaultSettings)
+
+	// Basic server lifecycle scenarios
+	ctx.When(`^the HTTP server is started$`, testCtx.theHTTPServerIsStarted)
+	ctx.Then(`^the server should listen on the configured address$`, testCtx.theServerShouldListenOnTheConfiguredAddress)
+	ctx.Then(`^the server should accept HTTP requests$`, testCtx.theServerShouldAcceptHTTPRequests)
+}
+
 // TestHTTPServerModuleBDD runs the complete BDD test suite for the HTTP server module
 // This is the main entry point that registers all scenario steps from all themed test files
 func TestHTTPServerModuleBDD(t *testing.T) {
@@ -13,23 +31,14 @@ func TestHTTPServerModuleBDD(t *testing.T) {
 		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
 			testCtx := &HTTPServerBDDTestContext{}
 
-			// Background step - shared across all scenarios
-			ctx.Given(`^I have a modular application with httpserver module configured$`, testCtx.iHaveAModularApplicationWithHTTPServerModuleConfigured)
+			// Set up common scenarios to reduce duplication
+			setupCommonBDDScenarios(ctx, testCtx)
 
 			// ============ CORE MODULE FUNCTIONALITY ============
-			// Steps for module initialization
-			ctx.When(`^the httpserver module is initialized$`, testCtx.theHTTPServerModuleIsInitialized)
-			ctx.Then(`^the HTTP server service should be available$`, testCtx.theHTTPServerServiceShouldBeAvailable)
-			ctx.Then(`^the server should be configured with default settings$`, testCtx.theServerShouldBeConfiguredWithDefaultSettings)
-
-			// Steps for basic HTTP server
-			ctx.Given(`^I have an HTTP server configuration$`, testCtx.iHaveAnHTTPServerConfiguration)
+			// Additional specific steps not covered in common scenarios
 
 			// ============ SERVER LIFECYCLE ============
-			// Server startup/shutdown steps
-			ctx.When(`^the HTTP server is started$`, testCtx.theHTTPServerIsStarted)
-			ctx.Then(`^the server should listen on the configured address$`, testCtx.theServerShouldListenOnTheConfiguredAddress)
-			ctx.Then(`^the server should accept HTTP requests$`, testCtx.theServerShouldAcceptHTTPRequests)
+			// Additional lifecycle steps
 
 			// Steps for timeout configuration
 			ctx.Given(`^I have an HTTP server with custom timeout settings$`, testCtx.iHaveAnHTTPServerWithCustomTimeoutSettings)

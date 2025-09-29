@@ -68,10 +68,10 @@ func (t *testEventObserver) ClearEvents() {
 
 func (ctx *EventLoggerBDDTestContext) resetContext() {
 	if ctx.tempDir != "" {
-		os.RemoveAll(ctx.tempDir)
+		_ = os.RemoveAll(ctx.tempDir)
 	}
 	if ctx.app != nil {
-		ctx.app.Stop()
+		_ = ctx.app.Stop()
 		// Give some time for cleanup
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -207,14 +207,4 @@ func extractEventTypeFromLog(logLine string) string {
 		return typePart
 	}
 	return ""
-}
-
-// Helper function to check if a string contains a substring
-func containsString(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
-
-// Helper function to find index of substring
-func indexOfString(s, substr string) int {
-	return strings.Index(s, substr)
 }

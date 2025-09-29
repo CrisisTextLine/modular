@@ -1,11 +1,19 @@
 package chimux
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+)
+
+// Static errors for bdd_config_test.go
+var (
+	errFailedToInitApp       = errors.New("failed to initialize app")
+	errBasePathNotConfigured = errors.New("base path not configured")
+	errTimeoutNotConfigured  = errors.New("timeout not configured")
 )
 
 func (ctx *ChiMuxBDDTestContext) iHaveAChimuxConfigurationWithBasePath(basePath string) error {
@@ -50,7 +58,7 @@ func (ctx *ChiMuxBDDTestContext) iRegisterRoutesWithTheConfiguredBasePath() erro
 
 		// Initialize
 		if err := mockTenantApp.Init(); err != nil {
-			return fmt.Errorf("failed to initialize app: %v", err)
+			return fmt.Errorf("%w: %w", errFailedToInitApp, err)
 		}
 
 		ctx.app = mockTenantApp
@@ -72,7 +80,7 @@ func (ctx *ChiMuxBDDTestContext) allRoutesShouldBePrefixedWithTheBasePath() erro
 	// This would be verified by checking the actual route registration
 	// For BDD test purposes, we check that base path is configured
 	if ctx.config.BasePath == "" {
-		return fmt.Errorf("base path not configured")
+		return errBasePathNotConfigured
 	}
 	return nil
 }
@@ -97,7 +105,7 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleAppliesTimeoutConfiguration() er
 
 func (ctx *ChiMuxBDDTestContext) theTimeoutMiddlewareShouldBeConfigured() error {
 	if ctx.config.Timeout <= 0 {
-		return fmt.Errorf("timeout not configured")
+		return errTimeoutNotConfigured
 	}
 	return nil
 }

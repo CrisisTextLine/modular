@@ -158,23 +158,14 @@ func TestHTTPServerModuleHealthAndMonitoring(t *testing.T) {
 		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
 			testCtx := &HTTPServerBDDTestContext{}
 
-			// Background
-			ctx.Given(`^I have a modular application with httpserver module configured$`, testCtx.iHaveAModularApplicationWithHTTPServerModuleConfigured)
+			// Use common scenario setup to reduce duplication
+			setupCommonBDDScenarios(ctx, testCtx)
 
-			// Basic HTTP server configuration
-			ctx.Given(`^I have an HTTP server configuration$`, testCtx.iHaveAnHTTPServerConfiguration)
-			ctx.When(`^the httpserver module is initialized$`, testCtx.theHTTPServerModuleIsInitialized)
-			ctx.Then(`^the HTTP server service should be available$`, testCtx.theHTTPServerServiceShouldBeAvailable)
-			ctx.Then(`^the server should be configured with default settings$`, testCtx.theServerShouldBeConfiguredWithDefaultSettings)
-
-			// Steps for health checks
+			// Health monitoring specific steps
 			ctx.Given(`^I have an HTTP server with health checks enabled$`, testCtx.iHaveAnHTTPServerWithHealthChecksEnabled)
 			ctx.When(`^I request the health check endpoint$`, testCtx.iRequestTheHealthCheckEndpoint)
-			ctx.When(`^the HTTP server is started$`, testCtx.theHTTPServerIsStarted)
 			ctx.Then(`^the health check should return server status$`, testCtx.theHealthCheckShouldReturnServerStatus)
 			ctx.Then(`^the response should indicate server health$`, testCtx.theResponseShouldIndicateServerHealth)
-			ctx.Then(`^the server should listen on the configured address$`, testCtx.theServerShouldListenOnTheConfiguredAddress)
-			ctx.Then(`^the server should accept HTTP requests$`, testCtx.theServerShouldAcceptHTTPRequests)
 
 			// Steps for monitoring
 			ctx.Given(`^I have an HTTP server with monitoring enabled$`, testCtx.iHaveAnHTTPServerWithMonitoringEnabled)

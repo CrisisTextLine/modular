@@ -1,16 +1,28 @@
 package chimux
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 )
 
+// Static errors for bdd_routing_test.go
+var (
+	errNoRoutesRegistered       = errors.New("no routes were registered")
+	errChiRouterNotAvailable    = errors.New("chi router not available")
+	errGETRouteNotRegistered    = errors.New("GET route not registered")
+	errPOSTRouteNotRegistered   = errors.New("POST route not registered")
+	errPUTRouteNotRegistered    = errors.New("PUT route not registered")
+	errDELETERouteNotRegistered = errors.New("DELETE route not registered")
+	errParameterizedRouteNotReg = errors.New("parameterized route not registered")
+	errWildcardRouteNotReg      = errors.New("wildcard route not registered")
+)
+
 func (ctx *ChiMuxBDDTestContext) iRegisterAGETRouteWithHandler(path string) error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("GET " + path))
+		_, _ = w.Write([]byte("GET " + path))
 	})
 
 	ctx.routerService.Get(path, handler)
@@ -21,7 +33,7 @@ func (ctx *ChiMuxBDDTestContext) iRegisterAGETRouteWithHandler(path string) erro
 func (ctx *ChiMuxBDDTestContext) iRegisterAPOSTRouteWithHandler(path string) error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("POST " + path))
+		_, _ = w.Write([]byte("POST " + path))
 	})
 
 	ctx.routerService.Post(path, handler)
@@ -31,7 +43,7 @@ func (ctx *ChiMuxBDDTestContext) iRegisterAPOSTRouteWithHandler(path string) err
 
 func (ctx *ChiMuxBDDTestContext) theRoutesShouldBeRegisteredSuccessfully() error {
 	if len(ctx.routes) == 0 {
-		return fmt.Errorf("no routes were registered")
+		return errNoRoutesRegistered
 	}
 	return nil
 }
@@ -40,7 +52,7 @@ func (ctx *ChiMuxBDDTestContext) iUseChiSpecificRoutingFeatures() error {
 	// Use Chi router to create advanced routing patterns
 	chiRouter := ctx.chiService.ChiRouter()
 	if chiRouter == nil {
-		return fmt.Errorf("chi router not available")
+		return errChiRouterNotAvailable
 	}
 	return nil
 }
@@ -87,7 +99,7 @@ func (ctx *ChiMuxBDDTestContext) iRegisterRoutesForDifferentHTTPMethods() error 
 func (ctx *ChiMuxBDDTestContext) gETRoutesShouldBeHandledCorrectly() error {
 	_, exists := ctx.routes["GET /test"]
 	if !exists {
-		return fmt.Errorf("GET route not registered")
+		return errGETRouteNotRegistered
 	}
 	return nil
 }
@@ -95,7 +107,7 @@ func (ctx *ChiMuxBDDTestContext) gETRoutesShouldBeHandledCorrectly() error {
 func (ctx *ChiMuxBDDTestContext) pOSTRoutesShouldBeHandledCorrectly() error {
 	_, exists := ctx.routes["POST /test"]
 	if !exists {
-		return fmt.Errorf("POST route not registered")
+		return errPOSTRouteNotRegistered
 	}
 	return nil
 }
@@ -103,7 +115,7 @@ func (ctx *ChiMuxBDDTestContext) pOSTRoutesShouldBeHandledCorrectly() error {
 func (ctx *ChiMuxBDDTestContext) pUTRoutesShouldBeHandledCorrectly() error {
 	_, exists := ctx.routes["PUT /test"]
 	if !exists {
-		return fmt.Errorf("PUT route not registered")
+		return errPUTRouteNotRegistered
 	}
 	return nil
 }
@@ -111,7 +123,7 @@ func (ctx *ChiMuxBDDTestContext) pUTRoutesShouldBeHandledCorrectly() error {
 func (ctx *ChiMuxBDDTestContext) dELETERoutesShouldBeHandledCorrectly() error {
 	_, exists := ctx.routes["DELETE /test"]
 	if !exists {
-		return fmt.Errorf("DELETE route not registered")
+		return errDELETERouteNotRegistered
 	}
 	return nil
 }
@@ -133,7 +145,7 @@ func (ctx *ChiMuxBDDTestContext) iRegisterParameterizedRoutes() error {
 func (ctx *ChiMuxBDDTestContext) routeParametersShouldBeExtractedCorrectly() error {
 	_, exists := ctx.routes["GET /users/{id}"]
 	if !exists {
-		return fmt.Errorf("parameterized route not registered")
+		return errParameterizedRouteNotReg
 	}
 	return nil
 }
@@ -141,7 +153,7 @@ func (ctx *ChiMuxBDDTestContext) routeParametersShouldBeExtractedCorrectly() err
 func (ctx *ChiMuxBDDTestContext) wildcardRoutesShouldMatchAppropriately() error {
 	_, exists := ctx.routes["GET /posts/*"]
 	if !exists {
-		return fmt.Errorf("wildcard route not registered")
+		return errWildcardRouteNotReg
 	}
 	return nil
 }

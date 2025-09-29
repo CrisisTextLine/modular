@@ -1,10 +1,17 @@
 package chimux
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+)
+
+// Static errors for bdd_cors_test.go
+var (
+	errFailedToInitAppCORS = errors.New("failed to initialize app")
+	errCORSConfigNotSet    = errors.New("CORS configuration not properly set, expected custom origins")
 )
 
 func (ctx *ChiMuxBDDTestContext) iHaveAChimuxConfigurationWithCORSSettings() error {
@@ -47,7 +54,7 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsInitializedWithCORS() error {
 
 	// Initialize
 	if err := mockTenantApp.Init(); err != nil {
-		return fmt.Errorf("failed to initialize app: %v", err)
+		return fmt.Errorf("%w: %w", errFailedToInitAppCORS, err)
 	}
 
 	ctx.app = mockTenantApp
@@ -63,7 +70,7 @@ func (ctx *ChiMuxBDDTestContext) theCORSMiddlewareShouldBeConfigured() error {
 func (ctx *ChiMuxBDDTestContext) allowedOriginsShouldIncludeTheConfiguredValues() error {
 	// The config should have been updated and used during initialization
 	if len(ctx.config.AllowedOrigins) == 0 || ctx.config.AllowedOrigins[0] == "*" {
-		return fmt.Errorf("CORS configuration not properly set, expected custom origins but got: %v", ctx.config.AllowedOrigins)
+		return fmt.Errorf("%w but got: %v", errCORSConfigNotSet, ctx.config.AllowedOrigins)
 	}
 	return nil
 }

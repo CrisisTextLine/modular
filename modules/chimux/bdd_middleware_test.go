@@ -1,8 +1,14 @@
 package chimux
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
+)
+
+// Static errors for bdd_middleware_test.go
+var (
+	errNoMiddlewareProviders      = errors.New("no middleware providers available")
+	errNeedTwoMiddlewareProviders = errors.New("need at least 2 middleware providers for ordering test")
 )
 
 // Test middleware provider
@@ -51,7 +57,7 @@ func (ctx *ChiMuxBDDTestContext) theMiddlewareShouldBeAppliedToTheRouter() error
 	// This would be verified by checking that middleware is actually applied
 	// For BDD test purposes, we assume it's applied if providers exist
 	if len(ctx.middlewareProviders) == 0 {
-		return fmt.Errorf("no middleware providers available")
+		return errNoMiddlewareProviders
 	}
 	return nil
 }
@@ -72,7 +78,7 @@ func (ctx *ChiMuxBDDTestContext) middlewareIsAppliedToTheRouter() error {
 func (ctx *ChiMuxBDDTestContext) middlewareShouldBeAppliedInTheCorrectOrder() error {
 	// For testing purposes, check that providers are ordered
 	if len(ctx.middlewareProviders) < 2 {
-		return fmt.Errorf("need at least 2 middleware providers for ordering test")
+		return errNeedTwoMiddlewareProviders
 	}
 	return nil
 }

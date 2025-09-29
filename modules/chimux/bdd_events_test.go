@@ -2,6 +2,7 @@ package chimux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,22 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+)
+
+// Static errors for bdd_events_test.go
+var (
+	errEventNotEmitted             = errors.New("event was not emitted")
+	errRouterServiceNotAvailable   = errors.New("router service not available")
+	errModuleNotAvailableForStop   = errors.New("module not available for stop testing")
+	errEventShouldContainInfo      = errors.New("event should contain information")
+	errExpectedRouteEventsCount    = errors.New("expected route registered events count mismatch")
+	errExpectedRoutePathNotFound   = errors.New("expected route path not found in events")
+	errChimuxModuleNotAvailable    = errors.New("chimux module not available")
+	errChimuxConfigNotLoaded       = errors.New("chimux configuration not loaded")
+	errEventObserverNotAvailable   = errors.New("event observer not available")
+	errNoGETRouteAvailable         = errors.New("no GET route available to disable")
+	errNoMiddlewareAppliedToRemove = errors.New("no middleware applied to remove")
+	errExpected404AfterDisabling   = errors.New("expected 404 after disabling route")
 )
 
 // Event observation step implementations
@@ -93,7 +110,7 @@ func (ctx *ChiMuxBDDTestContext) aConfigLoadedEventShouldBeEmitted() error {
 		eventTypes[i] = event.Type()
 	}
 
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeConfigLoaded, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeConfigLoaded, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) aRouterCreatedEventShouldBeEmitted() error {
@@ -111,7 +128,7 @@ func (ctx *ChiMuxBDDTestContext) aRouterCreatedEventShouldBeEmitted() error {
 		eventTypes[i] = event.Type()
 	}
 
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRouterCreated, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeRouterCreated, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) aModuleStartedEventShouldBeEmitted() error {
@@ -129,7 +146,7 @@ func (ctx *ChiMuxBDDTestContext) aModuleStartedEventShouldBeEmitted() error {
 		eventTypes[i] = event.Type()
 	}
 
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeModuleStarted, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeModuleStarted, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) routeRegisteredEventsShouldBeEmitted() error {
@@ -148,7 +165,7 @@ func (ctx *ChiMuxBDDTestContext) routeRegisteredEventsShouldBeEmitted() error {
 		for i, event := range events {
 			eventTypes[i] = event.Type()
 		}
-		return fmt.Errorf("expected at least 2 route registered events, found %d. Captured events: %v", routeRegisteredCount, eventTypes)
+		return fmt.Errorf("%w: found %d. Captured events: %v", errExpectedRouteEventsCount, routeRegisteredCount, eventTypes)
 	}
 
 	return nil
@@ -184,7 +201,7 @@ func (ctx *ChiMuxBDDTestContext) theEventsShouldContainTheCorrectRouteInformatio
 			}
 		}
 		if !found {
-			return fmt.Errorf("expected route path %s not found in events. Found paths: %v", expectedPath, routePaths)
+			return fmt.Errorf("%w %s not found in events. Found paths: %v", errExpectedRoutePathNotFound, expectedPath, routePaths)
 		}
 	}
 
@@ -206,7 +223,7 @@ func (ctx *ChiMuxBDDTestContext) aCORSConfiguredEventShouldBeEmitted() error {
 		eventTypes[i] = event.Type()
 	}
 
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeCorsConfigured, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeCorsConfigured, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) aCORSEnabledEventShouldBeEmitted() error {
@@ -224,7 +241,7 @@ func (ctx *ChiMuxBDDTestContext) aCORSEnabledEventShouldBeEmitted() error {
 		eventTypes[i] = event.Type()
 	}
 
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeCorsEnabled, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeCorsEnabled, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) middlewareAddedEventsShouldBeEmitted() error {
@@ -242,7 +259,7 @@ func (ctx *ChiMuxBDDTestContext) middlewareAddedEventsShouldBeEmitted() error {
 		eventTypes[i] = event.Type()
 	}
 
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeMiddlewareAdded, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeMiddlewareAdded, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) theEventsShouldContainMiddlewareInformation() error {
@@ -264,7 +281,7 @@ func (ctx *ChiMuxBDDTestContext) theEventsShouldContainMiddlewareInformation() e
 		}
 	}
 
-	return fmt.Errorf("middleware added events should contain middleware information")
+	return fmt.Errorf("%w: middleware added events should contain middleware information", errEventShouldContainInfo)
 }
 
 // New event observation step implementations for missing events
@@ -280,13 +297,13 @@ func (ctx *ChiMuxBDDTestContext) iHaveAChimuxConfigurationWithValidationRequirem
 func (ctx *ChiMuxBDDTestContext) theChimuxModuleValidatesTheConfiguration() error {
 	// Trigger real configuration validation by accessing the module's config validation
 	if ctx.module == nil {
-		return fmt.Errorf("chimux module not available")
+		return errChimuxModuleNotAvailable
 	}
 
 	// Get the current configuration
 	config := ctx.module.config
 	if config == nil {
-		return fmt.Errorf("chimux configuration not loaded")
+		return errChimuxConfigNotLoaded
 	}
 
 	// Perform actual validation and emit event based on result
@@ -311,7 +328,7 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleValidatesTheConfiguration() erro
 
 func (ctx *ChiMuxBDDTestContext) aConfigValidatedEventShouldBeEmitted() error {
 	if ctx.eventObserver == nil {
-		return fmt.Errorf("event observer not available")
+		return errEventObserverNotAvailable
 	}
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -323,7 +340,7 @@ func (ctx *ChiMuxBDDTestContext) aConfigValidatedEventShouldBeEmitted() error {
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.Type())
 	}
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeConfigValidated, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeConfigValidated, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) theEventShouldContainValidationResults() error {
@@ -334,13 +351,13 @@ func (ctx *ChiMuxBDDTestContext) theEventShouldContainValidationResults() error 
 			return nil
 		}
 	}
-	return fmt.Errorf("config validated event should contain validation results")
+	return fmt.Errorf("%w: config validated event should contain validation results", errEventShouldContainInfo)
 }
 
 func (ctx *ChiMuxBDDTestContext) theRouterIsStarted() error {
 	// Call the actual Start() method which will emit the RouterStarted event
 	if ctx.module == nil {
-		return fmt.Errorf("chimux module not available")
+		return errChimuxModuleNotAvailable
 	}
 
 	return ctx.module.Start(context.Background())
@@ -348,7 +365,7 @@ func (ctx *ChiMuxBDDTestContext) theRouterIsStarted() error {
 
 func (ctx *ChiMuxBDDTestContext) aRouterStartedEventShouldBeEmitted() error {
 	if ctx.eventObserver == nil {
-		return fmt.Errorf("event observer not available")
+		return errEventObserverNotAvailable
 	}
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -360,13 +377,13 @@ func (ctx *ChiMuxBDDTestContext) aRouterStartedEventShouldBeEmitted() error {
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.Type())
 	}
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRouterStarted, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeRouterStarted, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) theRouterIsStopped() error {
 	// Call the actual Stop() method which will emit the RouterStopped event
 	if ctx.module == nil {
-		return fmt.Errorf("chimux module not available")
+		return errChimuxModuleNotAvailable
 	}
 
 	return ctx.module.Stop(context.Background())
@@ -376,7 +393,7 @@ func (ctx *ChiMuxBDDTestContext) aRouterStoppedEventShouldBeEmitted() error {
 	time.Sleep(100 * time.Millisecond) // Allow time for async event emission
 
 	if ctx.eventObserver == nil {
-		return fmt.Errorf("event observer not available")
+		return errEventObserverNotAvailable
 	}
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -388,13 +405,13 @@ func (ctx *ChiMuxBDDTestContext) aRouterStoppedEventShouldBeEmitted() error {
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.Type())
 	}
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRouterStopped, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeRouterStopped, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) iHaveRegisteredRoutes() error {
 	// Set up some routes for removal testing
 	if ctx.routerService == nil {
-		return fmt.Errorf("router service not available")
+		return errRouterServiceNotAvailable
 	}
 	ctx.routerService.Get("/test-route", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -406,7 +423,7 @@ func (ctx *ChiMuxBDDTestContext) iHaveRegisteredRoutes() error {
 func (ctx *ChiMuxBDDTestContext) iRemoveARouteFromTheRouter() error {
 	// Actually disable a route via the chimux runtime feature
 	if ctx.module == nil {
-		return fmt.Errorf("chimux module not available")
+		return errChimuxModuleNotAvailable
 	}
 	// Expect a previously registered GET route (like /test-route) in routes map
 	var target string
@@ -417,13 +434,14 @@ func (ctx *ChiMuxBDDTestContext) iRemoveARouteFromTheRouter() error {
 		}
 	}
 	if target == "" {
-		return fmt.Errorf("no GET route available to disable")
+		return errNoGETRouteAvailable
 	}
 	// target key may include method if earlier logic stored differently; normalize
 	pattern := target
-	if strings.HasPrefix(pattern, "/") == false {
+	if !strings.HasPrefix(pattern, "/") {
 		// keys like "/test-route" expected; if stored as "/test-route" that's fine
-		// if stored as pattern only skip
+		// if stored as pattern only skip - add explicit no-op
+		pattern = "/" + pattern
 	}
 	// Disable route using new module API
 	if err := ctx.module.DisableRoute("GET", pattern); err != nil {
@@ -434,7 +452,7 @@ func (ctx *ChiMuxBDDTestContext) iRemoveARouteFromTheRouter() error {
 	w := httptest.NewRecorder()
 	ctx.module.router.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
-		return fmt.Errorf("expected 404 after disabling route, got %d", w.Code)
+		return fmt.Errorf("%w, got %d", errExpected404AfterDisabling, w.Code)
 	}
 	// Allow brief delay for event observer to capture emitted removal event
 	time.Sleep(20 * time.Millisecond)
@@ -443,7 +461,7 @@ func (ctx *ChiMuxBDDTestContext) iRemoveARouteFromTheRouter() error {
 
 func (ctx *ChiMuxBDDTestContext) aRouteRemovedEventShouldBeEmitted() error {
 	if ctx.eventObserver == nil {
-		return fmt.Errorf("event observer not available")
+		return errEventObserverNotAvailable
 	}
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -455,7 +473,7 @@ func (ctx *ChiMuxBDDTestContext) aRouteRemovedEventShouldBeEmitted() error {
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.Type())
 	}
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRouteRemoved, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeRouteRemoved, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) theEventShouldContainTheRemovedRouteInformation() error {
@@ -466,13 +484,13 @@ func (ctx *ChiMuxBDDTestContext) theEventShouldContainTheRemovedRouteInformation
 			return nil
 		}
 	}
-	return fmt.Errorf("route removed event should contain the removed route information")
+	return fmt.Errorf("%w: route removed event should contain the removed route information", errEventShouldContainInfo)
 }
 
 func (ctx *ChiMuxBDDTestContext) iHaveMiddlewareAppliedToTheRouter() error {
 	// Set up middleware for removal testing
 	if ctx.routerService == nil {
-		return fmt.Errorf("router service not available")
+		return errRouterServiceNotAvailable
 	}
 	// Apply named middleware using new runtime-controllable facility
 	name := "test-middleware"
@@ -488,10 +506,10 @@ func (ctx *ChiMuxBDDTestContext) iHaveMiddlewareAppliedToTheRouter() error {
 
 func (ctx *ChiMuxBDDTestContext) iRemoveMiddlewareFromTheRouter() error {
 	if ctx.module == nil {
-		return fmt.Errorf("chimux module not available")
+		return errChimuxModuleNotAvailable
 	}
 	if len(ctx.appliedMiddleware) == 0 {
-		return fmt.Errorf("no middleware applied to remove")
+		return errNoMiddlewareAppliedToRemove
 	}
 	removed := ctx.appliedMiddleware[0]
 	if err := ctx.module.RemoveMiddleware(removed); err != nil {
@@ -505,7 +523,7 @@ func (ctx *ChiMuxBDDTestContext) iRemoveMiddlewareFromTheRouter() error {
 
 func (ctx *ChiMuxBDDTestContext) aMiddlewareRemovedEventShouldBeEmitted() error {
 	if ctx.eventObserver == nil {
-		return fmt.Errorf("event observer not available")
+		return errEventObserverNotAvailable
 	}
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -517,7 +535,7 @@ func (ctx *ChiMuxBDDTestContext) aMiddlewareRemovedEventShouldBeEmitted() error 
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.Type())
 	}
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeMiddlewareRemoved, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeMiddlewareRemoved, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) theEventShouldContainTheRemovedMiddlewareInformation() error {
@@ -528,7 +546,7 @@ func (ctx *ChiMuxBDDTestContext) theEventShouldContainTheRemovedMiddlewareInform
 			return nil
 		}
 	}
-	return fmt.Errorf("middleware removed event should contain the removed middleware information")
+	return fmt.Errorf("%w: middleware removed event should contain the removed middleware information", errEventShouldContainInfo)
 }
 
 func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsStarted() error {
@@ -546,12 +564,12 @@ func (ctx *ChiMuxBDDTestContext) theChimuxModuleIsStopped() error {
 		time.Sleep(10 * time.Millisecond)
 		return err
 	}
-	return fmt.Errorf("module not available for stop testing")
+	return errModuleNotAvailableForStop
 }
 
 func (ctx *ChiMuxBDDTestContext) aModuleStoppedEventShouldBeEmitted() error {
 	if ctx.eventObserver == nil {
-		return fmt.Errorf("event observer not available")
+		return errEventObserverNotAvailable
 	}
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -563,7 +581,7 @@ func (ctx *ChiMuxBDDTestContext) aModuleStoppedEventShouldBeEmitted() error {
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.Type())
 	}
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeModuleStopped, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeModuleStopped, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) theEventShouldContainModuleStopInformation() error {
@@ -574,17 +592,17 @@ func (ctx *ChiMuxBDDTestContext) theEventShouldContainModuleStopInformation() er
 			return nil
 		}
 	}
-	return fmt.Errorf("module stopped event should contain module stop information")
+	return fmt.Errorf("%w: module stopped event should contain module stop information", errEventShouldContainInfo)
 }
 
 func (ctx *ChiMuxBDDTestContext) iHaveRoutesRegisteredForRequestHandling() error {
 	if ctx.routerService == nil {
-		return fmt.Errorf("router service not available")
+		return errRouterServiceNotAvailable
 	}
 	// Register test routes
 	ctx.routerService.Get("/test-request", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	})
 	return nil
 }
@@ -595,7 +613,7 @@ func (ctx *ChiMuxBDDTestContext) iMakeAnHTTPRequestToTheRouter() error {
 	if ctx.module != nil && ctx.module.router != nil {
 		ctx.module.router.Get("/test-request", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("test response"))
+			_, _ = w.Write([]byte("test response"))
 		})
 
 		// Create a test request
@@ -616,7 +634,7 @@ func (ctx *ChiMuxBDDTestContext) iMakeAnHTTPRequestToTheRouter() error {
 
 func (ctx *ChiMuxBDDTestContext) aRequestReceivedEventShouldBeEmitted() error {
 	if ctx.eventObserver == nil {
-		return fmt.Errorf("event observer not available")
+		return errEventObserverNotAvailable
 	}
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -628,12 +646,12 @@ func (ctx *ChiMuxBDDTestContext) aRequestReceivedEventShouldBeEmitted() error {
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.Type())
 	}
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestReceived, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeRequestReceived, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) aRequestProcessedEventShouldBeEmitted() error {
 	if ctx.eventObserver == nil {
-		return fmt.Errorf("event observer not available")
+		return errEventObserverNotAvailable
 	}
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -645,7 +663,7 @@ func (ctx *ChiMuxBDDTestContext) aRequestProcessedEventShouldBeEmitted() error {
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.Type())
 	}
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestProcessed, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeRequestProcessed, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) theEventsShouldContainRequestProcessingInformation() error {
@@ -656,17 +674,17 @@ func (ctx *ChiMuxBDDTestContext) theEventsShouldContainRequestProcessingInformat
 			return nil
 		}
 	}
-	return fmt.Errorf("request events should contain request processing information")
+	return fmt.Errorf("%w: request events should contain request processing information", errEventShouldContainInfo)
 }
 
 func (ctx *ChiMuxBDDTestContext) iHaveRoutesThatCanFail() error {
 	if ctx.routerService == nil {
-		return fmt.Errorf("router service not available")
+		return errRouterServiceNotAvailable
 	}
 	// Register a route that can fail
 	ctx.routerService.Get("/failing-route", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("server error"))
+		_, _ = w.Write([]byte("server error"))
 	})
 	return nil
 }
@@ -677,7 +695,7 @@ func (ctx *ChiMuxBDDTestContext) iMakeARequestThatCausesAFailure() error {
 		// Register a failing route
 		ctx.module.router.Get("/failing-route", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal Server Error"))
+			_, _ = w.Write([]byte("Internal Server Error"))
 		})
 
 		// Create a test request
@@ -698,7 +716,7 @@ func (ctx *ChiMuxBDDTestContext) iMakeARequestThatCausesAFailure() error {
 
 func (ctx *ChiMuxBDDTestContext) aRequestFailedEventShouldBeEmitted() error {
 	if ctx.eventObserver == nil {
-		return fmt.Errorf("event observer not available")
+		return errEventObserverNotAvailable
 	}
 	events := ctx.eventObserver.GetEvents()
 	for _, event := range events {
@@ -710,7 +728,7 @@ func (ctx *ChiMuxBDDTestContext) aRequestFailedEventShouldBeEmitted() error {
 	for _, event := range events {
 		eventTypes = append(eventTypes, event.Type())
 	}
-	return fmt.Errorf("event of type %s was not emitted. Captured events: %v", EventTypeRequestFailed, eventTypes)
+	return fmt.Errorf("%w: event of type %s was not emitted. Captured events: %v", errEventNotEmitted, EventTypeRequestFailed, eventTypes)
 }
 
 func (ctx *ChiMuxBDDTestContext) theEventShouldContainFailureInformation() error {
@@ -721,35 +739,5 @@ func (ctx *ChiMuxBDDTestContext) theEventShouldContainFailureInformation() error
 			return nil
 		}
 	}
-	return fmt.Errorf("request failed event should contain failure information")
-}
-
-// Event validation step - ensures all registered events are emitted during testing
-func (ctx *ChiMuxBDDTestContext) allRegisteredEventsShouldBeEmittedDuringTesting() error {
-	// Get all registered event types from the module
-	registeredEvents := ctx.module.GetRegisteredEventTypes()
-
-	// Create event validation observer
-	validator := modular.NewEventValidationObserver("event-validator", registeredEvents)
-	_ = validator // Use validator to avoid unused variable error
-
-	// Check which events were emitted during testing
-	emittedEvents := make(map[string]bool)
-	for _, event := range ctx.eventObserver.GetEvents() {
-		emittedEvents[event.Type()] = true
-	}
-
-	// Check for missing events
-	var missingEvents []string
-	for _, eventType := range registeredEvents {
-		if !emittedEvents[eventType] {
-			missingEvents = append(missingEvents, eventType)
-		}
-	}
-
-	if len(missingEvents) > 0 {
-		return fmt.Errorf("the following registered events were not emitted during testing: %v", missingEvents)
-	}
-
-	return nil
+	return fmt.Errorf("%w: request failed event should contain failure information", errEventShouldContainInfo)
 }

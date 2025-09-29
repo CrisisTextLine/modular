@@ -82,7 +82,7 @@ func (ctx *EventLoggerBDDTestContext) iRapidlyEmitMoreEventsThanTheBufferCanHold
 			event.SetID("test-id")
 			event.SetType(fmt.Sprintf("buffer.test.%d", i))
 			event.SetSource("test-source")
-			event.SetData(cloudevents.ApplicationJSON, "data")
+			_ = event.SetData(cloudevents.ApplicationJSON, "data")
 			event.SetTime(time.Now())
 			_ = ctx.service.OnEvent(context.Background(), event)
 		}()

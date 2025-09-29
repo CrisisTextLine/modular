@@ -493,9 +493,12 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 	if router == nil {
 		return fmt.Errorf("router service is nil after retrieval")
 	}
+	// Safely initialize routes map using the router's mutex
+	router.mu.Lock()
 	if router.routes == nil {
 		router.routes = make(map[string]http.HandlerFunc)
 	}
+	router.mu.Unlock()
 
 	// Use the constructor to properly initialize the module with dependencies
 	constructor := module.Constructor()

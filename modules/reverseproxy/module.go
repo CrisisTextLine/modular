@@ -1552,17 +1552,31 @@ func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backe
 			"error":   err.Error(),
 		})
 
+		// For statusCapturingResponseWriter, check if we've already handled this case
+		if sw, ok := w.(*statusCapturingResponseWriter); ok {
+			sw.mu.Lock()
+			alreadyHandled := sw.wroteHeader
+			sw.mu.Unlock()
+			if alreadyHandled {
+				// Response already written (probably by timeout handler), don't write again
+				return
+			}
+		}
+
 		// Return appropriate HTTP status code based on error type
-		if strings.Contains(err.Error(), "connection refused") ||
-			strings.Contains(err.Error(), "no such host") ||
-			strings.Contains(err.Error(), "connection timeout") {
+		// Check for timeout errors first (more specific)
+		errorMsg := strings.ToLower(err.Error())
+		if strings.Contains(errorMsg, "context deadline exceeded") ||
+			strings.Contains(errorMsg, "timeout") ||
+			strings.Contains(errorMsg, "deadline") {
+			http.Error(w, "Gateway timeout", http.StatusGatewayTimeout)
+		} else if strings.Contains(err.Error(), "connection refused") ||
+			strings.Contains(err.Error(), "no such host") {
 			http.Error(w, "Backend service unavailable", http.StatusBadGateway)
-		} else if strings.Contains(err.Error(), "context deadline exceeded") ||
-			strings.Contains(err.Error(), "timeout") {
-			http.Error(w, "Gateway timeout", http.StatusBadGateway)
 		} else {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
+
 	}
 
 	return proxy
@@ -1951,6 +1965,18 @@ func (w *statusCapturingResponseWriter) WriteHeader(code int) {
 	}
 }
 
+func (w *statusCapturingResponseWriter) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	// Ensure headers are written before body
+	if !w.wroteHeader {
+		w.status = http.StatusOK
+		w.wroteHeader = true
+		w.ResponseWriter.WriteHeader(w.status)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
 // createBackendProxyHandler creates an http.HandlerFunc that handles proxying requests
 // to a specific backend, with support for tenant-specific backends and feature flag evaluation
 func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.HandlerFunc {
@@ -2209,10 +2235,11 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 						sw.wroteHeader = true
 						sw.status = http.StatusGatewayTimeout
 						sw.mu.Unlock()
-						w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-						w.Header().Set("X-Content-Type-Options", "nosniff")
-						w.WriteHeader(http.StatusGatewayTimeout)
-						fmt.Fprintln(w, "Request timeout")
+						// Write through the synchronized wrapper to prevent race conditions
+						sw.Header().Set("Content-Type", "text/plain; charset=utf-8")
+						sw.Header().Set("X-Content-Type-Options", "nosniff")
+						sw.WriteHeader(http.StatusGatewayTimeout)
+						fmt.Fprintln(sw, "Request timeout")
 					} else {
 						sw.mu.Unlock()
 					}
@@ -2249,10 +2276,15 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 			// No circuit breaker, use the proxy directly but capture status and apply timeout
 			// Create a request-specific proxy to avoid race conditions on shared Transport field
 			proxyForRequest := &httputil.ReverseProxy{
-				Director:  proxy.Director,
-				Transport: proxy.Transport, // Start with the original transport
+				Director:       proxy.Director,
+				Transport:      proxy.Transport, // Start with the original transport
+				FlushInterval:  proxy.FlushInterval,
+				ErrorLog:       proxy.ErrorLog,
+				BufferPool:     proxy.BufferPool,
+				ModifyResponse: proxy.ModifyResponse,
+				ErrorHandler:   proxy.ErrorHandler, // Critical: copy the custom error handler
 			}
-			
+
 			// Configure request-specific timeout transport without modifying shared proxy
 			if proxyForRequest.Transport != nil {
 				if transport, ok := proxyForRequest.Transport.(*http.Transport); ok {
@@ -2310,10 +2342,11 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 						sw.wroteHeader = true
 						sw.status = http.StatusGatewayTimeout
 						sw.mu.Unlock()
-						w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-						w.Header().Set("X-Content-Type-Options", "nosniff")
-						w.WriteHeader(http.StatusGatewayTimeout)
-						fmt.Fprintln(w, "Request timeout")
+						// Write through the synchronized wrapper to prevent race conditions
+						sw.Header().Set("Content-Type", "text/plain; charset=utf-8")
+						sw.Header().Set("X-Content-Type-Options", "nosniff")
+						sw.WriteHeader(http.StatusGatewayTimeout)
+						fmt.Fprintln(sw, "Request timeout")
 					} else {
 						sw.mu.Unlock()
 					}

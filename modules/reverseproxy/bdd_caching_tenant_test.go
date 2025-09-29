@@ -177,7 +177,29 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithSpecificCacheTTLCon
 		},
 	}
 
-	return ctx.setupApplicationWithConfig()
+	err = ctx.setupApplicationWithConfig()
+	if err != nil {
+		return err
+	}
+
+	// Make an initial request to populate the cache
+	// This ensures there's something in the cache that can expire
+	resp, err := ctx.makeRequestThroughModule("GET", "/api/cached", nil)
+	if err != nil {
+		return fmt.Errorf("failed to make initial cache population request: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return fmt.Errorf("initial cache population request should succeed, got status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Verify that the cache is actually enabled and working
+	if ctx.service == nil || ctx.service.responseCache == nil {
+		return fmt.Errorf("response cache not initialized")
+	}
+
+	return nil
 }
 
 // Cache TTL Management Functions
@@ -191,11 +213,8 @@ func (ctx *ReverseProxyBDDTestContext) cachedResponsesAgeBeyondTTL() error {
 		ctx.eventObserver.ClearEvents()
 	}
 
-	// Send request that should hit backend due to expired cache
-	resp, err := ctx.makeRequestThroughModule("GET", "/api/cached", nil)
-	if err == nil && resp != nil {
-		resp.Body.Close()
-	}
+	// Don't make a request here as it would repopulate the cache
+	// The next step will verify that requests hit the backend due to expired cache
 
 	return nil
 }

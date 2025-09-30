@@ -204,7 +204,6 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: latest
-          only-new-issues: true
           working-directory: modules/${{ matrix.module }}
           args: -c ../../.golangci.github.yml
 

@@ -796,6 +796,11 @@ func deepCopyValue(dst, src reflect.Value) {
 		for i := 0; i < src.Len(); i++ {
 			deepCopyValue(dst.Index(i), src.Index(i))
 		}
+	case reflect.Array:
+		// Arrays are fixed-size, copy each element
+		for i := 0; i < src.Len(); i++ {
+			deepCopyValue(dst.Index(i), src.Index(i))
+		}
 	case reflect.Ptr:
 		if src.IsNil() {
 			return
@@ -803,6 +808,17 @@ func deepCopyValue(dst, src reflect.Value) {
 		// Create a new pointer to the same type
 		dst.Set(reflect.New(src.Elem().Type()))
 		deepCopyValue(dst.Elem(), src.Elem())
+	case reflect.Interface:
+		if src.IsNil() {
+			return
+		}
+		// For interfaces, copy the underlying concrete value
+		concreteValue := src.Elem()
+		if concreteValue.IsValid() {
+			concreteCopy := reflect.New(concreteValue.Type()).Elem()
+			deepCopyValue(concreteCopy, concreteValue)
+			dst.Set(concreteCopy)
+		}
 	case reflect.Struct:
 		// Copy each field of the struct
 		for i := 0; i < src.NumField(); i++ {
@@ -810,11 +826,22 @@ func deepCopyValue(dst, src reflect.Value) {
 				deepCopyValue(dst.Field(i), src.Field(i))
 			}
 		}
-	default:
-		// For basic types, just set the value
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128,
+		reflect.String:
+		// Basic types can be directly copied
 		if dst.CanSet() {
 			dst.Set(src)
 		}
+	case reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		// Channels, functions, and unsafe pointers are copied by reference
+		if dst.CanSet() {
+			dst.Set(src)
+		}
+	case reflect.Invalid:
+		// Invalid values should not be copied
+		return
 	}
 }
 

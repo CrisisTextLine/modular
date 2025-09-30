@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDryRunBugFixes tests the specific bugs that were fixed in the dry-run feature:
@@ -490,4 +492,224 @@ func testEndToEndDryRunWithRequestBody(t *testing.T) {
 	if err := reverseProxyModule.Stop(context.Background()); err != nil {
 		t.Errorf("Failed to stop reverse proxy module: %v", err)
 	}
+}
+
+// TestDryRunUsesTenantSpecificBackendURLs tests that dry run requests use tenant-specific
+// backend URLs when a tenant ID is provided, and fall back to global URLs otherwise.
+// This test verifies the fix for the bug where all tenants were using global backend URLs.
+func TestDryRunUsesTenantSpecificBackendURLs(t *testing.T) {
+	var globalPrimaryHit, globalSecondaryHit, tenantPrimaryHit, tenantSecondaryHit bool
+	var mu sync.Mutex
+
+	// Create global backend servers
+	globalPrimaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		globalPrimaryHit = true
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"backend":"global-primary"}`))
+	}))
+	defer globalPrimaryServer.Close()
+
+	globalSecondaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		globalSecondaryHit = true
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"backend":"global-secondary"}`))
+	}))
+	defer globalSecondaryServer.Close()
+
+	// Create tenant-specific backend servers
+	tenantPrimaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		tenantPrimaryHit = true
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"backend":"tenant-primary"}`))
+	}))
+	defer tenantPrimaryServer.Close()
+
+	tenantSecondaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		tenantSecondaryHit = true
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"backend":"tenant-secondary"}`))
+	}))
+	defer tenantSecondaryServer.Close()
+
+	// Create mock application
+	mockApp := &mockTenantApplication{}
+	mockApp.On("Logger").Return(&mockLogger{})
+
+	// Create global config with global backend URLs
+	globalConfig := &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"primary":   globalPrimaryServer.URL,
+			"secondary": globalSecondaryServer.URL,
+		},
+		DefaultBackend: "primary",
+		Routes: map[string]string{
+			"/api/test": "primary",
+		},
+		RouteConfigs: map[string]RouteConfig{
+			"/api/test": {
+				DryRun:        true,
+				DryRunBackend: "secondary",
+			},
+		},
+		DryRun: DryRunConfig{
+			Enabled:                true,
+			LogResponses:           true,
+			MaxResponseSize:        1024,
+			DefaultResponseBackend: "primary",
+		},
+		TenantIDHeader: "X-Tenant-ID",
+	}
+
+	// Setup tenant config with different backend URLs
+	tenantID := modular.TenantID("test-tenant")
+	tenantConfig := &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"primary":   tenantPrimaryServer.URL,
+			"secondary": tenantSecondaryServer.URL,
+		},
+	}
+
+	// Configure mock app to return our configs
+	mockCP := NewStdConfigProvider(globalConfig)
+	tenantMockCP := NewStdConfigProvider(tenantConfig)
+	mockApp.On("GetConfigSection", "reverseproxy").Return(mockCP, nil)
+	mockApp.On("GetTenantConfig", tenantID, "reverseproxy").Return(tenantMockCP, nil)
+	mockApp.On("ConfigProvider").Return(mockCP)
+	mockApp.On("ConfigSections").Return(map[string]modular.ConfigProvider{
+		"reverseproxy": mockCP,
+	})
+
+	// Create and initialize module
+	module := NewModule()
+	router := &testRouter{routes: make(map[string]http.HandlerFunc)}
+
+	constructedModule, err := module.Constructor()(mockApp, map[string]any{
+		"router": router,
+	})
+	require.NoError(t, err)
+
+	reverseProxyModule := constructedModule.(*ReverseProxyModule)
+
+	// Initialize module first
+	err = reverseProxyModule.Init(mockApp)
+	require.NoError(t, err)
+
+	// Register tenant after initialization (correct lifecycle)
+	reverseProxyModule.OnTenantRegistered(tenantID)
+
+	// Manually set up tenant config (simulating what Start() does)
+	reverseProxyModule.tenants[tenantID] = tenantConfig
+
+	err = reverseProxyModule.Start(context.Background())
+	require.NoError(t, err)
+
+	t.Run("dry run with tenant ID uses tenant-specific backend URLs", func(t *testing.T) {
+		// Reset hit flags
+		mu.Lock()
+		globalPrimaryHit = false
+		globalSecondaryHit = false
+		tenantPrimaryHit = false
+		tenantSecondaryHit = false
+		mu.Unlock()
+
+		// Create request with tenant ID header
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		req.Header.Set("X-Tenant-ID", string(tenantID))
+		w := httptest.NewRecorder()
+
+		// Get the route config for dry-run handling
+		routeConfig := globalConfig.RouteConfigs["/api/test"]
+
+		// Call the dry-run handler
+		reverseProxyModule.handleDryRunRequest(context.Background(), w, req, routeConfig, "primary", "secondary")
+
+		// Wait for background dry-run to complete
+		time.Sleep(200 * time.Millisecond)
+
+		// Verify tenant-specific backends were hit, not global ones
+		mu.Lock()
+		defer mu.Unlock()
+
+		assert.True(t, tenantPrimaryHit, "Tenant primary backend should have been hit")
+		assert.True(t, tenantSecondaryHit, "Tenant secondary backend should have been hit")
+		assert.False(t, globalPrimaryHit, "Global primary backend should NOT have been hit")
+		assert.False(t, globalSecondaryHit, "Global secondary backend should NOT have been hit")
+	})
+
+	t.Run("dry run without tenant ID uses global backend URLs", func(t *testing.T) {
+		// Reset hit flags
+		mu.Lock()
+		globalPrimaryHit = false
+		globalSecondaryHit = false
+		tenantPrimaryHit = false
+		tenantSecondaryHit = false
+		mu.Unlock()
+
+		// Create request WITHOUT tenant ID header
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		w := httptest.NewRecorder()
+
+		// Get the route config for dry-run handling
+		routeConfig := globalConfig.RouteConfigs["/api/test"]
+
+		// Call the dry-run handler
+		reverseProxyModule.handleDryRunRequest(context.Background(), w, req, routeConfig, "primary", "secondary")
+
+		// Wait for background dry-run to complete
+		time.Sleep(200 * time.Millisecond)
+
+		// Verify global backends were hit, not tenant-specific ones
+		mu.Lock()
+		defer mu.Unlock()
+
+		assert.True(t, globalPrimaryHit, "Global primary backend should have been hit")
+		assert.True(t, globalSecondaryHit, "Global secondary backend should have been hit")
+		assert.False(t, tenantPrimaryHit, "Tenant primary backend should NOT have been hit")
+		assert.False(t, tenantSecondaryHit, "Tenant secondary backend should NOT have been hit")
+	})
+
+	t.Run("dry run with unknown tenant ID falls back to global backend URLs", func(t *testing.T) {
+		// Reset hit flags
+		mu.Lock()
+		globalPrimaryHit = false
+		globalSecondaryHit = false
+		tenantPrimaryHit = false
+		tenantSecondaryHit = false
+		mu.Unlock()
+
+		// Create request with unknown tenant ID
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		req.Header.Set("X-Tenant-ID", "unknown-tenant")
+		w := httptest.NewRecorder()
+
+		// Get the route config for dry-run handling
+		routeConfig := globalConfig.RouteConfigs["/api/test"]
+
+		// Call the dry-run handler
+		reverseProxyModule.handleDryRunRequest(context.Background(), w, req, routeConfig, "primary", "secondary")
+
+		// Wait for background dry-run to complete
+		time.Sleep(200 * time.Millisecond)
+
+		// Verify global backends were hit (fallback behavior), not tenant-specific ones
+		mu.Lock()
+		defer mu.Unlock()
+
+		assert.True(t, globalPrimaryHit, "Global primary backend should have been hit (fallback)")
+		assert.True(t, globalSecondaryHit, "Global secondary backend should have been hit (fallback)")
+		assert.False(t, tenantPrimaryHit, "Tenant primary backend should NOT have been hit")
+		assert.False(t, tenantSecondaryHit, "Tenant secondary backend should NOT have been hit")
+	})
+
+	// Clean up
+	err = reverseProxyModule.Stop(context.Background())
+	require.NoError(t, err)
 }

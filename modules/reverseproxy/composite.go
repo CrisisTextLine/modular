@@ -29,6 +29,7 @@ type CompositeHandler struct {
 	responseTimeout time.Duration
 	circuitBreakers map[string]*CircuitBreaker
 	responseCache   *responseCache
+	eventEmitter    func(eventType string, data map[string]interface{})
 }
 
 // NewCompositeHandler creates a new composite handler with the given backends.
@@ -49,6 +50,11 @@ func NewCompositeHandler(backends []*Backend, parallel bool, responseTimeout tim
 	}
 }
 
+// SetEventEmitter sets the event emitter function for the composite handler.
+func (h *CompositeHandler) SetEventEmitter(emitter func(eventType string, data map[string]interface{})) {
+	h.eventEmitter = emitter
+}
+
 // ConfigureCircuitBreakers sets up circuit breakers for each backend using the provided configuration
 func (h *CompositeHandler) ConfigureCircuitBreakers(globalConfig CircuitBreakerConfig, backendConfigs map[string]CircuitBreakerConfig) {
 	for _, backend := range h.backends {
@@ -56,14 +62,18 @@ func (h *CompositeHandler) ConfigureCircuitBreakers(globalConfig CircuitBreakerC
 		if backendConfig, exists := backendConfigs[backend.ID]; exists {
 			// Use backend-specific configuration if it exists
 			if backendConfig.Enabled {
-				h.circuitBreakers[backend.ID] = NewCircuitBreaker(backend.ID, nil)
+				cb := NewCircuitBreakerWithConfig(backend.ID, backendConfig, nil)
+				cb.eventEmitter = h.eventEmitter
+				h.circuitBreakers[backend.ID] = cb
 			} else {
 				// Circuit breaker is explicitly disabled for this backend
 				h.circuitBreakers[backend.ID] = nil
 			}
 		} else if globalConfig.Enabled {
 			// Use global configuration
-			h.circuitBreakers[backend.ID] = NewCircuitBreaker(backend.ID, nil)
+			cb := NewCircuitBreakerWithConfig(backend.ID, globalConfig, nil)
+			cb.eventEmitter = h.eventEmitter
+			h.circuitBreakers[backend.ID] = cb
 		} else {
 			// Circuit breaker is disabled globally
 			h.circuitBreakers[backend.ID] = nil
@@ -352,7 +362,7 @@ func (h *CompositeHandler) mergeResponses(responses map[string]*http.Response, w
 // createCompositeHandler creates a handler for a composite route configuration.
 // It returns a handler that fetches responses from multiple backends and combines them.
 // If tenantConfig is provided, it uses that config for backend URLs, otherwise falls back to global config.
-func (m *ReverseProxyModule) createCompositeHandler(routeConfig CompositeRoute, tenantConfig *ReverseProxyConfig) (*CompositeHandler, error) {
+func (m *ReverseProxyModule) createCompositeHandler(ctx context.Context, routeConfig CompositeRoute, tenantConfig *ReverseProxyConfig) (*CompositeHandler, error) {
 	var backends []*Backend
 
 	// Default response timeout if not specified in config
@@ -387,11 +397,26 @@ func (m *ReverseProxyModule) createCompositeHandler(routeConfig CompositeRoute, 
 	// Create and configure the handler
 	handler := NewCompositeHandler(backends, true, responseTimeout)
 
-	// Configure circuit breakers
-	if m.circuitBreakers != nil {
-		for backendID, cb := range m.circuitBreakers {
-			handler.circuitBreakers[backendID] = cb
+	// Set event emitter for circuit breaker events
+	handler.SetEventEmitter(func(eventType string, data map[string]interface{}) {
+		m.emitEvent(ctx, eventType, data)
+	})
+
+	// Configure circuit breakers using the module's configuration
+	if m.config != nil {
+		// Use tenant config if available, otherwise use global config
+		config := m.config
+		if tenantConfig != nil {
+			config = tenantConfig
 		}
+
+		globalCBConfig := config.CircuitBreakerConfig
+		backendCBConfigs := make(map[string]CircuitBreakerConfig)
+		if config.BackendCircuitBreakers != nil {
+			backendCBConfigs = config.BackendCircuitBreakers
+		}
+
+		handler.ConfigureCircuitBreakers(globalCBConfig, backendCBConfigs)
 	}
 
 	// Set response cache if available
@@ -404,9 +429,9 @@ func (m *ReverseProxyModule) createCompositeHandler(routeConfig CompositeRoute, 
 
 // createFeatureFlagAwareCompositeHandlerFunc creates a http.HandlerFunc that evaluates feature flags
 // before delegating to the composite handler.
-func (m *ReverseProxyModule) createFeatureFlagAwareCompositeHandlerFunc(routeConfig CompositeRoute, tenantConfig *ReverseProxyConfig) (http.HandlerFunc, error) {
+func (m *ReverseProxyModule) createFeatureFlagAwareCompositeHandlerFunc(ctx context.Context, routeConfig CompositeRoute, tenantConfig *ReverseProxyConfig) (http.HandlerFunc, error) {
 	// Create the underlying composite handler
-	compositeHandler, err := m.createCompositeHandler(routeConfig, tenantConfig)
+	compositeHandler, err := m.createCompositeHandler(ctx, routeConfig, tenantConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -418,14 +443,36 @@ func (m *ReverseProxyModule) createFeatureFlagAwareCompositeHandlerFunc(routeCon
 			// Feature flag is disabled, use alternative backend if available
 			alternativeBackend := m.getAlternativeBackend(routeConfig.AlternativeBackend)
 			if alternativeBackend != "" {
-				// Route to alternative backend instead of composite route
-				m.app.Logger().Debug("Composite route feature flag disabled, using alternative backend",
-					"route", routeConfig.Pattern, "alternative", alternativeBackend, "flagID", routeConfig.FeatureFlagID)
+				// Check if dry-run mode is enabled for this scenario
+				effectiveConfig := m.getEffectiveConfigForRequest(r)
+				isDryRunEnabled := (effectiveConfig != nil && effectiveConfig.DryRun.Enabled)
 
-				// Create a simple proxy handler for the alternative backend
-				altHandler := m.createBackendProxyHandler(alternativeBackend)
-				altHandler(w, r)
-				return
+				if isDryRunEnabled {
+					// Use dry-run handler to compare composite vs alternative
+					m.app.Logger().Debug("Feature flag disabled with dry-run enabled, comparing composite vs alternative",
+						"route", routeConfig.Pattern, "alternative", alternativeBackend, "flagID", routeConfig.FeatureFlagID)
+
+					// Create a mock RouteConfig for dry-run handling
+					mockRouteConfig := RouteConfig{
+						FeatureFlagID:      routeConfig.FeatureFlagID,
+						AlternativeBackend: alternativeBackend,
+						DryRun:             true,
+						DryRunBackend:      "composite", // Compare against composite
+					}
+
+					// Handle dry-run comparison: alternative (returned) vs composite (compared)
+					m.handleDryRunRequest(r.Context(), w, r, mockRouteConfig, alternativeBackend, "composite")
+					return
+				} else {
+					// Route to alternative backend instead of composite route
+					m.app.Logger().Debug("Composite route feature flag disabled, using alternative backend",
+						"route", routeConfig.Pattern, "alternative", alternativeBackend, "flagID", routeConfig.FeatureFlagID)
+
+					// Create a simple proxy handler for the alternative backend
+					altHandler := m.createBackendProxyHandler(alternativeBackend)
+					altHandler(w, r)
+					return
+				}
 			} else {
 				// No alternative, return 404
 				m.app.Logger().Debug("Composite route feature flag disabled, no alternative available",

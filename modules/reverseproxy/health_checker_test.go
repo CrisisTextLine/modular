@@ -159,13 +159,15 @@ func TestHealthChecker_HTTPCheck(t *testing.T) {
 	}))
 	defer unhealthyServer.Close()
 
+	// Use shorter sleep time to prevent hanging connections
 	timeoutServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(10 * time.Second) // Longer than timeout
+		time.Sleep(100 * time.Millisecond) // Short delay, timeout will be shorter
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer timeoutServer.Close()
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	// Use shorter client timeout to prevent hanging
+	client := &http.Client{Timeout: 2 * time.Second}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	hc := NewHealthChecker(config, map[string]string{}, client, logger)
@@ -184,14 +186,17 @@ func TestHealthChecker_HTTPCheck(t *testing.T) {
 	require.Error(t, err)
 	assert.Greater(t, responseTime, time.Duration(0))
 
-	// Test timeout
+	// Test timeout - use very short timeout that's shorter than server delay
 	shortConfig := &HealthCheckConfig{
 		Enabled:             true,
 		Interval:            1 * time.Second,
-		Timeout:             1 * time.Millisecond, // Very short timeout
+		Timeout:             10 * time.Millisecond, // Shorter than server delay
 		ExpectedStatusCodes: []int{200},
 	}
 	hc.config = shortConfig
+
+	// Create new client with shorter timeout to ensure quick cleanup
+	hc.httpClient = &http.Client{Timeout: 50 * time.Millisecond}
 
 	healthy, responseTime, err = hc.performHTTPCheck(ctx, "timeout", timeoutServer.URL)
 	assert.False(t, healthy)

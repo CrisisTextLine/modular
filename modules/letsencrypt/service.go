@@ -2,8 +2,6 @@
 // via Let's Encrypt for the modular framework.
 package letsencrypt
 
-//nolint:unused // Certificate storage functions are planned for future use
-
 import (
 	"crypto/tls"
 	"crypto/x509"
@@ -18,13 +16,10 @@ import (
 )
 
 // certificateStorage handles the persistence of certificates on disk
-//
-//nolint:unused // Certificate storage functions are planned for future use
 type certificateStorage struct {
 	basePath string
 }
 
-//nolint:unused // Certificate storage functions are planned for future use
 func newCertificateStorage(basePath string) (*certificateStorage, error) {
 	// Ensure storage directory exists
 	if err := os.MkdirAll(basePath, 0700); err != nil {
@@ -37,8 +32,6 @@ func newCertificateStorage(basePath string) (*certificateStorage, error) {
 }
 
 // SaveCertificate saves a certificate to disk
-//
-//nolint:unused // Certificate storage functions are planned for future use
 func (s *certificateStorage) SaveCertificate(domain string, cert *certificate.Resource) error {
 	domainDir := filepath.Join(s.basePath, sanitizeDomain(domain))
 
@@ -74,8 +67,6 @@ func (s *certificateStorage) SaveCertificate(domain string, cert *certificate.Re
 }
 
 // LoadCertificate loads a certificate from disk
-//
-//nolint:unused // Certificate storage functions are planned for future use
 func (s *certificateStorage) LoadCertificate(domain string) (*tls.Certificate, error) {
 	domainDir := filepath.Join(s.basePath, sanitizeDomain(domain))
 
@@ -106,8 +97,6 @@ func (s *certificateStorage) LoadCertificate(domain string) (*tls.Certificate, e
 }
 
 // ListCertificates returns a list of domains with stored certificates
-//
-//nolint:unused // Certificate storage functions are planned for future use
 func (s *certificateStorage) ListCertificates() ([]string, error) {
 	var domains []string
 
@@ -131,8 +120,6 @@ func (s *certificateStorage) ListCertificates() ([]string, error) {
 }
 
 // IsCertificateExpiringSoon checks if a certificate is expiring within the given days
-//
-//nolint:unused // Certificate storage functions are planned for future use
 func (s *certificateStorage) IsCertificateExpiringSoon(domain string, days int) (bool, error) {
 	domainDir := filepath.Join(s.basePath, sanitizeDomain(domain))
 	certPath := filepath.Join(domainDir, "cert.pem")
@@ -163,13 +150,10 @@ func (s *certificateStorage) IsCertificateExpiringSoon(domain string, days int) 
 }
 
 // Helper functions for sanitizing domain names for use in filesystem paths
-//
-//nolint:unused // Certificate storage functions are planned for future use
 func sanitizeDomain(domain string) string {
 	return strings.ReplaceAll(domain, ".", "_")
 }
 
-//nolint:unused // Certificate storage functions are planned for future use
 func desanitizeDomain(sanitized string) string {
 	return strings.ReplaceAll(sanitized, "_", ".")
 }

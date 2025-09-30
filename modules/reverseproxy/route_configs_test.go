@@ -1,6 +1,7 @@
 package reverseproxy
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -58,7 +59,7 @@ func testRouteConfigWithFlag(t *testing.T, flagEnabled bool, expectedResponse st
 		t.Fatalf("Failed to register tenant service: %v", err)
 	}
 
-	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}
@@ -190,7 +191,7 @@ func TestRouteConfigsWithTenantSpecificFlags(t *testing.T) {
 		t.Fatalf("Failed to register tenant: %v", err)
 	}
 
-	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}

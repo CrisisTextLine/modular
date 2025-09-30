@@ -166,9 +166,7 @@ func TestProxyModule(t *testing.T) {
 		}
 	}
 
-	// Start the module to set up routes
-	err = module.Start(context.Background())
-	require.NoError(t, err)
+	// Don't call Start() - this is a unit test that manually configures everything
 
 	// Register route manually since we're bypassing the normal setup
 	testRouter.routes["/*"] = module.backendRoutes["api1"]["/*"]
@@ -253,9 +251,7 @@ func TestTenantAwareRouting(t *testing.T) {
 		}
 	}
 
-	// Start the module to set up routes
-	err = module.Start(context.Background())
-	require.NoError(t, err)
+	// Don't call Start() - this is a unit test that manually configures everything
 
 	// Register route manually since we're bypassing the normal setup
 	testRouter.routes["/*"] = module.backendRoutes["api1"]["/*"]
@@ -510,9 +506,8 @@ func TestCustomTenantHeader(t *testing.T) {
 		}
 	}
 
-	// Start the module to set up routes
-	err = module.Start(context.Background())
-	require.NoError(t, err)
+	// Don't call Start() - this is a unit test that manually configures everything
+	// Start() would create real proxies and overwrite our test setup
 
 	// Register route manually since we're bypassing the normal setup
 	testRouter.routes["/*"] = module.backendRoutes["api1"]["/*"]

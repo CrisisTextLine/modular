@@ -559,7 +559,7 @@ func copyMapToStruct(dstVal, srcVal reflect.Value) error {
 	return nil
 }
 
-// copyStructToStruct copies values from one struct to another
+// copyStructToStruct copies values from one struct to another using deep copy for maps/slices
 func copyStructToStruct(dstVal, srcVal reflect.Value) error {
 	for i := 0; i < dstVal.NumField(); i++ {
 		dstField := dstVal.Field(i)
@@ -573,9 +573,9 @@ func copyStructToStruct(dstVal, srcVal reflect.Value) error {
 			continue
 		}
 
-		// Copy if types are compatible
+		// Deep copy if types are compatible
 		if srcField.Type().AssignableTo(dstField.Type()) {
-			dstField.Set(srcField)
+			deepCopyValue(dstField, srcField)
 		}
 	}
 	return nil

@@ -272,57 +272,7 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 		}
 	}
 
-	// Create tenant-specific backend proxies
-	for tenantID, tenantCfg := range m.tenants {
-		if tenantCfg == nil || tenantCfg.BackendServices == nil {
-			continue
-		}
-
-		// Process each backend in tenant config
-		for backendID, serviceURL := range tenantCfg.BackendServices {
-			// Skip if URL is not provided
-			if serviceURL == "" {
-				continue
-			}
-
-			// Create a new proxy for this tenant's backend
-			backendURL, err := url.Parse(serviceURL)
-			if err != nil {
-				app.Logger().Error("Failed to parse tenant backend URL",
-					"tenant", tenantID, "backend", backendID, "url", serviceURL, "error", err)
-				continue
-			}
-
-			proxy := m.createReverseProxyForBackend(backendURL, backendID, "")
-
-			// Ensure tenant map exists for this backend
-			m.tenantProxiesMutex.Lock()
-			if _, exists := m.tenantBackendProxies[tenantID]; !exists {
-				m.tenantBackendProxies[tenantID] = make(map[string]*httputil.ReverseProxy)
-			}
-
-			// Store the tenant-specific proxy
-			m.tenantBackendProxies[tenantID][backendID] = proxy
-			m.tenantProxiesMutex.Unlock()
-
-			// If there's no global URL for this backend, create one in the global map
-			m.backendProxiesMutex.Lock()
-			if _, exists := m.backendProxies[backendID]; !exists {
-				app.Logger().Info("Using tenant-specific backend URL as global",
-					"tenant", tenantID, "backend", backendID, "url", serviceURL)
-				m.backendProxies[backendID] = proxy
-			}
-			m.backendProxiesMutex.Unlock()
-
-			// Initialize route map for this backend
-			if _, ok := m.backendRoutes[backendID]; !ok {
-				m.backendRoutes[backendID] = make(map[string]http.HandlerFunc)
-			}
-
-			app.Logger().Debug("Created tenant-specific proxy",
-				"tenant", tenantID, "backend", backendID, "url", serviceURL)
-		}
-	}
+	// Note: Tenant-specific proxies are created in Start() after tenants are registered via OnTenantRegistered()
 
 	// Set default backend for the module
 	m.defaultBackend = m.config.DefaultBackend
@@ -555,6 +505,58 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 
 	// Load tenant-specific configurations
 	m.loadTenantConfigs()
+
+	// Create tenant-specific backend proxies
+	for tenantID, tenantCfg := range m.tenants {
+		if tenantCfg == nil || tenantCfg.BackendServices == nil {
+			continue
+		}
+
+		// Process each backend in tenant config
+		for backendID, serviceURL := range tenantCfg.BackendServices {
+			// Skip if URL is not provided
+			if serviceURL == "" {
+				continue
+			}
+
+			// Create a new proxy for this tenant's backend
+			backendURL, err := url.Parse(serviceURL)
+			if err != nil {
+				m.app.Logger().Error("Failed to parse tenant backend URL",
+					"tenant", tenantID, "backend", backendID, "url", serviceURL, "error", err)
+				continue
+			}
+
+			proxy := m.createReverseProxyForBackend(backendURL, backendID, "")
+
+			// Ensure tenant map exists for this backend
+			m.tenantProxiesMutex.Lock()
+			if _, exists := m.tenantBackendProxies[tenantID]; !exists {
+				m.tenantBackendProxies[tenantID] = make(map[string]*httputil.ReverseProxy)
+			}
+
+			// Store the tenant-specific proxy
+			m.tenantBackendProxies[tenantID][backendID] = proxy
+			m.tenantProxiesMutex.Unlock()
+
+			// If there's no global URL for this backend, create one in the global map
+			m.backendProxiesMutex.Lock()
+			if _, exists := m.backendProxies[backendID]; !exists {
+				m.app.Logger().Info("Using tenant-specific backend URL as global",
+					"tenant", tenantID, "backend", backendID, "url", serviceURL)
+				m.backendProxies[backendID] = proxy
+			}
+			m.backendProxiesMutex.Unlock()
+
+			// Initialize route map for this backend
+			if _, ok := m.backendRoutes[backendID]; !ok {
+				m.backendRoutes[backendID] = make(map[string]http.HandlerFunc)
+			}
+
+			m.app.Logger().Debug("Created tenant-specific proxy",
+				"tenant", tenantID, "backend", backendID, "url", serviceURL)
+		}
+	}
 
 	// Setup routes for all backends
 	if err := m.setupBackendRoutes(); err != nil {

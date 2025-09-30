@@ -235,6 +235,52 @@ func Test_createTempConfig(t *testing.T) {
 		assert.False(t, info.isPtr)
 		assert.Equal(t, reflect.PointerTo(reflect.ValueOf(originalCfg).Type()), info.tempVal.Type())
 	})
+
+	t.Run("maps and slices are deeply copied", func(t *testing.T) {
+		type ConfigWithMaps struct {
+			Name     string
+			Settings map[string]string
+			Tags     []string
+		}
+
+		// Create an original config with initialized maps and slices
+		originalCfg := &ConfigWithMaps{
+			Name: "original",
+			Settings: map[string]string{
+				"key1": "value1",
+				"key2": "value2",
+			},
+			Tags: []string{"tag1", "tag2"},
+		}
+
+		// Create temp config
+		tempCfg, info, err := createTempConfig(originalCfg)
+		require.NoError(t, err)
+		require.NotNil(t, tempCfg)
+
+		tempCfgTyped := tempCfg.(*ConfigWithMaps)
+
+		// Verify initial values are copied
+		assert.Equal(t, "original", tempCfgTyped.Name)
+		assert.Equal(t, "value1", tempCfgTyped.Settings["key1"])
+		assert.Equal(t, "tag1", tempCfgTyped.Tags[0])
+
+		// Modify the temp config's maps and slices
+		tempCfgTyped.Settings["key1"] = "MODIFIED"
+		tempCfgTyped.Settings["newkey"] = "newvalue"
+		tempCfgTyped.Tags[0] = "MODIFIED"
+
+		// Original should NOT be affected (deep copy ensures isolation)
+		assert.Equal(t, "value1", originalCfg.Settings["key1"],
+			"Original config's map should not be affected by temp config modifications")
+		assert.NotContains(t, originalCfg.Settings, "newkey",
+			"Original config's map should not be affected by temp config modifications")
+		assert.Equal(t, "tag1", originalCfg.Tags[0],
+			"Original config's slice should not be affected by temp config modifications")
+
+		// Verify the info struct is correct
+		assert.True(t, info.isPtr)
+	})
 }
 
 func Test_updateConfig(t *testing.T) {
@@ -856,4 +902,368 @@ func TestProcessSectionConfigs(t *testing.T) {
 			assert.Len(t, tempConfigs, tt.expectConfigs)
 		})
 	}
+}
+
+// TestDeepCopyValue_Maps tests deep copying of maps
+func TestDeepCopyValue_Maps(t *testing.T) {
+	t.Parallel()
+
+	t.Run("simple map of strings", func(t *testing.T) {
+		src := map[string]string{
+			"key1": "value1",
+			"key2": "value2",
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstMap := dst.Interface().(map[string]string)
+		assert.Equal(t, "value1", dstMap["key1"])
+		assert.Equal(t, "value2", dstMap["key2"])
+
+		// Verify it's a deep copy by modifying the source
+		src["key1"] = "modified"
+		assert.Equal(t, "value1", dstMap["key1"], "Destination should not be affected by source modification")
+	})
+
+	t.Run("map with string slice values", func(t *testing.T) {
+		src := map[string][]string{
+			"list1": {"a", "b", "c"},
+			"list2": {"x", "y", "z"},
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstMap := dst.Interface().(map[string][]string)
+		assert.Equal(t, []string{"a", "b", "c"}, dstMap["list1"])
+		assert.Equal(t, []string{"x", "y", "z"}, dstMap["list2"])
+
+		// Verify it's a deep copy by modifying the source slice
+		src["list1"][0] = "modified"
+		assert.Equal(t, "a", dstMap["list1"][0], "Destination slice should not be affected")
+	})
+
+	t.Run("nested maps", func(t *testing.T) {
+		src := map[string]map[string]int{
+			"group1": {"a": 1, "b": 2},
+			"group2": {"x": 10, "y": 20},
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstMap := dst.Interface().(map[string]map[string]int)
+		assert.Equal(t, 1, dstMap["group1"]["a"])
+		assert.Equal(t, 20, dstMap["group2"]["y"])
+
+		// Verify it's a deep copy
+		src["group1"]["a"] = 999
+		assert.Equal(t, 1, dstMap["group1"]["a"], "Nested map should not be affected")
+	})
+
+	t.Run("nil map", func(t *testing.T) {
+		var src map[string]string = nil
+
+		dst := reflect.New(reflect.TypeOf(map[string]string{})).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		// For nil map, deepCopyValue returns early without modifying dst
+		// dst remains as zero value which is nil for maps
+		assert.True(t, !dst.IsValid() || dst.IsNil(), "Destination should remain nil for nil source")
+	})
+}
+
+// TestDeepCopyValue_Slices tests deep copying of slices
+func TestDeepCopyValue_Slices(t *testing.T) {
+	t.Parallel()
+
+	t.Run("simple slice of integers", func(t *testing.T) {
+		src := []int{1, 2, 3, 4, 5}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstSlice := dst.Interface().([]int)
+		assert.Equal(t, []int{1, 2, 3, 4, 5}, dstSlice)
+
+		// Verify it's a deep copy
+		src[0] = 999
+		assert.Equal(t, 1, dstSlice[0], "Destination should not be affected")
+	})
+
+	t.Run("slice of strings", func(t *testing.T) {
+		src := []string{"hello", "world"}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstSlice := dst.Interface().([]string)
+		assert.Equal(t, []string{"hello", "world"}, dstSlice)
+
+		src[0] = "modified"
+		assert.Equal(t, "hello", dstSlice[0])
+	})
+
+	t.Run("slice of maps", func(t *testing.T) {
+		src := []map[string]int{
+			{"a": 1, "b": 2},
+			{"x": 10, "y": 20},
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstSlice := dst.Interface().([]map[string]int)
+		assert.Equal(t, 1, dstSlice[0]["a"])
+		assert.Equal(t, 20, dstSlice[1]["y"])
+
+		// Verify it's a deep copy
+		src[0]["a"] = 999
+		assert.Equal(t, 1, dstSlice[0]["a"], "Nested map in slice should not be affected")
+	})
+
+	t.Run("nil slice", func(t *testing.T) {
+		var src []string = nil
+
+		dst := reflect.New(reflect.TypeOf([]string{})).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		// For nil slice, deepCopyValue returns early without modifying dst
+		// dst remains as zero value which is nil for slices
+		assert.True(t, !dst.IsValid() || dst.IsNil(), "Destination should remain nil for nil source")
+	})
+}
+
+// TestDeepCopyValue_Pointers tests deep copying of pointers
+func TestDeepCopyValue_Pointers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pointer to string", func(t *testing.T) {
+		str := "original"
+		src := &str
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstPtr := dst.Interface().(*string)
+		assert.Equal(t, "original", *dstPtr)
+
+		// Verify it's a deep copy
+		*src = "modified"
+		assert.Equal(t, "original", *dstPtr, "Destination should not be affected")
+	})
+
+	t.Run("pointer to struct", func(t *testing.T) {
+		type TestStruct struct {
+			Name  string
+			Value int
+		}
+
+		src := &TestStruct{Name: "test", Value: 42}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstPtr := dst.Interface().(*TestStruct)
+		assert.Equal(t, "test", dstPtr.Name)
+		assert.Equal(t, 42, dstPtr.Value)
+
+		// Verify it's a deep copy
+		src.Name = "modified"
+		assert.Equal(t, "test", dstPtr.Name)
+	})
+
+	t.Run("nil pointer", func(t *testing.T) {
+		var src *string = nil
+
+		dst := reflect.New(reflect.TypeOf((*string)(nil))).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		// For nil pointer, deepCopyValue returns early without modifying dst
+		// dst remains as zero value which is nil for pointers
+		assert.True(t, !dst.IsValid() || dst.IsNil(), "Destination should remain nil for nil source")
+	})
+}
+
+// TestDeepCopyValue_Structs tests deep copying of structs
+func TestDeepCopyValue_Structs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("simple struct", func(t *testing.T) {
+		type SimpleStruct struct {
+			Name string
+			Age  int
+		}
+
+		src := SimpleStruct{Name: "John", Age: 30}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstStruct := dst.Interface().(SimpleStruct)
+		assert.Equal(t, "John", dstStruct.Name)
+		assert.Equal(t, 30, dstStruct.Age)
+	})
+
+	t.Run("struct with map field", func(t *testing.T) {
+		type ConfigStruct struct {
+			Name     string
+			Settings map[string]string
+		}
+
+		src := ConfigStruct{
+			Name:     "config1",
+			Settings: map[string]string{"key1": "value1", "key2": "value2"},
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstStruct := dst.Interface().(ConfigStruct)
+		assert.Equal(t, "config1", dstStruct.Name)
+		assert.Equal(t, "value1", dstStruct.Settings["key1"])
+
+		// Verify it's a deep copy - THIS TESTS THE KEY BUG FIX
+		src.Settings["key1"] = "modified"
+		assert.Equal(t, "value1", dstStruct.Settings["key1"], "Map in struct should not be affected")
+	})
+
+	t.Run("struct with slice field", func(t *testing.T) {
+		type ListStruct struct {
+			Name  string
+			Items []string
+		}
+
+		src := ListStruct{
+			Name:  "list1",
+			Items: []string{"a", "b", "c"},
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstStruct := dst.Interface().(ListStruct)
+		assert.Equal(t, "list1", dstStruct.Name)
+		assert.Equal(t, []string{"a", "b", "c"}, dstStruct.Items)
+
+		// Verify it's a deep copy
+		src.Items[0] = "modified"
+		assert.Equal(t, "a", dstStruct.Items[0], "Slice in struct should not be affected")
+	})
+
+	t.Run("nested struct", func(t *testing.T) {
+		type InnerStruct struct {
+			Value int
+		}
+		type OuterStruct struct {
+			Name  string
+			Inner InnerStruct
+		}
+
+		src := OuterStruct{
+			Name:  "outer",
+			Inner: InnerStruct{Value: 42},
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstStruct := dst.Interface().(OuterStruct)
+		assert.Equal(t, "outer", dstStruct.Name)
+		assert.Equal(t, 42, dstStruct.Inner.Value)
+	})
+
+	t.Run("struct with unexported fields", func(t *testing.T) {
+		type StructWithPrivate struct {
+			Public  string
+			private int
+		}
+
+		src := StructWithPrivate{Public: "visible", private: 42}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		// Should not panic even with unexported fields
+		require.NotPanics(t, func() {
+			deepCopyValue(dst, reflect.ValueOf(src))
+		})
+
+		dstStruct := dst.Interface().(StructWithPrivate)
+		assert.Equal(t, "visible", dstStruct.Public)
+	})
+}
+
+// TestDeepCopyValue_BasicTypes tests deep copying of basic types
+func TestDeepCopyValue_BasicTypes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value interface{}
+	}{
+		{"int", 42},
+		{"int64", int64(123456789)},
+		{"float64", 3.14159},
+		{"string", "hello world"},
+		{"bool", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := reflect.ValueOf(tt.value)
+			dst := reflect.New(src.Type()).Elem()
+
+			deepCopyValue(dst, src)
+
+			assert.Equal(t, tt.value, dst.Interface())
+		})
+	}
+}
+
+// TestDeepCopyValue_ComplexStructures tests deep copying of complex nested structures
+func TestDeepCopyValue_ComplexStructures(t *testing.T) {
+	t.Parallel()
+
+	type ComplexConfig struct {
+		Name            string
+		BackendServices map[string]string
+		Features        map[string]bool
+		AllowedIPs      []string
+	}
+
+	src := ComplexConfig{
+		Name: "tenant1",
+		BackendServices: map[string]string{
+			"api":    "https://api.example.com",
+			"legacy": "https://legacy.example.com",
+		},
+		Features: map[string]bool{
+			"feature1": true,
+			"feature2": false,
+		},
+		AllowedIPs: []string{"192.168.1.1", "10.0.0.1"},
+	}
+
+	dst := reflect.New(reflect.TypeOf(src)).Elem()
+	deepCopyValue(dst, reflect.ValueOf(src))
+
+	dstConfig := dst.Interface().(ComplexConfig)
+
+	// Verify all fields copied correctly
+	assert.Equal(t, "tenant1", dstConfig.Name)
+	assert.Equal(t, "https://api.example.com", dstConfig.BackendServices["api"])
+	assert.Equal(t, "https://legacy.example.com", dstConfig.BackendServices["legacy"])
+	assert.True(t, dstConfig.Features["feature1"])
+	assert.False(t, dstConfig.Features["feature2"])
+	assert.Equal(t, []string{"192.168.1.1", "10.0.0.1"}, dstConfig.AllowedIPs)
+
+	// Verify deep copy by modifying source
+	src.BackendServices["api"] = "https://modified.example.com"
+	src.Features["feature1"] = false
+	src.AllowedIPs[0] = "1.1.1.1"
+
+	// Destination should NOT be affected (isolation is preserved)
+	assert.Equal(t, "https://api.example.com", dstConfig.BackendServices["api"], "BackendServices map should be deep copied")
+	assert.True(t, dstConfig.Features["feature1"], "Features map should be deep copied")
+	assert.Equal(t, "192.168.1.1", dstConfig.AllowedIPs[0], "AllowedIPs slice should be deep copied")
 }

@@ -562,7 +562,7 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 	}
 
 	// Setup composite routes
-	if err := m.setupCompositeRoutes(); err != nil {
+	if err := m.setupCompositeRoutes(ctx); err != nil {
 		return err
 	}
 
@@ -584,7 +584,7 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 	}
 
 	// Set up feature flag evaluation using aggregator pattern
-	if err := m.setupFeatureFlagEvaluation(); err != nil {
+	if err := m.setupFeatureFlagEvaluation(ctx); err != nil {
 		return fmt.Errorf("failed to set up feature flag evaluation: %w", err)
 	}
 
@@ -907,7 +907,7 @@ func (m *ReverseProxyModule) registerBackendRoute(backendID, route string) {
 // setupCompositeRoutes sets up routes that combine responses from multiple backends.
 // For each composite route in the configuration, it creates a handler that fetches
 // and combines responses from multiple backends.
-func (m *ReverseProxyModule) setupCompositeRoutes() error {
+func (m *ReverseProxyModule) setupCompositeRoutes(ctx context.Context) error {
 	// Create a map of handlers for each composite route, keyed by tenant ID
 	// Check if config is nil
 	if m.config == nil {
@@ -1094,7 +1094,7 @@ func (m *ReverseProxyModule) registerBasicRoutes() error {
 				// If this is a backend group, pick one now (round-robin) and substitute
 				resolvedBackendID := backendID
 				if strings.Contains(backendID, ",") {
-					selected, _, _ := m.selectBackendFromGroup(backendID)
+					selected, _, _ := m.selectBackendFromGroup(r.Context(), backendID)
 					if selected != "" {
 						resolvedBackendID = selected
 					}
@@ -1685,8 +1685,11 @@ func (m *ReverseProxyModule) createBackendProxy(backendID, serviceURL string) er
 // It updates the configuration, creates the proxy, and (optionally) registers a default route
 // if one matching the backend name does not already exist.
 func (m *ReverseProxyModule) AddBackend(backendID, serviceURL string) error { //nolint:ireturn
-	if backendID == "" || serviceURL == "" {
-		return fmt.Errorf("backend id and service URL required")
+	if backendID == "" {
+		return ErrBackendIDRequired
+	}
+	if serviceURL == "" {
+		return ErrServiceURLRequired
 	}
 	if m.config.BackendServices == nil {
 		m.config.BackendServices = make(map[string]string)
@@ -1727,14 +1730,14 @@ func (m *ReverseProxyModule) AddBackend(backendID, serviceURL string) error { //
 // RemoveBackend removes an existing backend at runtime and emits a backend.removed event.
 func (m *ReverseProxyModule) RemoveBackend(backendID string) error { //nolint:ireturn
 	if backendID == "" {
-		return fmt.Errorf("backend id required")
+		return ErrBackendIDRequired
 	}
 	if m.config.BackendServices == nil {
-		return fmt.Errorf("no backends configured")
+		return ErrNoBackendsConfigured
 	}
 	serviceURL, exists := m.config.BackendServices[backendID]
 	if !exists {
-		return fmt.Errorf("backend %s not found", backendID)
+		return fmt.Errorf("%w: %s", ErrBackendNotConfigured, backendID)
 	}
 
 	// Remove from maps
@@ -1757,7 +1760,7 @@ func (m *ReverseProxyModule) RemoveBackend(backendID string) error { //nolint:ir
 
 // selectBackendFromGroup performs a simple round-robin selection from a comma-separated backend group spec.
 // Returns selected backend id, selected index, and total backends.
-func (m *ReverseProxyModule) selectBackendFromGroup(group string) (string, int, int) {
+func (m *ReverseProxyModule) selectBackendFromGroup(ctx context.Context, group string) (string, int, int) {
 	parts := strings.Split(group, ",")
 	var backends []string
 	for _, p := range parts {
@@ -1779,7 +1782,7 @@ func (m *ReverseProxyModule) selectBackendFromGroup(group string) (string, int, 
 	// Emit load balancing decision events if module initialized so tests can observe
 	if m.initialized {
 		// Generic decision event (once per selection)
-		m.emitEvent(context.Background(), EventTypeLoadBalanceDecision, map[string]interface{}{ //nolint:contextcheck // load balance telemetry is generated asynchronously
+		m.emitEvent(ctx, EventTypeLoadBalanceDecision, map[string]interface{}{
 			"group":            group,
 			"selected_backend": selected,
 			"index":            idx,
@@ -1787,7 +1790,7 @@ func (m *ReverseProxyModule) selectBackendFromGroup(group string) (string, int, 
 			"time":             time.Now().UTC().Format(time.RFC3339Nano),
 		})
 		// Round-robin specific event includes rotation information
-		m.emitEvent(context.Background(), EventTypeLoadBalanceRoundRobin, map[string]interface{}{ //nolint:contextcheck // load balancer metrics sample outside request handling
+		m.emitEvent(ctx, EventTypeLoadBalanceRoundRobin, map[string]interface{}{
 			"group":         group,
 			"backend":       selected,
 			"current_index": idx,
@@ -2231,7 +2234,9 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 			} else {
 				// Create new circuit breaker with config and store for reuse
 				cb = NewCircuitBreakerWithConfig(finalBackend, cbConfig, m.metrics)
-				cb.eventEmitter = func(eventType string, data map[string]interface{}) { m.emitEvent(r.Context(), eventType, data) }
+				cb.eventEmitter = func(eventType string, data map[string]interface{}) { //nolint:contextcheck // circuit breaker events occur outside request handling
+					m.emitEvent(context.Background(), eventType, data)
+				}
 				m.circuitBreakers[finalBackend] = cb
 			}
 		}
@@ -2240,14 +2245,10 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 		if cb != nil {
 			// Ensure eventEmitter is set (defensive in case of early creation without emitter)
 			if cb.eventEmitter == nil {
-				cb.eventEmitter = func(eventType string, data map[string]interface{}) { m.emitEvent(r.Context(), eventType, data) }
+				cb.eventEmitter = func(eventType string, data map[string]interface{}) { //nolint:contextcheck // circuit breaker events occur outside request handling
+					m.emitEvent(context.Background(), eventType, data)
+				}
 			}
-			// Create a custom RoundTripper that applies circuit breaking with timeout
-			originalTransport := proxy.Transport
-			if originalTransport == nil {
-				originalTransport = http.DefaultTransport
-			}
-
 			// Create a timeout-aware transport
 			timeoutTransport := &http.Transport{
 				DialContext: (&net.Dialer{
@@ -3382,7 +3383,7 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 								}
 
 								if hasTenant {
-									handler := m.createBackendProxyHandlerForTenant(modular.TenantID(tenantIDStr), alternativeBackend)
+									handler := m.createBackendProxyHandlerForTenant(modular.TenantID(tenantIDStr), alternativeBackend) //nolint:contextcheck // handler captures request context via *http.Request
 									handler(w, r)
 									return
 								} else {
@@ -3421,7 +3422,7 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 					}
 
 					if hasTenant {
-						handler := m.createBackendProxyHandlerForTenant(modular.TenantID(tenantIDStr), primaryBackend)
+						handler := m.createBackendProxyHandlerForTenant(modular.TenantID(tenantIDStr), primaryBackend) //nolint:contextcheck // handler captures request context via *http.Request
 						handler(w, r)
 						return
 					} else {
@@ -3594,7 +3595,7 @@ func (m *ReverseProxyModule) GetHealthStatus() map[string]*HealthStatus {
 // It creates the internal file-based evaluator and registers it as "featureFlagEvaluator.file".
 // If an external evaluator was provided via constructor, it registers it as "featureFlagEvaluator.external".
 // Then it always creates an aggregator that discovers all evaluators and provides proper fallback behavior.
-func (m *ReverseProxyModule) setupFeatureFlagEvaluation() error {
+func (m *ReverseProxyModule) setupFeatureFlagEvaluation(ctx context.Context) error {
 	if !m.config.FeatureFlags.Enabled {
 		m.app.Logger().Debug("Feature flags disabled, skipping evaluation setup")
 		return nil
@@ -4173,8 +4174,9 @@ func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, da
 		if m.app != nil {
 			if subj, ok := any(m.app).(modular.Subject); ok {
 				if appErr := subj.NotifyObservers(ctx, event); appErr != nil {
-					// Note: No logger field available in module, skipping additional error logging
-					// to eliminate noisy test output. Error handling is centralized in EmitEvent.
+					// Error occurred during app notification, but we don't log it to avoid
+					// noisy test output. Error handling is centralized in EmitEvent.
+					// The error is intentionally ignored here as emission is best-effort.
 				}
 				return // Successfully emitted via app, no need to log error
 			}

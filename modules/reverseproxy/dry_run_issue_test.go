@@ -1,6 +1,7 @@
 package reverseproxy
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -49,7 +50,7 @@ func TestDryRunIssue(t *testing.T) {
 	}
 	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(flagConfig))
 
-	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	featureFlagEvaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}

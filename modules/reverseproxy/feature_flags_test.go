@@ -34,7 +34,7 @@ func TestFileBasedFeatureFlagEvaluator_WithMockApp(t *testing.T) {
 		t.Fatalf("Failed to register tenant service: %v", err)
 	}
 
-	evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	evaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestFileBasedFeatureFlagEvaluator_WithDefault(t *testing.T) {
 		t.Fatalf("Failed to register tenant service: %v", err)
 	}
 
-	evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	evaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestFileBasedFeatureFlagEvaluator_Disabled(t *testing.T) {
 		t.Fatalf("Failed to register tenant service: %v", err)
 	}
 
-	evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	evaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}

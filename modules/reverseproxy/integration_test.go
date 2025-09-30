@@ -215,7 +215,7 @@ func TestBackwardsCompatibility(t *testing.T) {
 	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(rpConfig))
 
 	// Test that file-based evaluator can be created directly (backwards compatibility)
-	fileEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	fileEvaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file-based evaluator: %v", err)
 	}

@@ -65,7 +65,7 @@ type FileBasedFeatureFlagEvaluator struct {
 }
 
 // NewFileBasedFeatureFlagEvaluator creates a new tenant-aware feature flag evaluator.
-func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logger) (*FileBasedFeatureFlagEvaluator, error) {
+func NewFileBasedFeatureFlagEvaluator(ctx context.Context, app modular.Application, logger *slog.Logger) (*FileBasedFeatureFlagEvaluator, error) {
 	// Validate parameters
 	if app == nil {
 		return nil, ErrApplicationNil
@@ -76,7 +76,7 @@ func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logg
 	// Get tenant service
 	var tenantService modular.TenantService
 	if err := app.GetService("tenantService", &tenantService); err != nil {
-		logger.WarnContext(context.Background(), "TenantService not available, feature flags will use default configuration only", "error", err)
+		logger.WarnContext(ctx, "TenantService not available, feature flags will use default configuration only", "error", err)
 		tenantService = nil
 	}
 
@@ -104,7 +104,7 @@ func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logg
 		}
 	} else {
 		// When no tenant service is available, we'll use defaultConfigProvider directly
-		logger.WarnContext(context.Background(), "No tenant service available, using default config provider only")
+		logger.WarnContext(ctx, "No tenant service available, using default config provider only")
 		tenantAwareConfig = nil
 	}
 

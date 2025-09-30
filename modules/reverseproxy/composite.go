@@ -362,7 +362,7 @@ func (h *CompositeHandler) mergeResponses(responses map[string]*http.Response, w
 // createCompositeHandler creates a handler for a composite route configuration.
 // It returns a handler that fetches responses from multiple backends and combines them.
 // If tenantConfig is provided, it uses that config for backend URLs, otherwise falls back to global config.
-func (m *ReverseProxyModule) createCompositeHandler(routeConfig CompositeRoute, tenantConfig *ReverseProxyConfig) (*CompositeHandler, error) {
+func (m *ReverseProxyModule) createCompositeHandler(ctx context.Context, routeConfig CompositeRoute, tenantConfig *ReverseProxyConfig) (*CompositeHandler, error) {
 	var backends []*Backend
 
 	// Default response timeout if not specified in config
@@ -399,7 +399,7 @@ func (m *ReverseProxyModule) createCompositeHandler(routeConfig CompositeRoute, 
 
 	// Set event emitter for circuit breaker events
 	handler.SetEventEmitter(func(eventType string, data map[string]interface{}) {
-		m.emitEvent(context.Background(), eventType, data)
+		m.emitEvent(ctx, eventType, data)
 	})
 
 	// Configure circuit breakers using the module's configuration
@@ -429,9 +429,9 @@ func (m *ReverseProxyModule) createCompositeHandler(routeConfig CompositeRoute, 
 
 // createFeatureFlagAwareCompositeHandlerFunc creates a http.HandlerFunc that evaluates feature flags
 // before delegating to the composite handler.
-func (m *ReverseProxyModule) createFeatureFlagAwareCompositeHandlerFunc(routeConfig CompositeRoute, tenantConfig *ReverseProxyConfig) (http.HandlerFunc, error) {
+func (m *ReverseProxyModule) createFeatureFlagAwareCompositeHandlerFunc(ctx context.Context, routeConfig CompositeRoute, tenantConfig *ReverseProxyConfig) (http.HandlerFunc, error) {
 	// Create the underlying composite handler
-	compositeHandler, err := m.createCompositeHandler(routeConfig, tenantConfig)
+	compositeHandler, err := m.createCompositeHandler(ctx, routeConfig, tenantConfig)
 	if err != nil {
 		return nil, err
 	}

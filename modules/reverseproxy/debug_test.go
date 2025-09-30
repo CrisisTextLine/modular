@@ -35,7 +35,7 @@ func TestDebugHandler(t *testing.T) {
 
 	// Create a mock feature flag evaluator
 	mockApp := NewMockTenantApplication()
-	featureFlagEval, err := NewFileBasedFeatureFlagEvaluator(mockApp, logger)
+	featureFlagEval, err := NewFileBasedFeatureFlagEvaluator(context.Background(), mockApp, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}

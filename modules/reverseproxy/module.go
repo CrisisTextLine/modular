@@ -927,7 +927,7 @@ func (m *ReverseProxyModule) setupCompositeRoutes(ctx context.Context) error {
 		var handlerFunc http.HandlerFunc
 		if routeConfig.FeatureFlagID != "" {
 			// Use feature flag aware handler
-			ffHandlerFunc, err := m.createFeatureFlagAwareCompositeHandlerFunc(routeConfig, nil)
+			ffHandlerFunc, err := m.createFeatureFlagAwareCompositeHandlerFunc(ctx, routeConfig, nil)
 			if err != nil {
 				m.app.Logger().Error("Failed to create feature flag aware composite handler",
 					"route", routePath, "error", err)
@@ -936,7 +936,7 @@ func (m *ReverseProxyModule) setupCompositeRoutes(ctx context.Context) error {
 			handlerFunc = ffHandlerFunc
 		} else {
 			// Use standard composite handler
-			handler, err := m.createCompositeHandler(routeConfig, nil)
+			handler, err := m.createCompositeHandler(ctx, routeConfig, nil)
 			if err != nil {
 				m.app.Logger().Error("Failed to create global composite handler",
 					"route", routePath, "error", err)
@@ -966,7 +966,7 @@ func (m *ReverseProxyModule) setupCompositeRoutes(ctx context.Context) error {
 			var handlerFunc http.HandlerFunc
 			if routeConfig.FeatureFlagID != "" {
 				// Use feature flag aware handler
-				ffHandlerFunc, err := m.createFeatureFlagAwareCompositeHandlerFunc(routeConfig, tenantConfig)
+				ffHandlerFunc, err := m.createFeatureFlagAwareCompositeHandlerFunc(ctx, routeConfig, tenantConfig)
 				if err != nil {
 					m.app.Logger().Error("Failed to create feature flag aware tenant composite handler",
 						"tenant", tenantID, "route", routePath, "error", err)
@@ -975,7 +975,7 @@ func (m *ReverseProxyModule) setupCompositeRoutes(ctx context.Context) error {
 				handlerFunc = ffHandlerFunc
 			} else {
 				// Use standard composite handler
-				handler, err := m.createCompositeHandler(routeConfig, tenantConfig)
+				handler, err := m.createCompositeHandler(ctx, routeConfig, tenantConfig)
 				if err != nil {
 					m.app.Logger().Error("Failed to create tenant composite handler",
 						"tenant", tenantID, "route", routePath, "error", err)
@@ -3611,7 +3611,7 @@ func (m *ReverseProxyModule) setupFeatureFlagEvaluation(ctx context.Context) err
 	}
 
 	// Always create the internal file-based evaluator
-	fileEvaluator, err := NewFileBasedFeatureFlagEvaluator(m.app, logger)
+	fileEvaluator, err := NewFileBasedFeatureFlagEvaluator(ctx, m.app, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create file-based feature flag evaluator: %w", err)
 	}
@@ -4173,11 +4173,10 @@ func (m *ReverseProxyModule) emitEvent(ctx context.Context, eventType string, da
 		// If module subject isn't available, try to emit directly through app if it's a Subject
 		if m.app != nil {
 			if subj, ok := any(m.app).(modular.Subject); ok {
-				if appErr := subj.NotifyObservers(ctx, event); appErr != nil {
-					// Error occurred during app notification, but we don't log it to avoid
-					// noisy test output. Error handling is centralized in EmitEvent.
-					// The error is intentionally ignored here as emission is best-effort.
-				}
+				// Error occurred during app notification, but we don't log it to avoid
+				// noisy test output. Error handling is centralized in EmitEvent.
+				// The error is intentionally ignored here as emission is best-effort.
+				_ = subj.NotifyObservers(ctx, event)
 				return // Successfully emitted via app, no need to log error
 			}
 		}

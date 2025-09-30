@@ -142,7 +142,7 @@ func TestFeatureFlagAggregator_PriorityOrdering(t *testing.T) {
 	}
 
 	// Create and register file evaluator
-	fileEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	fileEvaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file evaluator: %v", err)
 	}

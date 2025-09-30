@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -427,11 +426,11 @@ func TestSchedulerConfiguration(t *testing.T) {
 
 	// Test with custom configuration
 	config := &SchedulerConfig{
-		WorkerCount:       10,
-		QueueSize:         200,
-		StorageType:       "memory",
-		CheckInterval:     2 * time.Second,
-		EnablePersistence: false,
+		WorkerCount:        10,
+		QueueSize:          200,
+		StorageType:        "memory",
+		CheckInterval:      2 * time.Second,
+		PersistenceBackend: PersistenceBackendNone,
 	}
 	app.RegisterConfigSection(ModuleName, modular.NewStdConfigProvider(config))
 
@@ -463,8 +462,8 @@ func TestSchedulerServiceProvider(t *testing.T) {
 }
 
 func TestJobPersistence(t *testing.T) {
-	// Create temporary file for job persistence
-	tempFile := fmt.Sprintf("/tmp/job-persistence-test-%d.json", time.Now().UnixNano())
+	// Create memory persistence handler for testing
+	persistenceHandler := NewMemoryPersistenceHandler()
 
 	t.Run("SaveAndLoadJobs", func(t *testing.T) {
 		// Create module with persistence enabled
@@ -473,12 +472,12 @@ func TestJobPersistence(t *testing.T) {
 
 		// Override config for persistence and reduce shutdown timeout for test
 		config := &SchedulerConfig{
-			WorkerCount:       2,
-			QueueSize:         10,
-			StorageType:       "memory",
-			EnablePersistence: true,
-			PersistenceFile:   tempFile,
-			ShutdownTimeout:   1 * time.Second, // Short timeout for test
+			WorkerCount:        2,
+			QueueSize:          10,
+			StorageType:        "memory",
+			PersistenceBackend: PersistenceBackendMemory,
+			PersistenceHandler: persistenceHandler,
+			ShutdownTimeout:    1 * time.Second, // Short timeout for test
 		}
 		app.RegisterConfigSection(ModuleName, modular.NewStdConfigProvider(config))
 
@@ -520,9 +519,9 @@ func TestJobPersistence(t *testing.T) {
 		err = module.Stop(ctx)
 		require.NoError(t, err)
 
-		// Verify the file was created
-		_, err = os.Stat(tempFile)
-		require.NoError(t, err, "Persistence file should exist")
+		// Verify the data was persisted
+		data := persistenceHandler.GetStoredData()
+		require.NotEmpty(t, data, "Persistence data should exist")
 
 		// Create a new module to load the jobs
 		newModule := NewModule().(*SchedulerModule)
@@ -546,10 +545,7 @@ func TestJobPersistence(t *testing.T) {
 		assert.True(t, job.IsRecurring)
 		assert.Equal(t, "0 */2 * * *", job.Schedule)
 
-		// Delete temp file
-		err = os.Remove(tempFile)
-		if err != nil && !os.IsNotExist(err) {
-			t.Logf("Failed to remove temp file %s: %v", tempFile, err)
-		}
+		// Clear persistence data
+		persistenceHandler.Clear()
 	})
 }

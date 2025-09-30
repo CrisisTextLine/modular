@@ -248,7 +248,9 @@ func (f *FileTarget) Start(ctx context.Context) error {
 // Stop shuts down the file target.
 func (f *FileTarget) Stop(ctx context.Context) error {
 	if f.file != nil {
-		f.file.Close()
+		if err := f.file.Close(); err != nil {
+			f.logger.Debug("Error closing file", "error", err)
+		}
 		f.file = nil
 	}
 	f.logger.Debug("File output target stopped")

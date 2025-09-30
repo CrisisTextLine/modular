@@ -56,7 +56,7 @@ func TestNewFeatures(t *testing.T) {
 			t.Fatalf("Failed to register tenant: %v", err)
 		}
 
-		evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+		evaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 		if err != nil {
 			t.Fatalf("Failed to create feature flag evaluator: %v", err)
 		}
@@ -226,7 +226,7 @@ func TestNewFeatures(t *testing.T) {
 		app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
 
 		// Create feature flag evaluator
-		evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+		evaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 		if err != nil {
 			t.Fatalf("Failed to create feature flag evaluator: %v", err)
 		}
@@ -442,7 +442,7 @@ func TestScenarioIntegration(t *testing.T) {
 	}
 
 	// Create feature flag evaluator with typical Chimera scenarios
-	_, err = NewFileBasedFeatureFlagEvaluator(app, logger) // Created for completeness but not used in this integration test
+	_, err = NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger) // Created for completeness but not used in this integration test
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}

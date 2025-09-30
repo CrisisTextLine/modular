@@ -83,6 +83,12 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) iHaveAModularApplicationWithReve
 	mockRouter := &MockBDDRouter{}
 	ctx.app.RegisterService("router", mockRouter)
 
+	// Register TenantService to support feature flag functionality
+	tenantService := &MockTenantService{
+		Configs: make(map[modular.TenantID]map[string]modular.ConfigProvider),
+	}
+	ctx.app.RegisterService("tenantService", tenantService)
+
 	// Create reverse proxy module
 	ctx.module = NewModule()
 	ctx.app.RegisterModule(ctx.module)
@@ -136,7 +142,7 @@ func (ctx *FeatureFlagAggregatorBDDTestContext) theEvaluatorsAreRegisteredWithNa
 
 func (ctx *FeatureFlagAggregatorBDDTestContext) theFeatureFlagAggregatorDiscoversEvaluators() error {
 	// Setup feature flag evaluation (creates file evaluator + aggregator)
-	if err := ctx.module.setupFeatureFlagEvaluation(); err != nil {
+	if err := ctx.module.setupFeatureFlagEvaluation(context.Background()); err != nil {
 		return fmt.Errorf("failed to setup feature flag evaluation: %w", err)
 	}
 	// Ensure we have the aggregator

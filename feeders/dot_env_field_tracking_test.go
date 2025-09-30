@@ -15,6 +15,23 @@ type TestDotEnvConfig struct {
 }
 
 func TestDotEnvFeeder_FieldTracking(t *testing.T) {
+	// Unset environment variables that might interfere with the test FIRST
+	// The EnvCatalog gives precedence to OS environment variables via os.Getenv()
+	os.Unsetenv("NAME")
+	os.Unsetenv("PORT")
+	os.Unsetenv("ENABLED")
+	os.Unsetenv("DEBUG")
+	defer func() {
+		os.Unsetenv("NAME")
+		os.Unsetenv("PORT")
+		os.Unsetenv("ENABLED")
+		os.Unsetenv("DEBUG")
+	}()
+
+	// Reset the global environment catalog after unsetting variables
+	// This ensures the catalog doesn't have cached values from previous tests
+	ResetGlobalEnvCatalog()
+
 	// Create test .env file
 	envContent := `NAME=test-app
 PORT=8080
@@ -129,6 +146,17 @@ func TestDotEnvFeeder_SetFieldTracker(t *testing.T) {
 }
 
 func TestDotEnvFeeder_WithoutFieldTracker(t *testing.T) {
+	// Unset environment variables that might interfere with the test FIRST
+	os.Unsetenv("NAME")
+	os.Unsetenv("PORT")
+	defer func() {
+		os.Unsetenv("NAME")
+		os.Unsetenv("PORT")
+	}()
+
+	// Reset the global environment catalog after unsetting variables
+	ResetGlobalEnvCatalog()
+
 	// Create test .env file
 	envContent := `NAME=test-app
 PORT=8080`

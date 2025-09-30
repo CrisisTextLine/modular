@@ -21,6 +21,9 @@ var (
 	ErrNamecheapConfigIncomplete  = errors.New("namecheap DNS provider requires api_user, api_key, and username")
 	ErrHTTPChallengeNotConfigured = errors.New("HTTP challenge handler not configured")
 
+	// Service dependency errors
+	ErrLoggerServiceUnavailable = errors.New("required logger service not found or invalid type")
+
 	// Certificate errors
 	ErrCertificateFileNotFound = errors.New("certificate file not found")
 	ErrKeyFileNotFound         = errors.New("key file not found")

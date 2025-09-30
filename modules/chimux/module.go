@@ -113,6 +113,18 @@ var (
 	// with a non-tenant application. The chimux module requires tenant support
 	// for proper multi-tenant routing and configuration.
 	ErrRequiresTenantApplication = errors.New("chimux module requires a TenantApplication")
+
+	// ErrMiddlewareNotFound is returned when attempting to remove a middleware that doesn't exist.
+	ErrMiddlewareNotFound = errors.New("middleware not found")
+
+	// ErrMiddlewareAlreadyRemoved is returned when attempting to remove a middleware that has already been disabled.
+	ErrMiddlewareAlreadyRemoved = errors.New("middleware already removed")
+
+	// ErrRouteNotFound is returned when attempting to disable a route that doesn't exist.
+	ErrRouteNotFound = errors.New("route not found")
+
+	// ErrRouteAlreadyDisabled is returned when attempting to disable a route that is already disabled.
+	ErrRouteAlreadyDisabled = errors.New("route already disabled")
 )
 
 // ChiMuxModule provides HTTP routing functionality using the Chi router library.
@@ -685,10 +697,10 @@ func (m *ChiMuxModule) RemoveMiddleware(name string) error {
 	defer m.middlewareMu.Unlock()
 	cm, ok := m.middlewares[name]
 	if !ok {
-		return fmt.Errorf("middleware %s not found", name)
+		return fmt.Errorf("middleware %s: %w", name, ErrMiddlewareNotFound)
 	}
 	if !cm.enabled.Load() {
-		return fmt.Errorf("middleware %s already removed", name)
+		return fmt.Errorf("middleware %s: %w", name, ErrMiddlewareAlreadyRemoved)
 	}
 	cm.enabled.Store(false)
 	// Count remaining enabled
@@ -810,7 +822,7 @@ func (m *ChiMuxModule) DisableRoute(method, pattern string) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("route %s %s not found", method, pattern)
+		return fmt.Errorf("route %s %s: %w", method, pattern, ErrRouteNotFound)
 	}
 
 	m.disabledMu.Lock()
@@ -819,7 +831,7 @@ func (m *ChiMuxModule) DisableRoute(method, pattern string) error {
 		m.disabledRoutes[method] = make(map[string]bool)
 	}
 	if m.disabledRoutes[method][pattern] {
-		return fmt.Errorf("route %s %s already disabled", method, pattern)
+		return fmt.Errorf("route %s %s: %w", method, pattern, ErrRouteAlreadyDisabled)
 	}
 	m.disabledRoutes[method][pattern] = true
 

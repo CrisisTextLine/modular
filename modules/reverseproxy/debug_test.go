@@ -35,7 +35,7 @@ func TestDebugHandler(t *testing.T) {
 
 	// Create a mock feature flag evaluator
 	mockApp := NewMockTenantApplication()
-	featureFlagEval, err := NewFileBasedFeatureFlagEvaluator(mockApp, logger)
+	featureFlagEval, err := NewFileBasedFeatureFlagEvaluator(context.Background(), mockApp, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}
@@ -165,27 +165,18 @@ func TestDebugHandler(t *testing.T) {
 			err := json.NewDecoder(w.Body).Decode(&response)
 			require.NoError(t, err)
 
-			// New flattened schema returns circuit breaker entries directly at the top level.
-			// Backwards compatibility: if an old wrapped schema is ever reintroduced, tolerate it.
-			if cbWrapped, ok := response["circuitBreakers"]; ok {
-				if cbMap, ok2 := cbWrapped.(map[string]interface{}); ok2 {
-					response = cbMap // examine inner map for assertions
-				}
-			}
+			// Check the circuit_breakers field in the response
+			assert.Contains(t, response, "circuit_breakers", "response should contain circuit_breakers field")
 
-			// Expect configured backend circuit breakers to be present (placeholders acceptable).
-			assert.Contains(t, response, "primary")
-			assert.Contains(t, response, "secondary")
+			circuitBreakers, ok := response["circuit_breakers"]
+			require.True(t, ok, "circuit_breakers field should exist")
 
-			for name, v := range response {
-				cbInfo, ok := v.(map[string]interface{})
-				if !ok { // skip any non-map entries (e.g., future metadata fields)
-					continue
-				}
-				assert.Contains(t, cbInfo, "state", "circuit breaker %s missing state", name)
-				assert.Contains(t, cbInfo, "failureCount", "circuit breaker %s missing failureCount", name)
-				assert.Contains(t, cbInfo, "failures", "circuit breaker %s missing failures alias", name)
-			}
+			cbMap, ok := circuitBreakers.(map[string]interface{})
+			require.True(t, ok, "circuit_breakers should be a map")
+
+			// When no circuit breakers are set up, the map should be empty (no placeholder data)
+			// Since we haven't set up real circuit breakers in this test, expect empty map
+			assert.Empty(t, cbMap, "circuit breakers map should be empty when no real circuit breakers exist")
 		})
 
 		t.Run("HealthChecksEndpoint", func(t *testing.T) {
@@ -200,16 +191,18 @@ func TestDebugHandler(t *testing.T) {
 			var response map[string]interface{}
 			err := json.NewDecoder(w.Body).Decode(&response)
 			require.NoError(t, err)
+			// Verify the response contains health_checks field
+			assert.Contains(t, response, "health_checks", "response should contain health_checks field")
 
-			// Health checks may be disabled or empty; accept both wrapped and flattened schemas.
-			if hcWrapped, ok := response["healthChecks"]; ok {
-				if hcMap, ok2 := hcWrapped.(map[string]interface{}); ok2 {
-					response = hcMap
+			healthChecks, ok := response["health_checks"].(map[string]interface{})
+			require.True(t, ok, "health_checks should be a map")
+
+			// When no health checkers are provided (nil in constructor), the map should be empty
+			// Only check for status field if we actually have health check entries
+			for name, v := range healthChecks {
+				if name == "health_checks" {
+					continue // skip the wrapper key
 				}
-			}
-
-			// If health checks enabled, entries will be backend IDs -> info maps.
-			for name, v := range response {
 				info, ok := v.(map[string]interface{})
 				if !ok { // skip metadata
 					continue

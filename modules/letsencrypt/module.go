@@ -175,6 +175,7 @@ const ModuleName = "letsencrypt"
 //   - modular.Module: Basic module lifecycle
 //   - modular.Configurable: Configuration management
 //   - modular.ServiceAware: Service dependency management
+//   - modular.Constructable: Constructor-based dependency injection
 //   - modular.Startable: Startup logic
 //   - modular.Stoppable: Shutdown logic
 //   - CertificateService: Certificate management interface
@@ -188,10 +189,21 @@ type LetsEncryptModule struct {
 	certMutex     sync.RWMutex
 	shutdownChan  chan struct{}
 	renewalTicker *time.Ticker
-	rootCAs       *x509.CertPool  // Certificate authority root certificates
-	subject       modular.Subject // Added for event observation
-	subjectMu     sync.RWMutex    // Protects subject publication & reads during emission
+	rootCAs       *x509.CertPool      // Certificate authority root certificates
+	subject       modular.Subject     // Added for event observation
+	subjectMu     sync.RWMutex        // Protects subject publication & reads during emission
+	storage       *certificateStorage // Certificate storage service
+	logger        modular.Logger      // Logger for the module
 }
+
+// Compile-time assertions to ensure interface compliance
+var _ modular.Module = (*LetsEncryptModule)(nil)
+var _ modular.Configurable = (*LetsEncryptModule)(nil)
+var _ modular.ServiceAware = (*LetsEncryptModule)(nil)
+var _ modular.Constructable = (*LetsEncryptModule)(nil)
+var _ modular.Startable = (*LetsEncryptModule)(nil)
+var _ modular.Stoppable = (*LetsEncryptModule)(nil)
+var _ CertificateService = (*LetsEncryptModule)(nil)
 
 // User implements the ACME User interface for Let's Encrypt
 type User struct {
@@ -225,6 +237,13 @@ func New(config *LetsEncryptConfig) (*LetsEncryptModule, error) {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
+	// Set RenewBeforeDays from RenewBefore if not set
+	if config.RenewBeforeDays <= 0 && config.RenewBefore > 0 {
+		config.RenewBeforeDays = config.RenewBefore
+	} else if config.RenewBeforeDays <= 0 {
+		config.RenewBeforeDays = 30 // Default to 30 days
+	}
+
 	module := &LetsEncryptModule{
 		config:       config,
 		certificates: make(map[string]*tls.Certificate),
@@ -242,6 +261,104 @@ func (m *LetsEncryptModule) Name() string {
 // Config returns the module's configuration
 func (m *LetsEncryptModule) Config() interface{} {
 	return m.config
+}
+
+// RegisterConfig registers configuration requirements with the application
+func (m *LetsEncryptModule) RegisterConfig(app modular.Application) error {
+	// Check if letsencrypt config is already registered (e.g., by tests)
+	if _, err := app.GetConfigSection(m.Name()); err == nil {
+		// Config already registered, skip to avoid overriding
+		return nil
+	}
+
+	// Register empty config - defaults come from struct tags
+	m.config = &LetsEncryptConfig{}
+	app.RegisterConfigSection(m.Name(), modular.NewStdConfigProvider(m.config))
+	return nil
+}
+
+// Init initializes the module with the application context
+func (m *LetsEncryptModule) Init(app modular.Application) error {
+	// Retrieve the registered config section for access
+	cfg, err := app.GetConfigSection(m.Name())
+	if err != nil {
+		return fmt.Errorf("failed to get config section for letsencrypt module: %w", err)
+	}
+
+	m.config = cfg.GetConfig().(*LetsEncryptConfig)
+
+	// Logger should be injected via constructor, but fallback to app logger if needed
+	if m.logger == nil {
+		m.logger = app.Logger()
+	}
+
+	// Initialize certificate storage
+	storage, err := newCertificateStorage(m.config.StoragePath)
+	if err != nil {
+		return fmt.Errorf("failed to initialize certificate storage: %w", err)
+	}
+	m.storage = storage
+
+	// Load existing certificates from storage
+	if err := m.loadExistingCertificates(); err != nil {
+		m.logger.Warn("Failed to load existing certificates", "error", err)
+	}
+
+	m.logger.Info("Let's Encrypt module initialized", "storage_path", m.config.StoragePath)
+	return nil
+}
+
+// Dependencies returns the names of modules this module depends on
+func (m *LetsEncryptModule) Dependencies() []string {
+	// No hard module dependencies - services handled through RequiresServices
+	return nil
+}
+
+// ProvidesServices declares services provided by this module
+func (m *LetsEncryptModule) ProvidesServices() []modular.ServiceProvider {
+	return []modular.ServiceProvider{
+		{
+			Name:        "letsencrypt.certificates",
+			Description: "Certificate service for SSL/TLS certificate management",
+			Instance:    CertificateService(m),
+		},
+		{
+			Name:        "letsencrypt.module",
+			Description: "Let's Encrypt module instance",
+			Instance:    m,
+		},
+	}
+}
+
+// RequiresServices declares services required by this module
+func (m *LetsEncryptModule) RequiresServices() []modular.ServiceDependency {
+	return []modular.ServiceDependency{
+		{
+			Name:     "logger",
+			Required: true, // Logger is required for certificate management operations
+		},
+	}
+}
+
+// Constructor returns a function to construct this module with dependency injection
+func (m *LetsEncryptModule) Constructor() modular.ModuleConstructor {
+	return func(app modular.Application, services map[string]any) (modular.Module, error) {
+		// Extract logger from services
+		logger, ok := services["logger"].(modular.Logger)
+		if !ok {
+			return nil, ErrLoggerServiceUnavailable
+		}
+
+		// Create new module instance with injected logger
+		module := &LetsEncryptModule{
+			config:       m.config,
+			certificates: make(map[string]*tls.Certificate),
+			shutdownChan: make(chan struct{}),
+			logger:       logger,
+		}
+
+		return module, nil
+	}
 }
 
 // Start initializes the module and starts any background processes
@@ -335,15 +452,54 @@ func (m *LetsEncryptModule) GetCertificateForDomain(domain string) (*tls.Certifi
 	m.certMutex.RUnlock()
 
 	if !ok {
-		// Check if we have a wildcard certificate that matches
-		wildcardDomain := "*." + domain[strings.Index(domain, ".")+1:]
-		m.certMutex.RLock()
-		cert, ok = m.certificates[wildcardDomain]
-		m.certMutex.RUnlock()
+		// Try to load from storage if not in memory
+		if m.storage != nil {
+			loadedCert, err := m.storage.LoadCertificate(domain)
+			if err == nil {
+				// Cache the loaded certificate in memory
+				m.certMutex.Lock()
+				m.certificates[domain] = loadedCert
+				m.certMutex.Unlock()
 
-		if !ok {
-			return nil, fmt.Errorf("%w: %s", ErrNoCertificateFound, domain)
+				// Emit storage read event
+				m.emitEvent(context.Background(), EventTypeStorageRead, map[string]interface{}{
+					"domain": domain,
+					"path":   m.config.StoragePath,
+				})
+
+				return loadedCert, nil
+			}
 		}
+
+		// Check if we have a wildcard certificate that matches
+		if strings.Contains(domain, ".") {
+			wildcardDomain := "*." + domain[strings.Index(domain, ".")+1:]
+			m.certMutex.RLock()
+			cert, ok = m.certificates[wildcardDomain]
+			m.certMutex.RUnlock()
+
+			if !ok && m.storage != nil {
+				// Try to load wildcard from storage
+				if loadedCert, err := m.storage.LoadCertificate(wildcardDomain); err == nil {
+					// Cache the loaded certificate in memory
+					m.certMutex.Lock()
+					m.certificates[wildcardDomain] = loadedCert
+					m.certMutex.Unlock()
+
+					// Emit storage read event
+					m.emitEvent(context.Background(), EventTypeStorageRead, map[string]interface{}{
+						"domain": wildcardDomain,
+						"path":   m.config.StoragePath,
+					})
+
+					return loadedCert, nil
+				}
+			} else if ok {
+				return cert, nil
+			}
+		}
+
+		return nil, fmt.Errorf("%w: %s", ErrNoCertificateFound, domain)
 	}
 
 	return cert, nil
@@ -360,6 +516,34 @@ func (m *LetsEncryptModule) Domains() []string {
 	}
 
 	return domains
+}
+
+// loadExistingCertificates loads certificates from storage into memory
+func (m *LetsEncryptModule) loadExistingCertificates() error {
+	if m.storage == nil {
+		return nil
+	}
+
+	domains, err := m.storage.ListCertificates()
+	if err != nil {
+		return fmt.Errorf("failed to list certificates: %w", err)
+	}
+
+	m.certMutex.Lock()
+	defer m.certMutex.Unlock()
+
+	for _, domain := range domains {
+		cert, err := m.storage.LoadCertificate(domain)
+		if err != nil {
+			m.logger.Warn("Failed to load certificate for domain", "domain", domain, "error", err)
+			continue
+		}
+		m.certificates[domain] = cert
+		m.logger.Debug("Loaded certificate from storage", "domain", domain)
+	}
+
+	m.logger.Info("Loaded existing certificates", "count", len(domains))
+	return nil
 }
 
 // initUser initializes a new ACME user for registration with Let's Encrypt
@@ -491,6 +675,23 @@ func (m *LetsEncryptModule) refreshCertificates(ctx context.Context) error {
 		}
 		m.certificates[domain] = &cert
 
+		// Save certificate to storage
+		if m.storage != nil {
+			if err := m.storage.SaveCertificate(domain, certificates); err != nil {
+				m.logger.Warn("Failed to save certificate to storage", "domain", domain, "error", err)
+				m.emitEvent(ctx, EventTypeStorageError, map[string]interface{}{
+					"error":     err.Error(),
+					"domain":    domain,
+					"operation": "save_certificate",
+				})
+			} else {
+				m.emitEvent(ctx, EventTypeStorageWrite, map[string]interface{}{
+					"domain": domain,
+					"path":   m.config.StoragePath,
+				})
+			}
+		}
+
 		// Emit certificate issued event for each domain
 		m.emitEvent(ctx, EventTypeCertificateIssued, map[string]interface{}{
 			"domain": domain,
@@ -520,35 +721,98 @@ func (m *LetsEncryptModule) startRenewalTimer(ctx context.Context) {
 
 // checkAndRenewCertificates checks if certificates need renewal and renews them
 func (m *LetsEncryptModule) checkAndRenewCertificates(ctx context.Context) {
-	// Loop through all certificates and check their expiry dates
-	for domain, cert := range m.certificates {
-		if cert == nil || len(cert.Certificate) == 0 {
-			// Skip invalid certificates
-			continue
-		}
+	// Get domains from storage for checking
+	var domainsToCheck []string
 
-		// Parse the certificate to get its expiry date
-		x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+	// First check in-memory certificates
+	m.certMutex.RLock()
+	for domain := range m.certificates {
+		domainsToCheck = append(domainsToCheck, domain)
+	}
+	m.certMutex.RUnlock()
+
+	// Also check storage for any certificates not loaded in memory
+	if m.storage != nil {
+		storedDomains, err := m.storage.ListCertificates()
 		if err != nil {
-			fmt.Printf("Error parsing certificate for %s: %v\n", domain, err)
-			continue
-		}
-
-		// Calculate days until expiry
-		daysUntilExpiry := time.Until(x509Cert.NotAfter) / (24 * time.Hour)
-
-		// If certificate will expire within the renewal window, renew it
-		if daysUntilExpiry <= time.Duration(m.config.RenewBeforeDays) {
-			fmt.Printf("Certificate for %s will expire in %d days, renewing\n", domain, int(daysUntilExpiry))
-
-			// Request renewal for this specific domain
-			if err := m.renewCertificateForDomain(ctx, domain); err != nil {
-				fmt.Printf("Failed to renew certificate for %s: %v\n", domain, err)
-			} else {
-				fmt.Printf("Successfully renewed certificate for %s\n", domain)
+			m.logger.Warn("Failed to list certificates from storage", "error", err)
+		} else {
+			// Add any domains from storage that aren't in memory
+			domainSet := make(map[string]bool)
+			for _, domain := range domainsToCheck {
+				domainSet[domain] = true
+			}
+			for _, domain := range storedDomains {
+				if !domainSet[domain] {
+					domainsToCheck = append(domainsToCheck, domain)
+				}
 			}
 		}
 	}
+
+	// Loop through all domains and check their expiry dates
+	for _, domain := range domainsToCheck {
+		var needsRenewal bool
+		var daysUntilExpiry int
+
+		// Check expiry using storage if available (more reliable)
+		if m.storage != nil {
+			expiring, err := m.storage.IsCertificateExpiringSoon(domain, m.config.RenewBeforeDays)
+			if err != nil {
+				m.logger.Warn("Failed to check certificate expiry from storage", "domain", domain, "error", err)
+				// Fall back to in-memory check
+				needsRenewal = m.checkInMemoryCertificateExpiry(domain, &daysUntilExpiry)
+			} else {
+				needsRenewal = expiring
+			}
+		} else {
+			// Check in-memory certificate
+			needsRenewal = m.checkInMemoryCertificateExpiry(domain, &daysUntilExpiry)
+		}
+
+		// Renew if needed
+		if needsRenewal {
+			m.logger.Info("Certificate needs renewal", "domain", domain, "days_until_expiry", daysUntilExpiry)
+
+			// Emit expiring event
+			m.emitEvent(ctx, EventTypeCertificateExpiring, map[string]interface{}{
+				"domain":    domain,
+				"days_left": daysUntilExpiry,
+			})
+
+			// Request renewal for this specific domain
+			if err := m.renewCertificateForDomain(ctx, domain); err != nil {
+				m.logger.Error("Failed to renew certificate", "domain", domain, "error", err)
+			} else {
+				m.logger.Info("Successfully renewed certificate", "domain", domain)
+			}
+		}
+	}
+}
+
+// checkInMemoryCertificateExpiry checks if an in-memory certificate is expiring
+func (m *LetsEncryptModule) checkInMemoryCertificateExpiry(domain string, daysUntilExpiry *int) bool {
+	m.certMutex.RLock()
+	cert, exists := m.certificates[domain]
+	m.certMutex.RUnlock()
+
+	if !exists || cert == nil || len(cert.Certificate) == 0 {
+		return false
+	}
+
+	// Parse the certificate to get its expiry date
+	x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		m.logger.Error("Error parsing certificate", "domain", domain, "error", err)
+		return false
+	}
+
+	// Calculate days until expiry
+	daysLeft := time.Until(x509Cert.NotAfter) / (24 * time.Hour)
+	*daysUntilExpiry = int(daysLeft)
+
+	// If certificate will expire within the renewal window, renew it
+	return daysLeft <= time.Duration(m.config.RenewBeforeDays)
 }
 
 // renewCertificateForDomain renews the certificate for a specific domain
@@ -583,6 +847,23 @@ func (m *LetsEncryptModule) renewCertificateForDomain(ctx context.Context, domai
 	m.certMutex.Lock()
 	m.certificates[domain] = &cert
 	m.certMutex.Unlock()
+
+	// Save renewed certificate to storage
+	if m.storage != nil {
+		if err := m.storage.SaveCertificate(domain, certificates); err != nil {
+			m.logger.Warn("Failed to save renewed certificate to storage", "domain", domain, "error", err)
+			m.emitEvent(ctx, EventTypeStorageError, map[string]interface{}{
+				"error":     err.Error(),
+				"domain":    domain,
+				"operation": "save_renewed_certificate",
+			})
+		} else {
+			m.emitEvent(ctx, EventTypeStorageWrite, map[string]interface{}{
+				"domain": domain,
+				"path":   m.config.StoragePath,
+			})
+		}
+	}
 
 	// Emit certificate renewed event
 	m.emitEvent(ctx, EventTypeCertificateRenewed, map[string]interface{}{

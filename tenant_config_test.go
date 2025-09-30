@@ -6,6 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Test configuration structs
@@ -431,4 +434,83 @@ func TestCopyStructFields(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error with invalid source type")
 	}
+}
+
+// TestTenantConfigIsolation tests that tenant configurations are properly isolated
+// and do not share map references when copied (the bug that was fixed in commit dc66902)
+func TestTenantConfigIsolation(t *testing.T) {
+	t.Parallel()
+
+	// This test simulates the actual bug scenario:
+	// 1. A config struct is created with initialized maps
+	// 2. That config is copied using createTempConfig (which happens during tenant loading)
+	// 3. If shallow copy is used (the bug), modifying one copy affects the other
+
+	// Create a base config with maps - this simulates a default/template config
+	baseConfig := &TestTenantConfig{
+		Name:        "BaseConfig",
+		Environment: "default",
+		Features: map[string]bool{
+			"feature1": true,
+			"feature2": false,
+		},
+	}
+
+	// Simulate what happens when loading tenant configs:
+	// createTempConfig is called to make a copy
+	tenantACfg, _, err := createTempConfig(baseConfig)
+	require.NoError(t, err)
+	tenantATyped := tenantACfg.(*TestTenantConfig)
+
+	tenantBCfg, _, err := createTempConfig(baseConfig)
+	require.NoError(t, err)
+	tenantBTyped := tenantBCfg.(*TestTenantConfig)
+
+	// At this point, both tenants have copies of the base config
+	// Verify initial state
+	assert.Equal(t, "BaseConfig", tenantATyped.Name)
+	assert.Equal(t, "BaseConfig", tenantBTyped.Name)
+	assert.True(t, tenantATyped.Features["feature1"])
+	assert.True(t, tenantBTyped.Features["feature1"])
+
+	// THE CRITICAL TEST: Modify tenant A's map
+	tenantATyped.Features["feature1"] = false
+	tenantATyped.Features["new_feature_A"] = true
+	tenantATyped.Name = "TenantA"
+
+	// Modify tenant B's map
+	tenantBTyped.Features["feature2"] = true
+	tenantBTyped.Features["new_feature_B"] = true
+	tenantBTyped.Name = "TenantB"
+
+	// If deep copy is working:
+	// - TenantA and TenantB should have independent maps
+	// - Changes to one should NOT affect the other
+	// - The base config should also remain unchanged
+
+	// If shallow copy (the bug):
+	// - All three would share the same map reference
+	// - Changes to any would affect all
+
+	// Verify tenant A has its own changes
+	assert.False(t, tenantATyped.Features["feature1"], "TenantA should have feature1=false")
+	assert.True(t, tenantATyped.Features["new_feature_A"], "TenantA should have new_feature_A")
+	assert.False(t, tenantATyped.Features["new_feature_B"], "TenantA should NOT have TenantB's features")
+	assert.Equal(t, "TenantA", tenantATyped.Name)
+
+	// Verify tenant B has its own changes
+	assert.True(t, tenantBTyped.Features["feature1"], "TenantB should still have feature1=true (unaffected by TenantA)")
+	assert.True(t, tenantBTyped.Features["feature2"], "TenantB should have feature2=true")
+	assert.True(t, tenantBTyped.Features["new_feature_B"], "TenantB should have new_feature_B")
+	assert.False(t, tenantBTyped.Features["new_feature_A"], "TenantB should NOT have TenantA's features")
+	assert.Equal(t, "TenantB", tenantBTyped.Name)
+
+	// Verify base config remains unchanged
+	assert.Equal(t, "BaseConfig", baseConfig.Name, "Base config name should be unchanged")
+	assert.True(t, baseConfig.Features["feature1"], "Base config should still have feature1=true")
+	assert.False(t, baseConfig.Features["feature2"], "Base config should still have feature2=false")
+	assert.False(t, baseConfig.Features["new_feature_A"], "Base config should NOT have TenantA's features")
+	assert.False(t, baseConfig.Features["new_feature_B"], "Base config should NOT have TenantB's features")
+
+	t.Log("SUCCESS: Tenant configurations are properly isolated via deep copy - no shared map references")
 }

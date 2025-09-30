@@ -1,7 +1,6 @@
 package reverseproxy
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -479,7 +478,7 @@ func TestHeaderRewritingEdgeCases(t *testing.T) {
 			},
 			BackendConfigs: map[string]BackendServiceConfig{
 				"api": {
-					URL:             backendServer.URL,
+					URL: backendServer.URL,
 					HeaderRewriting: HeaderRewritingConfig{
 						// All fields are nil/empty
 					},

@@ -1267,3 +1267,230 @@ func TestDeepCopyValue_ComplexStructures(t *testing.T) {
 	assert.True(t, dstConfig.Features["feature1"], "Features map should be deep copied")
 	assert.Equal(t, "192.168.1.1", dstConfig.AllowedIPs[0], "AllowedIPs slice should be deep copied")
 }
+
+// TestDeepCopyValue_Arrays tests deep copying of fixed-size arrays
+func TestDeepCopyValue_Arrays(t *testing.T) {
+	t.Parallel()
+
+	t.Run("array of integers", func(t *testing.T) {
+		src := [5]int{1, 2, 3, 4, 5}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstArray := dst.Interface().([5]int)
+		assert.Equal(t, [5]int{1, 2, 3, 4, 5}, dstArray)
+
+		// Arrays are value types in Go, but let's verify the copy works
+		src[0] = 999
+		assert.Equal(t, 1, dstArray[0], "Destination array should not be affected")
+	})
+
+	t.Run("array of strings", func(t *testing.T) {
+		src := [3]string{"foo", "bar", "baz"}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstArray := dst.Interface().([3]string)
+		assert.Equal(t, [3]string{"foo", "bar", "baz"}, dstArray)
+
+		src[1] = "modified"
+		assert.Equal(t, "bar", dstArray[1])
+	})
+
+	t.Run("array of pointers", func(t *testing.T) {
+		str1, str2 := "value1", "value2"
+		src := [2]*string{&str1, &str2}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstArray := dst.Interface().([2]*string)
+		assert.Equal(t, "value1", *dstArray[0])
+		assert.Equal(t, "value2", *dstArray[1])
+
+		// Verify deep copy - modifying source pointer values shouldn't affect destination
+		*src[0] = "modified"
+		assert.Equal(t, "value1", *dstArray[0], "Array of pointers should be deep copied")
+	})
+}
+
+// TestDeepCopyValue_Interfaces tests deep copying of interface values
+func TestDeepCopyValue_Interfaces(t *testing.T) {
+	t.Parallel()
+
+	t.Run("interface with concrete string", func(t *testing.T) {
+		var src interface{} = "hello"
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstValue := dst.Interface()
+		assert.Equal(t, "hello", dstValue)
+	})
+
+	t.Run("interface with concrete map", func(t *testing.T) {
+		var src interface{} = map[string]int{"a": 1, "b": 2}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstValue := dst.Interface().(map[string]int)
+		assert.Equal(t, 1, dstValue["a"])
+		assert.Equal(t, 2, dstValue["b"])
+
+		// Verify it's a deep copy
+		srcMap := src.(map[string]int)
+		srcMap["a"] = 999
+		assert.Equal(t, 1, dstValue["a"], "Interface containing map should be deep copied")
+	})
+
+	t.Run("struct with interface field", func(t *testing.T) {
+		type ConfigWithInterface struct {
+			Name string
+			Data interface{}
+		}
+
+		src := ConfigWithInterface{
+			Name: "test",
+			Data: map[string]int{"count": 42},
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstValue := dst.Interface().(ConfigWithInterface)
+		assert.Equal(t, "test", dstValue.Name)
+		assert.Equal(t, 42, dstValue.Data.(map[string]int)["count"])
+
+		// Verify deep copy
+		srcMap := src.Data.(map[string]int)
+		srcMap["count"] = 999
+		assert.Equal(t, 42, dstValue.Data.(map[string]int)["count"], "Interface field containing map should be deep copied")
+	})
+
+	t.Run("struct with nil interface field", func(t *testing.T) {
+		type ConfigWithInterface struct {
+			Name string
+			Data interface{}
+		}
+
+		src := ConfigWithInterface{
+			Name: "test",
+			Data: nil,
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstValue := dst.Interface().(ConfigWithInterface)
+		assert.Equal(t, "test", dstValue.Name)
+		assert.Nil(t, dstValue.Data, "Nil interface field should remain nil")
+	})
+
+	t.Run("interface with struct", func(t *testing.T) {
+		type TestStruct struct {
+			Value int
+			Data  map[string]string
+		}
+
+		var src interface{} = TestStruct{
+			Value: 42,
+			Data:  map[string]string{"key": "value"},
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstValue := dst.Interface().(TestStruct)
+		assert.Equal(t, 42, dstValue.Value)
+		assert.Equal(t, "value", dstValue.Data["key"])
+
+		// Verify deep copy of the map inside the struct
+		srcStruct := src.(TestStruct)
+		srcStruct.Data["key"] = "modified"
+		assert.Equal(t, "value", dstValue.Data["key"], "Interface with struct containing map should be deep copied")
+	})
+}
+
+// TestDeepCopyValue_Channels tests copying of channels (by reference)
+func TestDeepCopyValue_Channels(t *testing.T) {
+	t.Parallel()
+
+	t.Run("channel of integers", func(t *testing.T) {
+		src := make(chan int, 2)
+		src <- 42
+		src <- 100
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstChan := dst.Interface().(chan int)
+
+		// Channels are copied by reference, so they should be the same channel
+		assert.Equal(t, 42, <-dstChan, "Channel should be copied by reference")
+		assert.Equal(t, 100, <-dstChan, "Channel should be copied by reference")
+	})
+
+	t.Run("nil channel", func(t *testing.T) {
+		var src chan string = nil
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstChan := dst.Interface().(chan string)
+		assert.Nil(t, dstChan, "Nil channel should remain nil")
+	})
+}
+
+// TestDeepCopyValue_Functions tests copying of functions (by reference)
+func TestDeepCopyValue_Functions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("function value", func(t *testing.T) {
+		callCount := 0
+		src := func(x int) int {
+			callCount++
+			return x * 2
+		}
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstFunc := dst.Interface().(func(int) int)
+
+		// Functions are copied by reference, so calling either increments the same counter
+		assert.Equal(t, 10, dstFunc(5))
+		assert.Equal(t, 1, callCount, "Function should be copied by reference")
+
+		assert.Equal(t, 20, src(10))
+		assert.Equal(t, 2, callCount, "Both function references share state")
+	})
+
+	t.Run("nil function", func(t *testing.T) {
+		var src func(int) int = nil
+
+		dst := reflect.New(reflect.TypeOf(src)).Elem()
+		deepCopyValue(dst, reflect.ValueOf(src))
+
+		dstFunc := dst.Interface().(func(int) int)
+		assert.Nil(t, dstFunc, "Nil function should remain nil")
+	})
+}
+
+// TestDeepCopyValue_Invalid tests handling of invalid reflect values
+func TestDeepCopyValue_Invalid(t *testing.T) {
+	t.Parallel()
+
+	t.Run("invalid value", func(t *testing.T) {
+		var src reflect.Value // Invalid (zero value)
+
+		dst := reflect.New(reflect.TypeOf("")).Elem()
+
+		// Should not panic
+		require.NotPanics(t, func() {
+			deepCopyValue(dst, src)
+		})
+	})
+}

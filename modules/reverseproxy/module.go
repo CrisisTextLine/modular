@@ -4011,19 +4011,35 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 			reqCopy.ContentLength = int64(len(bodyBytes))
 		}
 
-		// Get the actual backend URLs
-		primaryURL, exists := m.config.BackendServices[primaryBackend]
+		// Get the actual backend URLs (use tenant-specific if available)
+		// Extract tenant ID from request to get tenant-specific config
+		tenantIDStr, hasTenant := TenantIDFromRequest(m.config.TenantIDHeader, reqCopy)
+
+		// Determine which config to use (tenant-specific or global)
+		var backendConfig *ReverseProxyConfig
+		if hasTenant {
+			tenantID := modular.TenantID(tenantIDStr)
+			if tenantCfg, exists := m.tenants[tenantID]; exists && tenantCfg != nil {
+				backendConfig = tenantCfg
+			} else {
+				backendConfig = m.config
+			}
+		} else {
+			backendConfig = m.config
+		}
+
+		primaryURL, exists := backendConfig.BackendServices[primaryBackend]
 		if !exists {
 			if m.app != nil && m.app.Logger() != nil {
-				m.app.Logger().Error("Primary backend URL not found for dry run", "backend", primaryBackend)
+				m.app.Logger().Error("Primary backend URL not found for dry run", "backend", primaryBackend, "tenant", tenantIDStr)
 			}
 			return
 		}
 
-		secondaryURL, exists := m.config.BackendServices[secondaryBackend]
+		secondaryURL, exists := backendConfig.BackendServices[secondaryBackend]
 		if !exists {
 			if m.app != nil && m.app.Logger() != nil {
-				m.app.Logger().Error("Secondary backend URL not found for dry run", "backend", secondaryBackend)
+				m.app.Logger().Error("Secondary backend URL not found for dry run", "backend", secondaryBackend, "tenant", tenantIDStr)
 			}
 			return
 		}

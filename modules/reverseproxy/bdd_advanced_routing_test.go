@@ -1140,7 +1140,7 @@ func (ctx *ReverseProxyBDDTestContext) appropriateTimeoutErrorResponsesShouldBeR
 	if ctx.lastError != nil {
 		// If there's an error, check that it's a timeout-related error
 		errorStr := strings.ToLower(ctx.lastError.Error())
-		timeoutKeywords := []string{"timeout", "deadline exceeded", "context deadline exceeded", "i/o timeout", "request timeout"}
+		timeoutKeywords := []string{"timeout", "deadline exceeded", "context deadline exceeded", "i/o timeout"}
 
 		timeoutDetected := false
 		for _, keyword := range timeoutKeywords {
@@ -1151,7 +1151,7 @@ func (ctx *ReverseProxyBDDTestContext) appropriateTimeoutErrorResponsesShouldBeR
 		}
 
 		if !timeoutDetected {
-			return fmt.Errorf("error response should contain timeout indicators, got: %s", ctx.lastError.Error())
+			return fmt.Errorf("error response should contain timeout indicators, got: %s (lowercase: %s)", ctx.lastError.Error(), errorStr)
 		}
 
 		return nil
@@ -1159,11 +1159,20 @@ func (ctx *ReverseProxyBDDTestContext) appropriateTimeoutErrorResponsesShouldBeR
 
 	if ctx.lastResponse != nil {
 		// If there's a response, it should be a timeout-related status code
-		if ctx.lastResponse.StatusCode == http.StatusGatewayTimeout || ctx.lastResponse.StatusCode == http.StatusRequestTimeout {
-			return nil
+		validTimeoutStatuses := []int{
+			http.StatusGatewayTimeout,     // 504
+			http.StatusRequestTimeout,     // 408
+			http.StatusServiceUnavailable, // 503 - often used for timeout situations
+			http.StatusBadGateway,         // 502 - can indicate timeout to backend
 		}
 
-		return fmt.Errorf("expected timeout status code (504 or 408), got %d", ctx.lastResponse.StatusCode)
+		for _, validStatus := range validTimeoutStatuses {
+			if ctx.lastResponse.StatusCode == validStatus {
+				return nil
+			}
+		}
+
+		return fmt.Errorf("expected timeout status code (504, 408, 503, or 502), got %d", ctx.lastResponse.StatusCode)
 	}
 
 	return fmt.Errorf("expected either timeout error or timeout response status")

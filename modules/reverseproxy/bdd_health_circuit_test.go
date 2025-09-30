@@ -43,7 +43,8 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithHealthChecksEnabled
 		},
 		HealthCheck: HealthCheckConfig{
 			Enabled:  true,
-			Interval: 2 * time.Second, // Short interval for testing
+			Interval: 200 * time.Millisecond, // Very short interval for testing
+			Timeout:  500 * time.Millisecond, // Short timeout to fail fast
 			HealthEndpoints: map[string]string{
 				"test-backend": "/health",
 			},
@@ -56,7 +57,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithHealthChecksEnabled
 	}
 	// Flip backend to healthy after initial failing cycle so health checker emits healthy event
 	go func() {
-		time.Sleep(1200 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) // Optimized delay to match faster interval
 		backendHealthy = true
 	}()
 	return nil
@@ -111,8 +112,8 @@ func (ctx *ReverseProxyBDDTestContext) theProxyShouldDetectTheFailure() error {
 	}
 
 	// Wait for health checker to detect the failure (give it some time to run)
-	maxWaitTime := 6 * time.Second // More than 2x the health check interval
-	waitInterval := 500 * time.Millisecond
+	maxWaitTime := 1 * time.Second // Optimized wait time
+	waitInterval := 50 * time.Millisecond
 	hasUnhealthyBackend := false
 
 	for waited := time.Duration(0); waited < maxWaitTime; waited += waitInterval {

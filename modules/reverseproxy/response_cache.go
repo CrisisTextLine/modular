@@ -169,6 +169,13 @@ func (rc *responseCache) cleanup() {
 	}
 }
 
+// Clear removes all entries from the cache
+func (rc *responseCache) Clear() {
+	rc.mutex.Lock()
+	defer rc.mutex.Unlock()
+	rc.cache = make(map[string]*CachedResponse)
+}
+
 // periodicCleanup runs a cleanup on the cache at regular intervals
 // Close stops the periodic cleanup goroutine
 func (rc *responseCache) Close() {

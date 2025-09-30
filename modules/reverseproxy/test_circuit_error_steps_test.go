@@ -54,7 +54,7 @@ func TestCircuitErrorStepRegistration(t *testing.T) {
 	// 	// We just want to verify the steps can be registered
 	// 	t.Log("Suite run completed (expected to not find feature files)")
 	// }
-	
+
 	// Instead, just verify that the suite was created without errors
 	if suite.ScenarioInitializer == nil {
 		t.Fatal("ScenarioInitializer should not be nil")

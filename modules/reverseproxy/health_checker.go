@@ -81,6 +81,10 @@ type HealthChecker struct {
 	healthEndpoints          map[string]string
 	backendHealthCheckConfig map[string]BackendHealthConfig
 	expectedStatusCodes      []int
+
+	// Context for running health check goroutines (protected by runningMutex)
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewHealthChecker creates a new health checker with the given configuration.
@@ -166,26 +170,31 @@ func (hc *HealthChecker) Start(ctx context.Context) error {
 		// Channel is still open, use it
 	}
 
+	// Create a cancellable context for all health check goroutines
+	healthCtx, cancel := context.WithCancel(ctx)
+	hc.ctx = healthCtx
+	hc.cancel = cancel
+
 	hc.runningMutex.Unlock()
 
 	// Perform initial health check for all backends
 	for backendID, baseURL := range hc.backends {
 		hc.initializeBackendStatus(backendID, baseURL)
-		// Perform immediate health check
-		hc.performHealthCheck(ctx, backendID, baseURL)
+		// Perform immediate health check using derived context
+		hc.performHealthCheck(healthCtx, backendID, baseURL)
 	}
 
 	// Start periodic health checks
 	for backendID, baseURL := range hc.backends {
 		hc.wg.Add(1)
-		go hc.runPeriodicHealthCheck(ctx, backendID, baseURL)
+		go hc.runPeriodicHealthCheck(backendID, baseURL)
 	}
 
 	hc.logger.InfoContext(ctx, "Health checker started", "backends", len(hc.backends))
 	return nil
 }
 
-// Stop stops the health checking process.
+// Stop stops the health checking process and waits for all goroutines to terminate.
 func (hc *HealthChecker) Stop(ctx context.Context) {
 	hc.runningMutex.Lock()
 	if !hc.running {
@@ -195,6 +204,13 @@ func (hc *HealthChecker) Stop(ctx context.Context) {
 	hc.running = false
 	hc.runningMutex.Unlock()
 
+	hc.logger.InfoContext(ctx, "Stopping health checker", "backends", len(hc.backends))
+
+	// Cancel the context to stop all health check goroutines
+	if hc.cancel != nil {
+		hc.cancel()
+	}
+
 	// Close the stop channel only once
 	select {
 	case <-hc.stopChan:
@@ -203,8 +219,22 @@ func (hc *HealthChecker) Stop(ctx context.Context) {
 		close(hc.stopChan)
 	}
 
-	hc.wg.Wait()
-	hc.logger.InfoContext(ctx, "Health checker stopped")
+	// Wait for all goroutines to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		hc.wg.Wait()
+		close(done)
+	}()
+
+	// Wait for either all goroutines to finish or context timeout
+	select {
+	case <-done:
+		hc.logger.InfoContext(ctx, "Health checker stopped - all goroutines terminated")
+	case <-ctx.Done():
+		hc.logger.WarnContext(ctx, "Health checker stop timeout - some goroutines may still be running")
+	case <-time.After(10 * time.Second):
+		hc.logger.WarnContext(ctx, "Health checker stop timeout after 10s - forcing shutdown")
+	}
 }
 
 // IsRunning returns whether the health checker is currently running.
@@ -300,8 +330,19 @@ func (hc *HealthChecker) initializeBackendStatus(backendID, baseURL string) {
 }
 
 // runPeriodicHealthCheck runs periodic health checks for a backend.
-func (hc *HealthChecker) runPeriodicHealthCheck(ctx context.Context, backendID, baseURL string) {
+func (hc *HealthChecker) runPeriodicHealthCheck(backendID, baseURL string) {
 	defer hc.wg.Done()
+
+	// Get the context from the health checker (set during Start)
+	hc.runningMutex.RLock()
+	ctx := hc.ctx
+	hc.runningMutex.RUnlock()
+
+	// If context is nil, we can't run health checks
+	if ctx == nil {
+		hc.logger.Warn("Health check goroutine started without context", "backend", backendID)
+		return
+	}
 
 	interval := hc.getBackendInterval(backendID)
 	ticker := time.NewTicker(interval)
@@ -310,10 +351,17 @@ func (hc *HealthChecker) runPeriodicHealthCheck(ctx context.Context, backendID, 
 	for {
 		select {
 		case <-ctx.Done():
+			hc.logger.Debug("Health check goroutine stopped due to context cancellation", "backend", backendID)
 			return
 		case <-hc.stopChan:
+			hc.logger.Debug("Health check goroutine stopped due to stop channel", "backend", backendID)
 			return
 		case <-ticker.C:
+			// Check context again before performing health check
+			if ctx.Err() != nil {
+				hc.logger.Debug("Health check goroutine stopping - context cancelled", "backend", backendID)
+				return
+			}
 			hc.performHealthCheck(ctx, backendID, baseURL)
 		}
 	}
@@ -321,6 +369,11 @@ func (hc *HealthChecker) runPeriodicHealthCheck(ctx context.Context, backendID, 
 
 // performHealthCheck performs a health check for a specific backend.
 func (hc *HealthChecker) performHealthCheck(ctx context.Context, backendID, baseURL string) {
+	// Early exit if context is already cancelled
+	if ctx.Err() != nil {
+		return
+	}
+
 	start := time.Now()
 
 	// Check if we should skip this check due to recent request
@@ -338,6 +391,11 @@ func (hc *HealthChecker) performHealthCheck(ctx context.Context, backendID, base
 		return
 	}
 
+	// Check context again before expensive operations
+	if ctx.Err() != nil {
+		return
+	}
+
 	hc.statusMutex.Lock()
 	if status, exists := hc.healthStatus[backendID]; exists {
 		status.TotalChecks++
@@ -346,6 +404,11 @@ func (hc *HealthChecker) performHealthCheck(ctx context.Context, backendID, base
 
 	// Perform DNS resolution check
 	dnsResolved, resolvedIPs, dnsErr := hc.performDNSCheck(ctx, baseURL)
+
+	// Check context after DNS check
+	if ctx.Err() != nil {
+		return
+	}
 
 	// Perform HTTP health check
 	healthy, responseTime, httpErr := hc.performHTTPCheck(ctx, backendID, baseURL)
@@ -640,11 +703,22 @@ func (hc *HealthChecker) UpdateBackends(ctx context.Context, backends map[string
 	hc.backends = cloned
 	hc.statusMutex.Unlock()
 
-	// If running, start periodic checks for new backends
+	// If running, start periodic checks for new backends using the stored context
 	if len(newBackends) > 0 && hc.IsRunning() {
+		// Get the context under lock to avoid race conditions
+		hc.runningMutex.RLock()
+		healthCtx := hc.ctx
+		hc.runningMutex.RUnlock()
+
+		// Make sure we have a valid context (Start() should have been called)
+		if healthCtx == nil {
+			hc.logger.WarnContext(ctx, "Cannot start health checks for new backends: context not initialized. Call Start() first.")
+			return
+		}
 		for backendID, baseURL := range newBackends {
 			hc.wg.Add(1)
-			go hc.runPeriodicHealthCheck(ctx, backendID, baseURL)
+			// goroutine will get context from hc.ctx internally
+			go hc.runPeriodicHealthCheck(backendID, baseURL)
 		}
 	}
 }

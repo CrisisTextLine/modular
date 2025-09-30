@@ -38,6 +38,7 @@ func (ctx *ReverseProxyBDDTestContext) circuitBreakersShouldRespondAppropriately
 		http.StatusServiceUnavailable,  // 503
 		http.StatusInternalServerError, // 500
 		http.StatusBadGateway,          // 502
+		http.StatusGatewayTimeout,      // 504 - circuit breaker timeout
 	}
 
 	statusValid := false
@@ -64,7 +65,7 @@ func (ctx *ReverseProxyBDDTestContext) circuitBreakersShouldRespondAppropriately
 
 	// The response should indicate some form of service unavailability
 	bodyStr := strings.ToLower(string(body))
-	errorIndicators := []string{"error", "unavailable", "failed", "circuit", "service"}
+	errorIndicators := []string{"error", "unavailable", "failed", "circuit", "service", "timeout"}
 	hasErrorIndicator := false
 	for _, indicator := range errorIndicators {
 		if strings.Contains(bodyStr, indicator) {

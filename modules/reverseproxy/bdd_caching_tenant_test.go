@@ -182,6 +182,14 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithSpecificCacheTTLCon
 		return err
 	}
 
+	// Verify that the cache is actually enabled and working
+	if ctx.service == nil || ctx.service.responseCache == nil {
+		return fmt.Errorf("response cache not initialized")
+	}
+
+	// Explicitly clear cache to ensure clean state for this scenario
+	ctx.service.responseCache.Clear()
+
 	// Make an initial request to populate the cache
 	// This ensures there's something in the cache that can expire
 	resp, err := ctx.makeRequestThroughModule("GET", "/api/cached", nil)
@@ -194,19 +202,25 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithSpecificCacheTTLCon
 	}
 	resp.Body.Close()
 
-	// Verify that the cache is actually enabled and working
-	if ctx.service == nil || ctx.service.responseCache == nil {
-		return fmt.Errorf("response cache not initialized")
-	}
-
 	return nil
 }
 
 // Cache TTL Management Functions
 
 func (ctx *ReverseProxyBDDTestContext) cachedResponsesAgeBeyondTTL() error {
-	// Wait for cache TTL to expire
-	time.Sleep(2 * time.Second) // Assume 1-second TTL, wait for expiration
+	// Verify the cache exists and has the expected TTL
+	if ctx.service == nil || ctx.service.responseCache == nil {
+		return fmt.Errorf("response cache not initialized")
+	}
+
+	if ctx.config == nil || ctx.config.CacheTTL <= 0 {
+		return fmt.Errorf("cache TTL not configured")
+	}
+
+	// Wait for cache TTL to expire plus a small buffer
+	ttl := ctx.config.CacheTTL
+	waitTime := ttl + (500 * time.Millisecond) // Add buffer to ensure expiration
+	time.Sleep(waitTime)
 
 	// Clear events to focus on fresh requests after TTL
 	if ctx.eventObserver != nil {

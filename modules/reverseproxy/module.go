@@ -1568,34 +1568,67 @@ func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backe
 			"error":   err.Error(),
 		})
 
-		// For statusCapturingResponseWriter, check if we've already handled this case
+		// Determine error status and message based on error type
+		statusCode, message := m.classifyProxyError(err)
+
+		// For statusCapturingResponseWriter, use thread-safe methods
 		if sw, ok := w.(*statusCapturingResponseWriter); ok {
 			sw.mu.Lock()
-			alreadyHandled := sw.wroteHeader
-			sw.mu.Unlock()
-			if alreadyHandled {
+			defer sw.mu.Unlock()
+			if sw.wroteHeader {
 				// Response already written (probably by timeout handler), don't write again
 				return
 			}
-		}
 
-		// Return appropriate HTTP status code based on error type
-		// Check for timeout errors first (more specific)
-		errorMsg := strings.ToLower(err.Error())
-		if strings.Contains(errorMsg, "context deadline exceeded") ||
-			strings.Contains(errorMsg, "timeout") ||
-			strings.Contains(errorMsg, "deadline") {
-			http.Error(w, "Gateway timeout", http.StatusGatewayTimeout)
-		} else if strings.Contains(err.Error(), "connection refused") ||
-			strings.Contains(err.Error(), "no such host") {
-			http.Error(w, "Backend service unavailable", http.StatusBadGateway)
+			// Directly access underlying ResponseWriter since we already hold the lock
+			// Do not call sw.WriteHeader() or sw.Write() as they would try to acquire the lock again
+			sw.ResponseWriter.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			sw.ResponseWriter.Header().Set("X-Content-Type-Options", "nosniff")
+
+			sw.status = statusCode
+			sw.wroteHeader = true
+			sw.ResponseWriter.WriteHeader(statusCode)
+			if _, writeErr := sw.ResponseWriter.Write([]byte(message + "\n")); writeErr != nil {
+				// Log write error but don't block response completion
+				if m.app != nil && m.app.Logger() != nil {
+					m.app.Logger().Warn("Failed to write error response body", "backend", backendID, "error", writeErr.Error())
+				}
+			}
 		} else {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			// For non-statusCapturingResponseWriter, use standard http.Error
+			http.Error(w, message, statusCode)
 		}
 
 	}
 
 	return proxy
+}
+
+// classifyProxyError determines the appropriate HTTP status code and user-friendly message
+// based on the type of proxy error encountered. This helper function centralizes error
+// classification logic to maintain consistency across error handling paths.
+func (m *ReverseProxyModule) classifyProxyError(err error) (statusCode int, message string) {
+	if err == nil {
+		return http.StatusInternalServerError, "Internal server error"
+	}
+
+	errorMsg := strings.ToLower(err.Error())
+
+	// Check for timeout errors first (most specific)
+	if strings.Contains(errorMsg, "context deadline exceeded") ||
+		strings.Contains(errorMsg, "timeout") ||
+		strings.Contains(errorMsg, "deadline") {
+		return http.StatusGatewayTimeout, "Gateway timeout"
+	}
+
+	// Check for connection errors
+	if strings.Contains(errorMsg, "connection refused") ||
+		strings.Contains(errorMsg, "no such host") {
+		return http.StatusBadGateway, "Backend service unavailable"
+	}
+
+	// Default to internal server error
+	return http.StatusInternalServerError, "Internal server error"
 }
 
 // createBackendProxy creates a reverse proxy for the specified backend ID and service URL.
@@ -2007,17 +2040,24 @@ type bufferingResponseWriter struct {
 	header http.Header
 	body   []byte
 	status int
+	mu     sync.Mutex // Protect concurrent access to header, body, and status
 }
 
 func (w *bufferingResponseWriter) Header() http.Header {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.header
 }
 
 func (w *bufferingResponseWriter) WriteHeader(code int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.status = code
 }
 
 func (w *bufferingResponseWriter) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
@@ -2027,6 +2067,9 @@ func (w *bufferingResponseWriter) Write(data []byte) (int, error) {
 
 // flushTo writes the buffered response to the actual ResponseWriter
 func (w *bufferingResponseWriter) flushTo(target http.ResponseWriter) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	// Copy headers
 	for key, values := range w.header {
 		for _, value := range values {
@@ -2233,16 +2276,26 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 			var cbErr error
 			var cbResp *http.Response
 
+			// Create a context that will be cancelled if the parent request context is cancelled
+			proxyCtx, proxyCancel := context.WithCancel(r.Context())
+			defer proxyCancel() // Ensure cleanup
+
 			go func() {
 				defer close(done)
+				defer proxyCancel() // Ensure context is cancelled when goroutine exits
+
 				// Use a buffering response writer to prevent writing to actual response until timeout check
 				bufWriter := &bufferingResponseWriter{
 					header: make(http.Header),
 					body:   make([]byte, 0),
 				}
 				sw = &statusCapturingResponseWriter{ResponseWriter: bufWriter, status: http.StatusOK}
+
+				// Create a request with the proxy context to ensure proper cancellation
+				proxyReq := r.WithContext(proxyCtx)
+
 				// Use timeout-aware proxy directly to ensure real timeout behavior
-				cbResp, cbErr = cb.Execute(r, func(req *http.Request) (*http.Response, error) { //nolint:bodyclose // synthetic response carries no body and is explicitly closed after execution
+				cbResp, cbErr = cb.Execute(proxyReq, func(req *http.Request) (*http.Response, error) { //nolint:bodyclose // synthetic response carries no body and is explicitly closed after execution
 					proxyCopy.ServeHTTP(sw, req)
 
 					// Create response with captured status
@@ -2280,12 +2333,27 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 						"error":   "request timeout",
 					})
 
-					// Since we used a buffering response writer, nothing was written to the real response yet
-					// Write timeout response directly
-					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-					w.Header().Set("X-Content-Type-Options", "nosniff")
-					w.WriteHeader(http.StatusGatewayTimeout)
-					fmt.Fprintln(w, "Request timeout")
+					// Use thread-safe timeout response handling
+					// Check if we have a statusCapturingResponseWriter to avoid race conditions
+					if sw != nil {
+						sw.mu.Lock()
+						if !sw.wroteHeader {
+							// Directly access underlying ResponseWriter since we already hold the lock
+							sw.ResponseWriter.Header().Set("Content-Type", "text/plain; charset=utf-8")
+							sw.ResponseWriter.Header().Set("X-Content-Type-Options", "nosniff")
+							sw.status = http.StatusGatewayTimeout
+							sw.wroteHeader = true
+							sw.ResponseWriter.WriteHeader(http.StatusGatewayTimeout)
+							fmt.Fprintln(sw.ResponseWriter, "Request timeout")
+						}
+						sw.mu.Unlock()
+					} else {
+						// Fallback for direct writing (buffering writer case)
+						w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+						w.Header().Set("X-Content-Type-Options", "nosniff")
+						w.WriteHeader(http.StatusGatewayTimeout)
+						fmt.Fprintln(w, "Request timeout")
+					}
 					return
 				}
 
@@ -2357,7 +2425,8 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 					"path":    r.URL.Path,
 					"error":   "request timeout",
 				})
-				// Since we're using a buffering response writer, write timeout response directly to real ResponseWriter
+				// Since we used a buffering response writer, write timeout response through buffer
+				// This is safe because bufferingResponseWriter doesn't write to actual response yet
 				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 				w.Header().Set("X-Content-Type-Options", "nosniff")
 				w.WriteHeader(http.StatusGatewayTimeout)
@@ -2427,11 +2496,24 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 
 			// Create a timeout context for the request
 			done := make(chan struct{})
+			var swMutex sync.Mutex
 			var sw *statusCapturingResponseWriter
+
+			// Create a context that will be cancelled if the parent request context is cancelled
+			proxyCtx, proxyCancel := context.WithCancel(r.Context())
+			defer proxyCancel() // Ensure cleanup
+
 			go func() {
 				defer close(done)
+				defer proxyCancel() // Ensure context is cancelled when goroutine exits
+
+				swMutex.Lock()
 				sw = &statusCapturingResponseWriter{ResponseWriter: w, status: http.StatusOK}
-				proxyForRequest.ServeHTTP(sw, r)
+				swMutex.Unlock()
+
+				// Create a request with the proxy context to ensure proper cancellation
+				proxyReq := r.WithContext(proxyCtx)
+				proxyForRequest.ServeHTTP(sw, proxyReq)
 			}()
 
 			// Wait for either completion or timeout
@@ -2447,30 +2529,60 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 					"path":    r.URL.Path,
 					"error":   "request timeout",
 				})
-				// Since we're using a buffering response writer, write timeout response directly to real ResponseWriter
-				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.WriteHeader(http.StatusGatewayTimeout)
-				fmt.Fprintln(w, "Request timeout")
+
+				// Use thread-safe access to status writer
+				swMutex.Lock()
+				localSW := sw
+				swMutex.Unlock()
+
+				if localSW != nil {
+					localSW.mu.Lock()
+					if !localSW.wroteHeader {
+						// Directly access underlying ResponseWriter since we already hold the lock
+						localSW.ResponseWriter.Header().Set("Content-Type", "text/plain; charset=utf-8")
+						localSW.ResponseWriter.Header().Set("X-Content-Type-Options", "nosniff")
+						localSW.status = http.StatusGatewayTimeout
+						localSW.wroteHeader = true
+						localSW.ResponseWriter.WriteHeader(http.StatusGatewayTimeout)
+						fmt.Fprintln(localSW.ResponseWriter, "Request timeout")
+					}
+					localSW.mu.Unlock()
+				} else {
+					// Fallback to direct response writer (shouldn't happen in normal flow)
+					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					w.Header().Set("X-Content-Type-Options", "nosniff")
+					w.WriteHeader(http.StatusGatewayTimeout)
+					fmt.Fprintln(w, "Request timeout")
+				}
 				return
 			}
 
 			// Emit success or failure event based on status code
-			if sw.status >= 400 {
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
-					"backend": backend,
-					"method":  r.Method,
-					"path":    r.URL.Path,
-					"status":  sw.status,
-					"error":   fmt.Sprintf("upstream returned status %d", sw.status),
-				})
-			} else {
-				m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
-					"backend": backend,
-					"method":  r.Method,
-					"path":    r.URL.Path,
-					"status":  sw.status,
-				})
+			swMutex.Lock()
+			localSW := sw
+			swMutex.Unlock()
+
+			if localSW != nil {
+				localSW.mu.Lock()
+				status := localSW.status
+				localSW.mu.Unlock()
+
+				if status >= 400 {
+					m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+						"backend": backend,
+						"method":  r.Method,
+						"path":    r.URL.Path,
+						"status":  status,
+						"error":   fmt.Sprintf("upstream returned status %d", status),
+					})
+				} else {
+					m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+						"backend": backend,
+						"method":  r.Method,
+						"path":    r.URL.Path,
+						"status":  status,
+					})
+				}
 			}
 		}
 	}

@@ -167,6 +167,32 @@ func (ctx *ReverseProxyBDDTestContext) getTenantBRequestsCopy() []*http.Request 
 }
 
 func (ctx *ReverseProxyBDDTestContext) resetContext() {
+	// Stop the module explicitly before closing servers
+	if ctx.module != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		ctx.module.Stop(stopCtx)
+
+		// Wait for health checker to fully stop with proper verification
+		if ctx.module.healthChecker != nil {
+			// Wait up to 2 seconds for health checker to stop
+			maxWait := 200 // 200 * 10ms = 2 seconds
+			for i := 0; i < maxWait && ctx.module.healthChecker.IsRunning(); i++ {
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			// Log warning if still running
+			if ctx.module.healthChecker.IsRunning() {
+				fmt.Printf("WARNING: Health checker still running after %d ms\n", maxWait*10)
+			}
+		}
+	}
+
+	// Clear cache if service has one to ensure no state leakage between scenarios
+	if ctx.service != nil && ctx.service.responseCache != nil {
+		ctx.service.responseCache.Clear()
+	}
+
 	// Close test servers
 	for _, server := range ctx.testServers {
 		if server != nil {
@@ -189,10 +215,24 @@ func (ctx *ReverseProxyBDDTestContext) resetContext() {
 		}
 	}
 
+	// Increased delay to allow all background goroutines to fully shut down
+	// This is critical for preventing goroutine leaks between test scenarios
+	time.Sleep(500 * time.Millisecond)
+
 	ctx.app = nil
 	ctx.module = nil
 	ctx.service = nil
-	ctx.config = nil
+
+	// Create a new config instance with initialized maps to avoid sharing state between scenarios
+	ctx.config = &ReverseProxyConfig{
+		BackendServices: make(map[string]string),
+		Routes:          make(map[string]string),
+		BackendConfigs:  make(map[string]BackendServiceConfig),
+		HealthCheck: HealthCheckConfig{
+			HealthEndpoints: make(map[string]string),
+		},
+	}
+
 	ctx.lastError = nil
 	ctx.testServers = nil
 	ctx.lastResponse = nil

@@ -1,7 +1,6 @@
 package reverseproxy
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +45,7 @@ func TestHostnameNotForwarded(t *testing.T) {
 	}
 
 	// Create the reverse proxy directly
-	proxy := module.createReverseProxyForBackend(context.Background(), backendURL, "", "")
+	proxy := module.createReverseProxyForBackend(backendURL, "", "")
 	require.NotNil(t, proxy)
 
 	// Test Case 1: Request with custom Host header should preserve it
@@ -182,7 +181,7 @@ func TestHostnameForwardingWithTenants(t *testing.T) {
 		// Create the reverse proxy for global backend
 		globalURL, err := url.Parse(globalBackendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxyForBackend(context.Background(), globalURL, "", "")
+		proxy := module.createReverseProxyForBackend(globalURL, "", "")
 
 		// Create a request without tenant header
 		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
@@ -212,7 +211,7 @@ func TestHostnameForwardingWithTenants(t *testing.T) {
 		// Create the reverse proxy for tenant backend
 		tenantURL, err := url.Parse(tenantBackendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxyForBackend(context.Background(), tenantURL, "", "")
+		proxy := module.createReverseProxyForBackend(tenantURL, "", "")
 
 		// Create a request with tenant header
 		req := httptest.NewRequest("GET", "http://tenant-client.example.com/api/test", nil)
@@ -269,7 +268,7 @@ func TestHostnameForwardingComparisonWithDefault(t *testing.T) {
 		DefaultBackend: "test-backend",
 		TenantIDHeader: "X-Tenant-ID",
 	}
-	customProxy := module.createReverseProxyForBackend(context.Background(), backendURL, "", "")
+	customProxy := module.createReverseProxyForBackend(backendURL, "", "")
 
 	// Create a default Go reverse proxy for comparison
 	defaultProxy := &httputil.ReverseProxy{

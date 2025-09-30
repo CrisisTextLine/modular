@@ -492,7 +492,7 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 				continue
 			}
 
-			proxy := m.createReverseProxyForBackend(backendURL, backendID, "")
+			proxy := m.createReverseProxyForBackend(ctx, backendURL, backendID, "")
 
 			// Ensure tenant map exists for this backend
 			if _, exists := m.tenantBackendProxies[tenantID]; !exists {
@@ -1249,11 +1249,11 @@ func (m *ReverseProxyModule) SetHttpClient(client *http.Client) {
 }
 
 // createReverseProxyForBackend creates a reverse proxy for a specific backend with per-backend configuration.
-func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backendID string, endpoint string) *httputil.ReverseProxy {
+func (m *ReverseProxyModule) createReverseProxyForBackend(ctx context.Context, target *url.URL, backendID string, endpoint string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
 	// Emit proxy created event
-	m.emitEvent(context.Background(), EventTypeProxyCreated, map[string]interface{}{
+	m.emitEvent(ctx, EventTypeProxyCreated, map[string]interface{}{
 		"backend_id": backendID,
 		"target_url": target.String(),
 		"endpoint":   endpoint,
@@ -1372,7 +1372,7 @@ func (m *ReverseProxyModule) createBackendProxy(backendID, serviceURL string) er
 	}
 
 	// Set up proxy for this backend
-	proxy := m.createReverseProxyForBackend(backendURL, backendID, "")
+	proxy := m.createReverseProxyForBackend(context.Background(), backendURL, backendID, "")
 
 	// Store the proxy for this backend
 	m.backendProxies[backendID] = proxy

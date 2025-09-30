@@ -527,7 +527,7 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 				continue
 			}
 
-			proxy := m.createReverseProxyForBackend(backendURL, backendID, "")
+			proxy := m.createReverseProxyForBackend(backendURL, backendID, "") //nolint:contextcheck // proxy creation occurs during module initialization
 
 			// Ensure tenant map exists for this backend
 			m.tenantProxiesMutex.Lock()

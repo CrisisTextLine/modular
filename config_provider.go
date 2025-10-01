@@ -3,6 +3,8 @@ package modular
 import (
 	"fmt"
 	"reflect"
+	"sync"
+	"sync/atomic"
 )
 
 const mainConfigSection = "_main"
@@ -49,14 +51,30 @@ type ConfigProvider interface {
 // StdConfigProvider provides a standard implementation of ConfigProvider.
 // It wraps a configuration struct and makes it available through the ConfigProvider interface.
 //
-// This is the most common way to create configuration providers for modules.
-// Simply create your configuration struct and wrap it with NewStdConfigProvider.
+// IMPORTANT THREAD SAFETY WARNING:
+// StdConfigProvider returns the SAME reference on every GetConfig() call.
+// This means:
+//   - Multiple modules/goroutines will share the same configuration object
+//   - Modifications by any consumer affect ALL other consumers
+//   - NOT safe for concurrent modification
+//   - NOT suitable for multi-tenant applications with per-tenant config isolation
+//
+// For safer alternatives, see:
+//   - NewIsolatedConfigProvider: Returns deep copies (test isolation)
+//   - NewImmutableConfigProvider: Thread-safe immutable config (production)
+//   - NewCopyOnWriteConfigProvider: Copy-on-write for defensive mutations
+//
+// Best practices:
+//   - Use StdConfigProvider only when you need shared mutable config
+//   - Modules should NOT modify configs in-place
+//   - Tests should use IsolatedConfigProvider to prevent pollution
 type StdConfigProvider struct {
 	cfg any
 }
 
 // GetConfig returns the configuration object.
-// The returned value is the exact object that was passed to NewStdConfigProvider.
+// WARNING: The returned value is the exact object reference that was passed to NewStdConfigProvider.
+// Any modifications to this object will affect all other consumers of this config provider.
 func (s *StdConfigProvider) GetConfig() any {
 	return s.cfg
 }
@@ -64,6 +82,10 @@ func (s *StdConfigProvider) GetConfig() any {
 // NewStdConfigProvider creates a new standard configuration provider.
 // The cfg parameter should be a pointer to a struct that defines the
 // configuration schema for your module.
+//
+// WARNING: This provider returns the SAME reference on every GetConfig() call.
+// For test isolation or thread-safe scenarios, use NewIsolatedConfigProvider or
+// NewImmutableConfigProvider instead.
 //
 // Example:
 //
@@ -76,6 +98,204 @@ func (s *StdConfigProvider) GetConfig() any {
 //	provider := modular.NewStdConfigProvider(cfg)
 func NewStdConfigProvider(cfg any) *StdConfigProvider {
 	return &StdConfigProvider{cfg: cfg}
+}
+
+// IsolatedConfigProvider provides complete configuration isolation by returning
+// a deep copy on every GetConfig() call. This ensures that each consumer receives
+// its own independent copy of the configuration, preventing any possibility of
+// shared state or mutation pollution.
+//
+// Use cases:
+//   - Test isolation: Prevents config pollution between test runs
+//   - Multi-tenant applications: Each tenant gets isolated config
+//   - Defensive programming: Modules can modify their config without side effects
+//
+// Performance considerations:
+//   - Deep copy on EVERY GetConfig() call (expensive)
+//   - Best suited for scenarios where isolation is more important than performance
+//   - For production workloads, consider ImmutableConfigProvider instead
+//
+// Example:
+//
+//	cfg := &MyConfig{Host: "localhost", Port: 8080}
+//	provider := modular.NewIsolatedConfigProvider(cfg)
+//	// Each call returns a completely independent copy
+//	copy1 := provider.GetConfig().(*MyConfig)
+//	copy2 := provider.GetConfig().(*MyConfig)
+//	copy1.Port = 9090  // Does NOT affect copy2
+type IsolatedConfigProvider struct {
+	cfg any
+}
+
+// GetConfig returns a deep copy of the configuration object.
+// Each call creates a new independent copy, ensuring complete isolation.
+// Returns nil if deep copying fails to maintain isolation guarantees.
+func (p *IsolatedConfigProvider) GetConfig() any {
+	copied, err := DeepCopyConfig(p.cfg)
+	if err != nil {
+		// Return nil to prevent shared state pollution and maintain isolation guarantees
+		return nil
+	}
+	return copied
+}
+
+// NewIsolatedConfigProvider creates a configuration provider that returns
+// deep copies on every GetConfig() call, ensuring complete isolation between
+// consumers.
+//
+// This is the recommended provider for test scenarios where config isolation
+// is critical to prevent test pollution.
+//
+// Example:
+//
+//	cfg := &MyConfig{Host: "localhost"}
+//	provider := modular.NewIsolatedConfigProvider(cfg)
+func NewIsolatedConfigProvider(cfg any) *IsolatedConfigProvider {
+	return &IsolatedConfigProvider{cfg: cfg}
+}
+
+// ImmutableConfigProvider provides thread-safe access to configuration using
+// atomic operations. The configuration is stored in an atomic.Value, allowing
+// concurrent reads without locks while supporting atomic updates.
+//
+// Use cases:
+//   - Production applications with concurrent access
+//   - High-performance read-heavy workloads
+//   - Configuration hot-reloading with atomic swaps
+//   - Multi-tenant applications with shared config
+//
+// Thread safety:
+//   - GetConfig() is lock-free and safe for concurrent reads
+//   - Multiple goroutines can read simultaneously without contention
+//   - Updates via UpdateConfig() are atomic
+//
+// Performance:
+//   - Excellent for read-heavy workloads (no locks, no copies)
+//   - Near-zero overhead for reads
+//   - Best choice for production concurrent scenarios
+//
+// Example:
+//
+//	cfg := &MyConfig{Host: "localhost", Port: 8080}
+//	provider := modular.NewImmutableConfigProvider(cfg)
+//	// Thread-safe reads from multiple goroutines
+//	config := provider.GetConfig().(*MyConfig)
+//	// Atomic update
+//	newCfg := &MyConfig{Host: "example.com", Port: 443}
+//	provider.UpdateConfig(newCfg)
+type ImmutableConfigProvider struct {
+	cfg atomic.Value
+}
+
+// GetConfig returns the current configuration object in a thread-safe manner.
+// This operation is lock-free and safe for concurrent access from multiple goroutines.
+func (p *ImmutableConfigProvider) GetConfig() any {
+	return p.cfg.Load()
+}
+
+// UpdateConfig atomically replaces the configuration with a new value.
+// This operation is thread-safe and all subsequent GetConfig() calls will
+// return the new configuration.
+//
+// This is useful for configuration hot-reloading scenarios where you want to
+// update the config without restarting the application.
+func (p *ImmutableConfigProvider) UpdateConfig(cfg any) {
+	p.cfg.Store(cfg)
+}
+
+// NewImmutableConfigProvider creates a thread-safe configuration provider
+// using atomic operations. This is the recommended provider for production
+// applications with concurrent access patterns.
+//
+// Example:
+//
+//	cfg := &MyConfig{Host: "localhost", Port: 8080}
+//	provider := modular.NewImmutableConfigProvider(cfg)
+func NewImmutableConfigProvider(cfg any) *ImmutableConfigProvider {
+	provider := &ImmutableConfigProvider{}
+	provider.cfg.Store(cfg)
+	return provider
+}
+
+// CopyOnWriteConfigProvider provides a configuration provider with explicit
+// copy-on-write semantics. It returns the original configuration for reads,
+// but provides a GetMutableConfig() method that returns an isolated deep copy
+// for scenarios where modifications are needed.
+//
+// Use cases:
+//   - Modules that need to apply defensive modifications
+//   - Scenarios where you want to modify config without affecting others
+//   - When you need explicit control over when copies are made
+//
+// Thread safety:
+//   - GetConfig() uses RLock for safe concurrent reads
+//   - GetMutableConfig() uses Lock and creates isolated copies
+//   - Safe for concurrent access with proper synchronization
+//
+// Performance:
+//   - Good: Only copies when explicitly requested via GetMutableConfig()
+//   - Read-heavy workloads perform well (RLock is cheap)
+//   - Better than IsolatedConfigProvider (which copies on every read)
+//
+// Example:
+//
+//	cfg := &MyConfig{Host: "localhost", Port: 8080}
+//	provider := modular.NewCopyOnWriteConfigProvider(cfg)
+//
+//	// Read-only access (no copy)
+//	readCfg := provider.GetConfig().(*MyConfig)
+//
+//	// Need to modify? Get a mutable copy
+//	mutableCfg, err := provider.GetMutableConfig()
+//	if err == nil {
+//	    cfg := mutableCfg.(*MyConfig)
+//	    cfg.Port = 9090  // Safe to modify, won't affect others
+//	}
+type CopyOnWriteConfigProvider struct {
+	cfg any
+	mu  sync.RWMutex
+}
+
+// GetConfig returns the original configuration object for read-only access.
+// This method uses RLock for safe concurrent reads without creating copies.
+func (p *CopyOnWriteConfigProvider) GetConfig() any {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.cfg
+}
+
+// GetMutableConfig returns a deep copy of the configuration for modification.
+// The returned copy is completely isolated from the original and other consumers.
+//
+// This method should be used when you need to make modifications to the config
+// without affecting other consumers. The copy is created using DeepCopyConfig.
+//
+// Returns an error if deep copying fails.
+func (p *CopyOnWriteConfigProvider) GetMutableConfig() (any, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return DeepCopyConfig(p.cfg)
+}
+
+// UpdateOriginal atomically replaces the original configuration with a new value.
+// This allows implementing config hot-reload scenarios where you want to update
+// the base configuration that GetConfig() returns.
+func (p *CopyOnWriteConfigProvider) UpdateOriginal(cfg any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cfg = cfg
+}
+
+// NewCopyOnWriteConfigProvider creates a configuration provider with
+// copy-on-write semantics. Use GetConfig() for read-only access and
+// GetMutableConfig() when you need an isolated copy for modification.
+//
+// Example:
+//
+//	cfg := &MyConfig{Host: "localhost", Port: 8080}
+//	provider := modular.NewCopyOnWriteConfigProvider(cfg)
+func NewCopyOnWriteConfigProvider(cfg any) *CopyOnWriteConfigProvider {
+	return &CopyOnWriteConfigProvider{cfg: cfg}
 }
 
 // Config represents a configuration builder that can combine multiple feeders and structures.
@@ -929,13 +1149,19 @@ func deepCopyValue(dst, src reflect.Value) {
 			}
 		}
 
-	case reflect.Chan, reflect.Func:
-		// Channels and functions are copied by reference (cannot deep copy)
+	case reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		// Channels, functions, and unsafe pointers are copied by reference (cannot deep copy)
 		dst.Set(src)
 
-	default:
-		// For basic types (int, string, bool, etc.), direct assignment works
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128, reflect.String:
+		// For basic types, direct assignment works
 		dst.Set(src)
+
+	case reflect.Invalid:
+		// Invalid values - do nothing
+		return
 	}
 }
 

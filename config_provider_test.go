@@ -1,6 +1,7 @@
 package modular
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 )
@@ -156,7 +157,7 @@ func TestImmutableConfigProvider(t *testing.T) {
 				defer wg.Done()
 				cfg := provider.GetConfig().(*TestConfig)
 				if cfg == nil {
-					errors <- ErrConfigNil
+					errors <- fmt.Errorf("config is nil")
 				}
 			}()
 		}
@@ -304,7 +305,7 @@ func TestCopyOnWriteConfigProvider(t *testing.T) {
 				defer wg.Done()
 				cfg := provider.GetConfig().(*TestConfig)
 				if cfg == nil {
-					errors <- ErrConfigNil
+					errors <- fmt.Errorf("config is nil")
 				}
 			}()
 		}

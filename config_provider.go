@@ -129,12 +129,12 @@ type IsolatedConfigProvider struct {
 
 // GetConfig returns a deep copy of the configuration object.
 // Each call creates a new independent copy, ensuring complete isolation.
-// Returns nil if deep copying fails.
+// Returns nil if deep copying fails to maintain isolation guarantees.
 func (p *IsolatedConfigProvider) GetConfig() any {
 	copied, err := DeepCopyConfig(p.cfg)
 	if err != nil {
-		// Fallback to original if copy fails (shouldn't happen in practice)
-		return p.cfg
+		// Return nil to prevent shared state pollution and maintain isolation guarantees
+		return nil
 	}
 	return copied
 }

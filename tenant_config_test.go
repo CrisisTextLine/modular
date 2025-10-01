@@ -637,3 +637,53 @@ func TestTenantConfigProviderMixed(t *testing.T) {
 		t.Error("Tenant3 should use standard provider")
 	}
 }
+
+func TestTenantConfigProvider_GetDefaultConfig(t *testing.T) {
+	defaultCfg := &TestTenantConfig{
+		Name:        "DefaultApp",
+		Environment: "test",
+		Features:    map[string]bool{"feature1": true},
+	}
+
+	provider := NewStdConfigProvider(defaultCfg)
+	tcp := NewTenantConfigProvider(provider)
+
+	// Test GetDefaultConfig
+	defaultProvider := tcp.GetDefaultConfig()
+	if defaultProvider == nil {
+		t.Error("Expected GetDefaultConfig to return provider")
+	}
+
+	config := defaultProvider.GetConfig().(*TestTenantConfig)
+	if config.Name != "DefaultApp" {
+		t.Errorf("Expected Name 'DefaultApp', got '%s'", config.Name)
+	}
+}
+
+func TestTenantConfigProvider_GetConfig(t *testing.T) {
+	defaultCfg := &TestTenantConfig{
+		Name:        "DefaultApp",
+		Environment: "prod",
+	}
+
+	provider := NewStdConfigProvider(defaultCfg)
+	tcp := NewTenantConfigProvider(provider)
+
+	// Test GetConfig returns default config
+	config := tcp.GetConfig()
+	if config == nil {
+		t.Error("Expected GetConfig to return config")
+	}
+
+	cfg := config.(*TestTenantConfig)
+	if cfg.Name != "DefaultApp" {
+		t.Errorf("Expected Name 'DefaultApp', got '%s'", cfg.Name)
+	}
+
+	// Test GetConfig with nil default provider
+	tcpNil := &TenantConfigProvider{defaultConfig: nil}
+	configNil := tcpNil.GetConfig()
+	if configNil != nil {
+		t.Error("Expected GetConfig to return nil when default provider is nil")
+	}
+}

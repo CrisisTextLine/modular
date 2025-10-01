@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/CrisisTextLine/modular v1.6.0
-	github.com/stretchr/testify v1.11.0
+	github.com/stretchr/testify v1.11.1
 )
 
 require (

@@ -1149,13 +1149,19 @@ func deepCopyValue(dst, src reflect.Value) {
 			}
 		}
 
-	case reflect.Chan, reflect.Func:
-		// Channels and functions are copied by reference (cannot deep copy)
+	case reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		// Channels, functions, and unsafe pointers are copied by reference (cannot deep copy)
 		dst.Set(src)
 
-	default:
-		// For basic types (int, string, bool, etc.), direct assignment works
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128, reflect.String:
+		// For basic types, direct assignment works
 		dst.Set(src)
+
+	case reflect.Invalid:
+		// Invalid values - do nothing
+		return
 	}
 }
 

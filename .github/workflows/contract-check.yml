@@ -81,29 +81,39 @@ jobs:
         id: contract-diff
         run: |
           mkdir -p artifacts/diffs
-          
+
           breaking_changes=false
           has_changes=false
-          
+
           # Compare core framework
           if [ -f "artifacts/contracts/main/core.json" ] && [ -f "artifacts/contracts/pr/core.json" ]; then
             echo "Comparing core framework contract..."
-            if ./cmd/modcli/modcli contract compare artifacts/contracts/main/core.json artifacts/contracts/pr/core.json -o artifacts/diffs/core.json --format=markdown > artifacts/diffs/core.md 2>/dev/null; then
-              echo "Core framework: No breaking changes"
+            if ./cmd/modcli/modcli contract compare artifacts/contracts/main/core.json artifacts/contracts/pr/core.json -o artifacts/diffs/core.json --format=markdown > artifacts/diffs/core.md 2>&1; then
+              if [ -s "artifacts/diffs/core.md" ]; then
+                echo "Core framework: Changes detected (no breaking changes)"
+                has_changes=true
+              else
+                echo "Core framework: No changes"
+              fi
             else
               echo "Core framework: Breaking changes detected!"
               breaking_changes=true
               has_changes=true
             fi
           fi
-          
+
           # Compare all modules
           for module_dir in modules/*/; do
             module_name=$(basename "$module_dir")
             if [ -f "artifacts/contracts/main/${module_name}.json" ] && [ -f "artifacts/contracts/pr/${module_name}.json" ]; then
               echo "Comparing module: $module_name"
-              if ./cmd/modcli/modcli contract compare "artifacts/contracts/main/${module_name}.json" "artifacts/contracts/pr/${module_name}.json" -o "artifacts/diffs/${module_name}.json" --format=markdown > "artifacts/diffs/${module_name}.md" 2>/dev/null; then
-                echo "Module $module_name: No breaking changes"
+              if ./cmd/modcli/modcli contract compare "artifacts/contracts/main/${module_name}.json" "artifacts/contracts/pr/${module_name}.json" -o "artifacts/diffs/${module_name}.json" --format=markdown > "artifacts/diffs/${module_name}.md" 2>&1; then
+                if [ -s "artifacts/diffs/${module_name}.md" ]; then
+                  echo "Module $module_name: Changes detected (no breaking changes)"
+                  has_changes=true
+                else
+                  echo "Module $module_name: No changes"
+                fi
               else
                 echo "Module $module_name: Breaking changes detected!"
                 breaking_changes=true
@@ -111,7 +121,7 @@ jobs:
               fi
             fi
           done
-          
+
           echo "breaking_changes=$breaking_changes" >> $GITHUB_OUTPUT
           echo "has_changes=$has_changes" >> $GITHUB_OUTPUT
 

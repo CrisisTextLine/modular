@@ -432,3 +432,208 @@ func TestCopyStructFields(t *testing.T) {
 		t.Errorf("Expected error with invalid source type")
 	}
 }
+
+func TestTenantConfigProviderWithIsolation(t *testing.T) {
+	defaultCfg := &TestTenantConfig{
+		Name:        "DefaultApp",
+		Environment: "test",
+		Features:    map[string]bool{"feature1": true, "feature2": false},
+	}
+
+	tcp := NewTenantConfigProviderWithIsolation(defaultCfg)
+
+	t.Run("default config returns isolated copies", func(t *testing.T) {
+		cfg1 := tcp.GetConfig().(*TestTenantConfig)
+		cfg2 := tcp.GetConfig().(*TestTenantConfig)
+
+		// Should be different pointers
+		if cfg1 == cfg2 {
+			t.Error("Expected isolated copies, got same pointer")
+		}
+
+		// Modify cfg1, should not affect cfg2
+		cfg1.Name = "Modified"
+		if cfg2.Name == "Modified" {
+			t.Error("Modification of cfg1 affected cfg2 - not isolated")
+		}
+	})
+
+	t.Run("tenant configs are isolated", func(t *testing.T) {
+		tenant1 := TenantID("tenant1")
+		tenant2 := TenantID("tenant2")
+
+		tenant1Cfg := &TestTenantConfig{
+			Name:        "Tenant1",
+			Environment: "prod",
+			Features:    map[string]bool{"feature1": true},
+		}
+
+		tenant2Cfg := &TestTenantConfig{
+			Name:        "Tenant2",
+			Environment: "dev",
+			Features:    map[string]bool{"feature2": true},
+		}
+
+		tcp.SetTenantConfigIsolated(tenant1, "app", tenant1Cfg)
+		tcp.SetTenantConfigIsolated(tenant2, "app", tenant2Cfg)
+
+		// Get configs multiple times
+		provider1, _ := tcp.GetTenantConfig(tenant1, "app")
+		cfg1a := provider1.GetConfig().(*TestTenantConfig)
+		cfg1b := provider1.GetConfig().(*TestTenantConfig)
+
+		// Should be different pointers (isolated)
+		if cfg1a == cfg1b {
+			t.Error("Expected isolated copies for tenant1, got same pointer")
+		}
+
+		// Modify cfg1a
+		cfg1a.Name = "Modified"
+
+		// cfg1b should not be affected
+		if cfg1b.Name == "Modified" {
+			t.Error("Modification of cfg1a affected cfg1b - not isolated")
+		}
+
+		// Original tenant1Cfg should not be affected
+		if tenant1Cfg.Name == "Modified" {
+			t.Error("Modification of copy affected original config")
+		}
+	})
+
+	t.Run("map modifications are isolated", func(t *testing.T) {
+		tenant := TenantID("tenant-map-test")
+
+		cfg := &TestTenantConfig{
+			Name:     "MapTest",
+			Features: map[string]bool{"feature1": true, "feature2": false},
+		}
+
+		tcp.SetTenantConfigIsolated(tenant, "app", cfg)
+
+		provider, _ := tcp.GetTenantConfig(tenant, "app")
+		copy1 := provider.GetConfig().(*TestTenantConfig)
+		copy2 := provider.GetConfig().(*TestTenantConfig)
+
+		// Modify map in copy1
+		copy1.Features["feature3"] = true
+		copy1.Features["feature1"] = false
+
+		// copy2 should not be affected
+		if _, exists := copy2.Features["feature3"]; exists {
+			t.Error("Map modification in copy1 affected copy2")
+		}
+		if !copy2.Features["feature1"] {
+			t.Error("Map modification in copy1 affected copy2 feature1")
+		}
+	})
+}
+
+func TestTenantConfigProviderImmutable(t *testing.T) {
+	defaultCfg := &TestTenantConfig{
+		Name:        "ImmutableApp",
+		Environment: "prod",
+		Features:    map[string]bool{"feature1": true},
+	}
+
+	tcp := NewTenantConfigProviderImmutable(defaultCfg)
+
+	t.Run("default config returns same reference", func(t *testing.T) {
+		cfg1 := tcp.GetConfig().(*TestTenantConfig)
+		cfg2 := tcp.GetConfig().(*TestTenantConfig)
+
+		// Should be the same pointer (immutable)
+		if cfg1 != cfg2 {
+			t.Error("Expected same pointer for immutable config")
+		}
+	})
+
+	t.Run("tenant configs are immutable", func(t *testing.T) {
+		tenant := TenantID("tenant-immutable")
+
+		cfg := &TestTenantConfig{
+			Name:        "ImmutableTenant",
+			Environment: "prod",
+			Features:    map[string]bool{"feature1": true},
+		}
+
+		tcp.SetTenantConfigImmutable(tenant, "app", cfg)
+
+		provider, _ := tcp.GetTenantConfig(tenant, "app")
+		cfg1 := provider.GetConfig().(*TestTenantConfig)
+		cfg2 := provider.GetConfig().(*TestTenantConfig)
+
+		// Should be the same pointer
+		if cfg1 != cfg2 {
+			t.Error("Expected same pointer for immutable tenant config")
+		}
+	})
+
+	t.Run("can update immutable config atomically", func(t *testing.T) {
+		tenant := TenantID("tenant-update")
+
+		originalCfg := &TestTenantConfig{
+			Name:        "Original",
+			Environment: "dev",
+		}
+
+		tcp.SetTenantConfig(tenant, "app", NewImmutableConfigProvider(originalCfg))
+
+		provider, _ := tcp.GetTenantConfig(tenant, "app")
+		immutableProvider := provider.(*ImmutableConfigProvider)
+
+		// Update config
+		newCfg := &TestTenantConfig{
+			Name:        "Updated",
+			Environment: "prod",
+		}
+		immutableProvider.UpdateConfig(newCfg)
+
+		// Should get updated config
+		updated := immutableProvider.GetConfig().(*TestTenantConfig)
+		if updated.Name != "Updated" || updated.Environment != "prod" {
+			t.Error("Config was not updated atomically")
+		}
+	})
+}
+
+func TestTenantConfigProviderMixed(t *testing.T) {
+	// Test mixing different provider types for different tenants
+	defaultCfg := &TestTenantConfig{Name: "Default"}
+	tcp := NewTenantConfigProvider(NewStdConfigProvider(defaultCfg))
+
+	tenant1 := TenantID("tenant-isolated")
+	tenant2 := TenantID("tenant-immutable")
+	tenant3 := TenantID("tenant-standard")
+
+	cfg1 := &TestTenantConfig{Name: "Tenant1"}
+	cfg2 := &TestTenantConfig{Name: "Tenant2"}
+	cfg3 := &TestTenantConfig{Name: "Tenant3"}
+
+	// Set different provider types
+	tcp.SetTenantConfigIsolated(tenant1, "app", cfg1)
+	tcp.SetTenantConfigImmutable(tenant2, "app", cfg2)
+	tcp.SetTenantConfig(tenant3, "app", NewStdConfigProvider(cfg3))
+
+	// Verify each works as expected
+	provider1, _ := tcp.GetTenantConfig(tenant1, "app")
+	copy1a := provider1.GetConfig().(*TestTenantConfig)
+	copy1b := provider1.GetConfig().(*TestTenantConfig)
+	if copy1a == copy1b {
+		t.Error("Tenant1 should use isolated provider")
+	}
+
+	provider2, _ := tcp.GetTenantConfig(tenant2, "app")
+	copy2a := provider2.GetConfig().(*TestTenantConfig)
+	copy2b := provider2.GetConfig().(*TestTenantConfig)
+	if copy2a != copy2b {
+		t.Error("Tenant2 should use immutable provider")
+	}
+
+	provider3, _ := tcp.GetTenantConfig(tenant3, "app")
+	copy3a := provider3.GetConfig().(*TestTenantConfig)
+	copy3b := provider3.GetConfig().(*TestTenantConfig)
+	if copy3a != copy3b {
+		t.Error("Tenant3 should use standard provider")
+	}
+}

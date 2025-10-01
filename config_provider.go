@@ -795,6 +795,7 @@ func createTempConfig(cfg any) (interface{}, configInfo, error) {
 
 	// Copy existing values from the original config to the temp config
 	// This preserves any values that were already set (e.g., by tests)
+	// NOTE: This is a SHALLOW copy - maps and slices are shared with the original
 	tempCfgValue.Elem().Set(sourceValue)
 
 	return tempCfgValue.Interface(), configInfo{
@@ -802,6 +803,140 @@ func createTempConfig(cfg any) (interface{}, configInfo, error) {
 		tempVal:     tempCfgValue,
 		isPtr:       isPtr,
 	}, nil
+}
+
+// DeepCopyConfig creates a deep copy of a configuration object, ensuring complete
+// isolation between the original and the copy. This is useful for:
+// - Test isolation: preventing config pollution between tests
+// - Multi-tenant applications: ensuring tenant configs don't share state
+// - Module initialization: giving each module its own config instance
+//
+// The function recursively copies all maps, slices, and nested structures.
+// Returns an error if the config is nil or if the copy operation fails.
+func DeepCopyConfig(cfg any) (any, error) {
+	copied, _, err := createTempConfigDeep(cfg)
+	return copied, err
+}
+
+// createTempConfigDeep creates a temporary deep copy of the configuration for processing.
+// Unlike createTempConfig, this performs a DEEP copy where maps, slices, and nested
+// structures are fully duplicated, ensuring complete isolation between the original
+// and temporary configuration.
+//
+// This is useful when you need to ensure that modifications to the temporary config
+// during processing will not affect the original configuration.
+func createTempConfigDeep(cfg any) (interface{}, configInfo, error) {
+	if cfg == nil {
+		return nil, configInfo{}, ErrConfigNil
+	}
+
+	cfgValue := reflect.ValueOf(cfg)
+	isPtr := cfgValue.Kind() == reflect.Ptr
+
+	var targetType reflect.Type
+	var sourceValue reflect.Value
+	if isPtr {
+		if cfgValue.IsNil() {
+			return nil, configInfo{}, ErrConfigNilPointer
+		}
+		targetType = cfgValue.Elem().Type()
+		sourceValue = cfgValue.Elem()
+	} else {
+		targetType = cfgValue.Type()
+		sourceValue = cfgValue
+	}
+
+	tempCfgValue := reflect.New(targetType)
+
+	// Perform deep copy to ensure complete isolation
+	deepCopyValue(tempCfgValue.Elem(), sourceValue)
+
+	return tempCfgValue.Interface(), configInfo{
+		originalVal: cfgValue,
+		tempVal:     tempCfgValue,
+		isPtr:       isPtr,
+	}, nil
+}
+
+// deepCopyValue performs a deep copy of values including maps, slices, and nested structures.
+// It recursively copies the source value into the destination value, ensuring that
+// mutable types (maps, slices, pointers) are properly duplicated rather than shared.
+//
+// This is useful for creating isolated configuration copies where modifications to
+// the copy should not affect the original.
+func deepCopyValue(dst, src reflect.Value) {
+	// Handle invalid or nil values
+	if !src.IsValid() {
+		return
+	}
+
+	switch src.Kind() {
+	case reflect.Ptr:
+		if src.IsNil() {
+			return
+		}
+		// Allocate new pointer and recursively copy the pointed-to value
+		dst.Set(reflect.New(src.Elem().Type()))
+		deepCopyValue(dst.Elem(), src.Elem())
+
+	case reflect.Interface:
+		if src.IsNil() {
+			return
+		}
+		// Copy the concrete value inside the interface
+		concrete := src.Elem()
+		newVal := reflect.New(concrete.Type()).Elem()
+		deepCopyValue(newVal, concrete)
+		dst.Set(newVal)
+
+	case reflect.Map:
+		if src.IsNil() {
+			return
+		}
+		// Create a new map and copy all key-value pairs
+		dst.Set(reflect.MakeMap(src.Type()))
+		for _, key := range src.MapKeys() {
+			srcVal := src.MapIndex(key)
+			dstVal := reflect.New(srcVal.Type()).Elem()
+			deepCopyValue(dstVal, srcVal)
+			dst.SetMapIndex(key, dstVal)
+		}
+
+	case reflect.Slice:
+		if src.IsNil() {
+			return
+		}
+		// Create a new slice and copy all elements
+		dst.Set(reflect.MakeSlice(src.Type(), src.Len(), src.Cap()))
+		for i := 0; i < src.Len(); i++ {
+			deepCopyValue(dst.Index(i), src.Index(i))
+		}
+
+	case reflect.Array:
+		// Copy all array elements
+		for i := 0; i < src.Len(); i++ {
+			deepCopyValue(dst.Index(i), src.Index(i))
+		}
+
+	case reflect.Struct:
+		// Copy all struct fields
+		for i := 0; i < src.NumField(); i++ {
+			srcField := src.Field(i)
+			dstField := dst.Field(i)
+			// Only copy exported fields (CanSet returns true for exported fields)
+			if dstField.CanSet() {
+				deepCopyValue(dstField, srcField)
+			}
+		}
+
+	case reflect.Chan, reflect.Func:
+		// Channels and functions are copied by reference (cannot deep copy)
+		dst.Set(src)
+
+	default:
+		// For basic types (int, string, bool, etc.), direct assignment works
+		dst.Set(src)
+	}
 }
 
 func updateConfig(app *StdApplication, info configInfo) {

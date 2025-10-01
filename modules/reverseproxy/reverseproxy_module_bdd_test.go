@@ -16,6 +16,12 @@ func TestReverseProxyModuleBDD(t *testing.T) {
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
 			ctx := &ReverseProxyBDDTestContext{}
 
+			// CRITICAL: Reset context AFTER each scenario to ensure cleanup
+			// This prevents health checkers and other background goroutines from leaking
+			s.AfterScenario(func(*godog.Scenario, error) {
+				ctx.resetContext()
+			})
+
 			// Register all step definitions from all BDD files
 			registerAllStepDefinitions(s, ctx)
 		},

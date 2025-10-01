@@ -486,8 +486,21 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 		return fmt.Errorf("configuration not set: config is nil")
 	}
 
-	// Register config section directly (like the working scenarios)
-	reverseproxyConfigProvider := modular.NewStdConfigProvider(ctx.config)
+	// CRITICAL FIX: Deep copy the config to prevent shared state between tests
+	// Use the framework's DeepCopyConfig to ensure complete isolation
+	configCopy, err := modular.DeepCopyConfig(ctx.config)
+	if err != nil {
+		return fmt.Errorf("failed to deep copy config: %w", err)
+	}
+
+	// Type assert back to ReverseProxyConfig
+	reverseProxyConfigCopy, ok := configCopy.(*ReverseProxyConfig)
+	if !ok {
+		return fmt.Errorf("deep copy returned unexpected type: %T", configCopy)
+	}
+
+	// Register config section with the isolated copy
+	reverseproxyConfigProvider := modular.NewStdConfigProvider(reverseProxyConfigCopy)
 	ctx.app.RegisterConfigSection("reverseproxy", reverseproxyConfigProvider)
 
 	// Register services used by reverse proxy
@@ -557,10 +570,12 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 	ctx.app.RegisterModule(ctx.module)
 
 	// Initialize and start the application
+	fmt.Printf("🔍 DEBUG: Before ctx.app.Init(), ctx.config.CacheTTL=%v\n", ctx.config.CacheTTL)
 	if err := ctx.app.Init(); err != nil {
 		ctx.lastError = err
 		return fmt.Errorf("failed to initialize application: %w", err)
 	}
+	fmt.Printf("🔍 DEBUG: After ctx.app.Init(), ctx.config.CacheTTL=%v\n", ctx.config.CacheTTL)
 	if err := ctx.app.Start(); err != nil {
 		ctx.lastError = err
 		return fmt.Errorf("failed to start application: %w", err)
@@ -574,6 +589,11 @@ func (ctx *ReverseProxyBDDTestContext) setupApplicationWithConfig() error {
 	if ctx.service == nil {
 		return fmt.Errorf("reverseproxy service is nil after startup")
 	}
+
+	// NOTE: We intentionally DO NOT update ctx.config to point to module.config
+	// because ctx.config should remain the original config we set up for the test.
+	// The module has its own copy (from deepCopyConfig) which may have defaults applied.
+	// Tests that need to check the module's actual config should use ctx.module.config directly.
 
 	return nil
 }
@@ -878,3 +898,7 @@ func (t *TestFeatureFlagEvaluator) EvaluateFlagWithDefault(ctx context.Context, 
 	}
 	return result
 }
+
+// deepCopyConfig creates a deep copy of a ReverseProxyConfig to prevent shared state between tests
+// NOTE: deepCopyConfig has been removed. Use modular.DeepCopyConfig() instead.
+// The framework now exports a generic deep copy function that works for all config types.

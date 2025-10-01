@@ -15,6 +15,7 @@ import (
 
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCachingEnabled() error {
 	// Reset context and set up fresh application for this scenario
+	fmt.Printf("\n🔍 DEBUG: iHaveAReverseProxyWithCachingEnabled() starting (Response caching scenario)\n")
 	ctx.resetContext()
 
 	// Create a test backend server
@@ -39,7 +40,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCachingEnabled() er
 			},
 		},
 		CacheEnabled: true,
-		CacheTTL:     300 * time.Second,
+		CacheTTL:     337 * time.Second, // SIGNATURE: 337s for "Response caching" scenario
 		HealthCheck: HealthCheckConfig{
 			Enabled:  false,
 			Interval: 30 * time.Second,
@@ -51,6 +52,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithCachingEnabled() er
 		},
 	}
 
+	fmt.Printf("🔍 DEBUG: Set CacheTTL=337s (Response caching signature)\n")
 	return ctx.setupApplicationWithConfig()
 }
 
@@ -138,6 +140,7 @@ func (ctx *ReverseProxyBDDTestContext) subsequentRequestsShouldBeServedFromCache
 }
 
 func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithSpecificCacheTTLConfigured() error {
+	fmt.Printf("\n🔍 DEBUG: iHaveAReverseProxyWithSpecificCacheTTLConfigured() starting (Cache TTL behavior scenario)\n")
 	ctx.resetContext()
 
 	app, err := modular.NewApplication(modular.WithLogger(&testLogger{}))
@@ -165,7 +168,7 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithSpecificCacheTTLCon
 		},
 		DefaultBackend: "cached-backend",
 		CacheEnabled:   true,
-		CacheTTL:       1 * time.Second, // Short TTL for testing
+		CacheTTL:       1 * time.Second, // SIGNATURE: 1s for "Cache TTL behavior" scenario
 		HealthCheck: HealthCheckConfig{
 			Enabled:  false,
 			Interval: 30 * time.Second,
@@ -177,9 +180,26 @@ func (ctx *ReverseProxyBDDTestContext) iHaveAReverseProxyWithSpecificCacheTTLCon
 		},
 	}
 
+	fmt.Printf("🔍 DEBUG: Set CacheTTL=1s (Cache TTL behavior signature)\n")
+	fmt.Printf("🔍 DEBUG: BEFORE setupApplicationWithConfig: ctx.config pointer=%p, CacheTTL=%v\n", ctx.config, ctx.config.CacheTTL)
+
 	err = ctx.setupApplicationWithConfig()
 	if err != nil {
 		return err
+	}
+
+	fmt.Printf("🔍 DEBUG: AFTER setupApplicationWithConfig: ctx.config pointer=%p, CacheTTL=%v\n", ctx.config, ctx.config.CacheTTL)
+
+	// Also check if ctx.service.config points to the same config
+	if ctx.service != nil {
+		fmt.Printf("🔍 DEBUG: ctx.service exists, ctx.module.config pointer=%p, CacheTTL=%v\n",
+			ctx.module.config, ctx.module.config.CacheTTL)
+
+		if ctx.config == ctx.module.config {
+			fmt.Printf("🔍 DEBUG: ✅ ctx.config and ctx.module.config are THE SAME pointer\n")
+		} else {
+			fmt.Printf("🔍 DEBUG: ❌ ctx.config and ctx.module.config are DIFFERENT pointers!\n")
+		}
 	}
 
 	// Verify that the cache is actually enabled and working
@@ -220,6 +240,11 @@ func (ctx *ReverseProxyBDDTestContext) cachedResponsesAgeBeyondTTL() error {
 	// Wait for cache TTL to expire plus a small buffer
 	ttl := ctx.config.CacheTTL
 	waitTime := ttl + (500 * time.Millisecond) // Add buffer to ensure expiration
+
+	// LOG THE ACTUAL TTL BEING USED - this will help us trace config bleeding
+	fmt.Printf("\n🔍 DEBUG: cachedResponsesAgeBeyondTTL reading CacheTTL=%v, will sleep for %v\n", ttl, waitTime)
+	fmt.Printf("🔍 DEBUG: Expected signatures: 1s=Cache_TTL_behavior, 337s=Response_caching\n\n")
+
 	time.Sleep(waitTime)
 
 	// Clear events to focus on fresh requests after TTL

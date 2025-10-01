@@ -7,7 +7,7 @@ replace github.com/CrisisTextLine/modular => ../..
 replace github.com/CrisisTextLine/modular/modules/database => ../../modules/database
 
 require (
-	github.com/CrisisTextLine/modular v1.11.1
+	github.com/CrisisTextLine/modular v1.11.4
 	github.com/CrisisTextLine/modular/modules/database v1.1.0
 	github.com/mattn/go-sqlite3 v1.14.32
 )
@@ -28,7 +28,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.33.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.37.0 // indirect
 	github.com/aws/smithy-go v1.22.5 // indirect
-	github.com/cloudevents/sdk-go/v2 v2.16.1 // indirect
+	github.com/cloudevents/sdk-go/v2 v2.16.2 // indirect
 	github.com/golobby/cast v1.3.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

@@ -167,28 +167,67 @@ jobs:
           fi
 
           mkdir -p artifacts/contracts/prev artifacts/contracts/current artifacts/diffs
+
+          # Extract current contract (must succeed)
+          echo "Extracting current contract for ${MODULE}..."
+          if ! ./cmd/modcli/modcli contract extract modules/${MODULE} -o artifacts/contracts/current/${MODULE}.json 2>&1; then
+            echo "ERROR: Failed to extract current contract for ${MODULE}"
+            exit 1
+          fi
+          echo "✓ Current contract extracted successfully"
+
+          # Extract previous contract if tag exists
           if [ -n "$PREV_CONTRACT_REF" ]; then
+            echo "Extracting previous contract from ${PREV_CONTRACT_REF}..."
             TMPDIR=$(mktemp -d)
+            trap "rm -rf '$TMPDIR'" EXIT
+
+            # Extract source from previous tag
             git archive $PREV_CONTRACT_REF | tar -x -C "$TMPDIR"
-            mkdir -p "$TMPDIR/cmd/modcli" && cp cmd/modcli/modcli "$TMPDIR/cmd/modcli/modcli" || true
-            (cd "$TMPDIR/modules/${MODULE}" && ../../cmd/modcli/modcli contract extract . -o contract.json) || echo "Prev contract extraction failed"
-            if [ -f "$TMPDIR/modules/${MODULE}/contract.json" ]; then
-              mv "$TMPDIR/modules/${MODULE}/contract.json" artifacts/contracts/prev/${MODULE}.json
+
+            # Copy current modcli binary to temp dir
+            mkdir -p "$TMPDIR/cmd/modcli" && cp cmd/modcli/modcli "$TMPDIR/cmd/modcli/modcli"
+
+            # Extract contract from previous version using fixed modcli
+            if (cd "$TMPDIR" && ./cmd/modcli/modcli contract extract modules/${MODULE} -o prev-contract.json 2>&1); then
+              mv "$TMPDIR/prev-contract.json" artifacts/contracts/prev/${MODULE}.json
+              echo "✓ Previous contract extracted from $PREV_CONTRACT_REF"
+            else
+              echo "⚠ WARNING: Failed to extract contract from $PREV_CONTRACT_REF - treating as new module"
             fi
           fi
-          ./cmd/modcli/modcli contract extract modules/${MODULE} -o artifacts/contracts/current/${MODULE}.json || echo "Current contract extraction failed"
 
           CHANGE_CLASS="none"
           DIFF_MD_PATH="artifacts/diffs/${MODULE}.md"
+
           if [ -f artifacts/contracts/prev/${MODULE}.json ] && [ -f artifacts/contracts/current/${MODULE}.json ]; then
-            if ./cmd/modcli/modcli contract compare artifacts/contracts/prev/${MODULE}.json artifacts/contracts/current/${MODULE}.json -o artifacts/diffs/${MODULE}.json --format=markdown > "$DIFF_MD_PATH" 2>/dev/null; then
-              if [ -s "$DIFF_MD_PATH" ]; then CHANGE_CLASS="minor"; fi
+            echo "Comparing contracts..."
+            if ./cmd/modcli/modcli contract compare artifacts/contracts/prev/${MODULE}.json artifacts/contracts/current/${MODULE}.json -o artifacts/diffs/${MODULE}.json --format=markdown > "$DIFF_MD_PATH" 2>&1; then
+              if [ -s "$DIFF_MD_PATH" ]; then
+                echo "✓ Additive changes detected (non-breaking)"
+                CHANGE_CLASS="minor"
+              else
+                echo "✓ No API changes detected"
+                CHANGE_CLASS="none"
+              fi
             else
-              echo "Breaking changes detected"; CHANGE_CLASS="major"; [ -s "$DIFF_MD_PATH" ] || echo "(Breaking changes; diff unavailable)" > "$DIFF_MD_PATH";
+              echo "⚠ Breaking changes detected!"
+              echo "Diff output:"
+              cat "$DIFF_MD_PATH" || true
+              CHANGE_CLASS="major"
+              [ -s "$DIFF_MD_PATH" ] || echo "⚠️ Breaking changes detected but diff unavailable" > "$DIFF_MD_PATH"
             fi
           else
-            if [ -f artifacts/contracts/current/${MODULE}.json ] && [ $(wc -c < artifacts/contracts/current/${MODULE}.json) -gt 20 ]; then CHANGE_CLASS="minor"; fi
+            # No previous contract - check if current has content
+            if [ -f artifacts/contracts/current/${MODULE}.json ] && [ $(wc -c < artifacts/contracts/current/${MODULE}.json) -gt 20 ]; then
+              echo "✓ No previous contract found - treating as initial public API"
+              CHANGE_CLASS="minor"
+            else
+              echo "⚠ No public API detected"
+              CHANGE_CLASS="none"
+            fi
           fi
+
           echo "Contract change classification: $CHANGE_CLASS"
 
           CUR=${BASE_VERSION#v}; MAJOR=${CUR%%.*}; REST=${CUR#*.}; MINOR=${REST%%.*}; PATCH=${CUR##*.}

@@ -359,6 +359,20 @@ func TestCopyOnWriteConfigProvider(t *testing.T) {
 	})
 }
 
+func TestIsolatedConfigProvider_ErrorFallback(t *testing.T) {
+	// Test the error fallback path in IsolatedConfigProvider.GetConfig()
+	// when DeepCopyConfig returns an error (e.g., nil config)
+
+	// Create provider with nil config - this will trigger error in DeepCopyConfig
+	provider := &IsolatedConfigProvider{cfg: nil}
+
+	// GetConfig should handle the error gracefully and return nil
+	result := provider.GetConfig()
+	if result != nil {
+		t.Errorf("Expected GetConfig to return nil for nil config, got %v", result)
+	}
+}
+
 func TestDeepCopyConfig(t *testing.T) {
 	t.Run("copies primitives", func(t *testing.T) {
 		cfg := &TestConfig{Host: "localhost", Port: 8080}

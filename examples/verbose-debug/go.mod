@@ -5,7 +5,7 @@ go 1.25
 toolchain go1.25.0
 
 require (
-	github.com/CrisisTextLine/modular v1.11.1
+	github.com/CrisisTextLine/modular v1.11.4
 	github.com/CrisisTextLine/modular/modules/database v1.1.0
 	modernc.org/sqlite v1.38.0
 )
@@ -26,7 +26,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.33.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.37.0 // indirect
 	github.com/aws/smithy-go v1.22.5 // indirect
-	github.com/cloudevents/sdk-go/v2 v2.16.1 // indirect
+	github.com/cloudevents/sdk-go/v2 v2.16.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/golobby/cast v1.3.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -40,7 +40,6 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/mod v0.27.0 // indirect
-	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.65.10 // indirect

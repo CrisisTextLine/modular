@@ -5,12 +5,12 @@ go 1.25
 toolchain go1.25.0
 
 require (
-	github.com/CrisisTextLine/modular v1.11.1
+	github.com/CrisisTextLine/modular v1.11.4
 	github.com/alicebob/miniredis/v2 v2.35.0
-	github.com/cloudevents/sdk-go/v2 v2.16.1
+	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/cucumber/godog v0.15.1
 	github.com/redis/go-redis/v9 v9.12.1
-	github.com/stretchr/testify v1.11.0
+	github.com/stretchr/testify v1.11.1
 )
 
 require (

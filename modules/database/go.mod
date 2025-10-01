@@ -3,13 +3,13 @@ module github.com/CrisisTextLine/modular/modules/database
 go 1.25
 
 require (
-	github.com/CrisisTextLine/modular v1.11.1
+	github.com/CrisisTextLine/modular v1.11.4
 	github.com/aws/aws-sdk-go-v2 v1.38.0
 	github.com/aws/aws-sdk-go-v2/config v1.31.0
 	github.com/aws/aws-sdk-go-v2/feature/rds/auth v1.5.11
-	github.com/cloudevents/sdk-go/v2 v2.16.1
+	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/cucumber/godog v0.15.1
-	github.com/stretchr/testify v1.11.0
+	github.com/stretchr/testify v1.11.1
 	modernc.org/sqlite v1.38.0
 )
 

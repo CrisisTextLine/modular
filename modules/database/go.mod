@@ -3,7 +3,7 @@ module github.com/CrisisTextLine/modular/modules/database
 go 1.25
 
 require (
-	github.com/CrisisTextLine/modular v1.11.4
+	github.com/CrisisTextLine/modular v1.11.6
 	github.com/aws/aws-sdk-go-v2 v1.38.0
 	github.com/aws/aws-sdk-go-v2/config v1.31.0
 	github.com/aws/aws-sdk-go-v2/feature/rds/auth v1.5.11

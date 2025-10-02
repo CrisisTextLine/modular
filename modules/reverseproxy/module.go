@@ -733,16 +733,19 @@ func (m *ReverseProxyModule) createTenantProxies(ctx context.Context) {
 				continue
 			}
 
-			// Check if proxy already exists for this tenant and backend
-			m.tenantProxiesMutex.RLock()
+			// Check if proxy already exists - use write lock to avoid race with test setup
+			m.tenantProxiesMutex.Lock()
 			tenantProxies, tenantMapExists := m.tenantBackendProxies[tenantID]
 			proxyExists := tenantMapExists && tenantProxies != nil && tenantProxies[backendID] != nil
-			m.tenantProxiesMutex.RUnlock()
 
-			// Skip if proxy already exists (avoid recreating unnecessarily)
 			if proxyExists {
+				// Proxy already exists, skip creation
+				m.tenantProxiesMutex.Unlock()
 				continue
 			}
+
+			// No proxy exists, unlock to create it (avoid holding lock during creation)
+			m.tenantProxiesMutex.Unlock()
 
 			// Create a new proxy for this tenant's backend
 			backendURL, err := url.Parse(serviceURL)
@@ -756,26 +759,47 @@ func (m *ReverseProxyModule) createTenantProxies(ctx context.Context) {
 
 			proxy := m.createReverseProxyForBackend(ctx, backendURL, backendID, "")
 
-			// Ensure tenant map exists for this backend
+			// Re-acquire lock and double-check before storing (double-checked locking pattern)
 			m.tenantProxiesMutex.Lock()
 			if _, exists := m.tenantBackendProxies[tenantID]; !exists {
 				m.tenantBackendProxies[tenantID] = make(map[string]*httputil.ReverseProxy)
 			}
 
-			// Store the tenant-specific proxy
-			m.tenantBackendProxies[tenantID][backendID] = proxy
+			// Check again in case another goroutine/test created it while we were unlocked
+			if m.tenantBackendProxies[tenantID][backendID] == nil {
+				// Store the tenant-specific proxy only if still nil
+				m.tenantBackendProxies[tenantID][backendID] = proxy
+			}
 			m.tenantProxiesMutex.Unlock()
 
 			// If there's no global URL for this backend, create one in the global map
-			m.backendProxiesMutex.Lock()
-			if _, exists := m.backendProxies[backendID]; !exists {
-				if m.app != nil && m.app.Logger() != nil {
-					m.app.Logger().Info("Using tenant-specific backend URL as global",
-						"tenant", tenantID, "backend", backendID, "url", serviceURL)
+			// BUT only if we actually stored a tenant proxy (not if test overrode it)
+			m.tenantProxiesMutex.RLock()
+			actuallyStoredTenantProxy := m.tenantBackendProxies[tenantID] != nil && m.tenantBackendProxies[tenantID][backendID] == proxy
+			m.tenantProxiesMutex.RUnlock()
+
+			backendWasAdded := false
+			if actuallyStoredTenantProxy {
+				m.backendProxiesMutex.Lock()
+				if _, exists := m.backendProxies[backendID]; !exists {
+					if m.app != nil && m.app.Logger() != nil {
+						m.app.Logger().Info("Using tenant-specific backend URL as global",
+							"tenant", tenantID, "backend", backendID, "url", serviceURL)
+					}
+					m.backendProxies[backendID] = proxy
+					backendWasAdded = true
 				}
-				m.backendProxies[backendID] = proxy
+				m.backendProxiesMutex.Unlock()
+
+				// Emit backend added event only for dynamic additions after initialization
+				if backendWasAdded && m.initialized {
+					m.emitEvent(ctx, EventTypeBackendAdded, map[string]interface{}{
+						"backend": backendID,
+						"url":     serviceURL,
+						"time":    time.Now().UTC().Format(time.RFC3339Nano),
+					})
+				}
 			}
-			m.backendProxiesMutex.Unlock()
 
 			// Initialize route map for this backend if needed
 			if _, ok := m.backendRoutes[backendID]; !ok {

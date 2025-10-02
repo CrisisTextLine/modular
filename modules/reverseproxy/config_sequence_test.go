@@ -18,8 +18,9 @@ func TestSequentialCacheScenarios(t *testing.T) {
 
 		t.Logf("After Response caching Given: CacheTTL = %v", ctx.config.CacheTTL)
 
-		if ctx.config.CacheTTL != 300*time.Second {
-			t.Errorf("Expected CacheTTL=300s for Response caching, got %v", ctx.config.CacheTTL)
+		// CacheTTL is set to 337s as a signature to identify this scenario (see bdd_caching_tenant_test.go:43)
+		if ctx.config.CacheTTL != 337*time.Second {
+			t.Errorf("Expected CacheTTL=337s for Response caching (signature value), got %v", ctx.config.CacheTTL)
 		}
 
 		// Cleanup after this scenario (simulating what happens between scenarios)

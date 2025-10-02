@@ -1,6 +1,7 @@
 package reverseproxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -314,7 +315,7 @@ func (ctx *ReverseProxyBDDTestContext) appropriateErrorResponsesShouldBeReturned
 
 	// We need to create the backend proxy for the unavailable backend
 	backendURL, _ := url.Parse(unavailableBackendServer.URL)
-	ctx.service.backendProxies["unavailable-backend"] = ctx.service.createReverseProxyForBackend(backendURL, "unavailable-backend", "")
+	ctx.service.backendProxies["unavailable-backend"] = ctx.service.createReverseProxyForBackend(context.Background(), backendURL, "unavailable-backend", "")
 
 	// Register the route handler for the new route
 	ctx.service.safeHandleFunc("/error/unavailable", ctx.service.createBackendProxyHandler("unavailable-backend"))
@@ -354,7 +355,7 @@ func (ctx *ReverseProxyBDDTestContext) appropriateErrorResponsesShouldBeReturned
 
 	// Create the backend proxy for the timeout backend
 	timeoutBackendURL, _ := url.Parse(timeoutServer.URL)
-	ctx.service.backendProxies["timeout-backend"] = ctx.service.createReverseProxyForBackend(timeoutBackendURL, "timeout-backend", "")
+	ctx.service.backendProxies["timeout-backend"] = ctx.service.createReverseProxyForBackend(context.Background(), timeoutBackendURL, "timeout-backend", "")
 
 	// Register the route handler for the timeout route
 	ctx.service.safeHandleFunc("/error/timeout", ctx.service.createBackendProxyHandler("timeout-backend"))

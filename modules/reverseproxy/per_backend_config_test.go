@@ -287,10 +287,12 @@ func TestPerBackendCustomHostname(t *testing.T) {
 func TestPerBackendHeaderRewriting(t *testing.T) {
 	// Track what headers the backend receives
 	var receivedHeaders map[string]string
+	var receivedHeadersFull http.Header
 
 	// Create mock backend server
 	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedHeaders = make(map[string]string)
+		receivedHeadersFull = r.Header.Clone()
 		for name, values := range r.Header {
 			if len(values) > 0 {
 				receivedHeaders[name] = values[0]
@@ -362,6 +364,109 @@ func TestPerBackendHeaderRewriting(t *testing.T) {
 		assert.Empty(t, receivedHeaders["X-Client-Version"],
 			"Backend should not receive removed X-Client-Version header")
 	})
+
+	t.Run("SetHeaders Replaces Existing Values", func(t *testing.T) {
+		// This test verifies that SetHeaders uses Header.Set() (replaces)
+		// rather than Header.Add() (appends), ensuring no duplicate headers
+		receivedHeaders = nil
+		receivedHeadersFull = nil
+
+		// Create the reverse proxy for API backend
+		apiURL, err := url.Parse(backendServer.URL)
+		require.NoError(t, err)
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
+
+		// Create a request with an existing header that will be replaced
+		req := httptest.NewRequest("GET", "http://client.example.com/api/products", nil)
+		req.Host = "client.example.com"
+		req.Header.Set("X-Custom-Auth", "old-value")
+		req.Header.Set("X-API-Key", "client-key")
+
+		t.Logf("Headers set on request: X-Custom-Auth=%v, X-API-Key=%v",
+			req.Header["X-Custom-Auth"], req.Header["X-Api-Key"])
+
+		// Process the request through the proxy
+		w := httptest.NewRecorder()
+		proxy.ServeHTTP(w, req)
+
+		// Verify the response
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		t.Logf("Backend received X-Custom-Auth: %v (count: %d)",
+			receivedHeadersFull["X-Custom-Auth"], len(receivedHeadersFull["X-Custom-Auth"]))
+		t.Logf("Backend received X-Api-Key: %v (count: %d)",
+			receivedHeadersFull["X-Api-Key"], len(receivedHeadersFull["X-Api-Key"]))
+
+		// The backend should receive the NEW values (replaced, not appended)
+		assert.Equal(t, "secret-key", receivedHeadersFull.Get("X-Api-Key"),
+			"SetHeaders should replace existing X-API-Key header")
+		assert.Equal(t, "bearer-token", receivedHeadersFull.Get("X-Custom-Auth"),
+			"SetHeaders should replace existing X-Custom-Auth header")
+
+		// Verify there's only ONE value per header (not multiple)
+		// This is the key test: if we used Add() instead of Set(), we'd have 2 values
+		apiKeyValues := receivedHeadersFull.Values("X-Api-Key")
+		require.NotEmpty(t, apiKeyValues, "X-API-Key header must be present")
+		assert.Len(t, apiKeyValues, 1, "Should have exactly one X-API-Key value (not multiple)")
+
+		authValues := receivedHeadersFull.Values("X-Custom-Auth")
+		require.NotEmpty(t, authValues, "X-Custom-Auth header must be present")
+		assert.Len(t, authValues, 1, "Should have exactly one X-Custom-Auth value (not multiple)")
+	})
+
+	t.Run("copyResponseHeaders Deduplicates Single-Value Headers", func(t *testing.T) {
+		// This test directly verifies that copyResponseHeaders deduplicates
+		// single-value headers like Access-Control-* while preserving multi-value headers
+
+		// Create source headers with duplicates (simulating backend response)
+		source := make(http.Header)
+		source.Add("Access-Control-Allow-Origin", "*")
+		source.Add("Access-Control-Allow-Origin", "*") // Duplicate
+		source.Add("Access-Control-Allow-Methods", "GET, POST")
+		source.Add("Access-Control-Allow-Methods", "GET, POST") // Duplicate
+		source.Add("Set-Cookie", "session=abc123")
+		source.Add("Set-Cookie", "user=john") // Multiple cookies - should be preserved
+		source.Set("Content-Type", "application/json")
+
+		// Create target headers
+		target := make(http.Header)
+
+		// Call copyResponseHeaders
+		copyResponseHeaders(source, target)
+
+		// Verify single-value headers are deduplicated
+		originValues := target.Values("Access-Control-Allow-Origin")
+		assert.Len(t, originValues, 1, "Access-Control-Allow-Origin should be deduplicated to 1 value")
+		assert.Equal(t, "*", originValues[0])
+
+		methodsValues := target.Values("Access-Control-Allow-Methods")
+		assert.Len(t, methodsValues, 1, "Access-Control-Allow-Methods should be deduplicated to 1 value")
+		assert.Equal(t, "GET, POST", methodsValues[0])
+
+		contentTypeValues := target.Values("Content-Type")
+		assert.Len(t, contentTypeValues, 1, "Content-Type should be single value")
+		assert.Equal(t, "application/json", contentTypeValues[0])
+
+		// Verify multi-value headers are preserved
+		cookieValues := target.Values("Set-Cookie")
+		assert.Len(t, cookieValues, 2, "Set-Cookie should preserve multiple values")
+		assert.Contains(t, cookieValues, "session=abc123")
+		assert.Contains(t, cookieValues, "user=john")
+	})
+}
+
+// headerCapturingRecorder wraps ResponseRecorder to capture headers at WriteHeader time
+type headerCapturingRecorder struct {
+	http.ResponseWriter
+	onWriteHeader func(http.Header)
+}
+
+func (r *headerCapturingRecorder) WriteHeader(statusCode int) {
+	if r.onWriteHeader != nil {
+		r.onWriteHeader(r.ResponseWriter.Header())
+	}
+	r.ResponseWriter.WriteHeader(statusCode)
 }
 
 // TestPerEndpointConfiguration tests endpoint-specific configuration

@@ -105,6 +105,46 @@ var _ modular.TenantAwareModule = (*ReverseProxyModule)(nil)
 var _ modular.Startable = (*ReverseProxyModule)(nil)
 var _ modular.Stoppable = (*ReverseProxyModule)(nil)
 
+// singleValueHTTPHeaders defines HTTP headers that should only have a single value
+// based on HTTP specifications and common practice. When copying response headers
+// from backends, duplicate values for these headers will be merged using the last value.
+//
+// This prevents issues where backends incorrectly send duplicate header values,
+// particularly for CORS headers which can cause browser errors when duplicated.
+//
+// Multi-value headers like Set-Cookie and Link are intentionally excluded from this
+// list and will preserve all values when copied.
+var singleValueHTTPHeaders = map[string]bool{
+	// CORS headers (W3C CORS Specification, RFC 6454)
+	// Browsers reject responses with duplicate CORS headers
+	"Access-Control-Allow-Origin":      true,
+	"Access-Control-Allow-Methods":     true,
+	"Access-Control-Allow-Headers":     true,
+	"Access-Control-Allow-Credentials": true,
+	"Access-Control-Expose-Headers":    true,
+	"Access-Control-Max-Age":           true,
+
+	// Content headers (RFC 7231 - HTTP/1.1 Semantics and Content)
+	// These define the representation and should be unique
+	"Content-Type":     true,
+	"Content-Length":   true,
+	"Content-Encoding": true,
+	"Content-Language": true,
+
+	// Navigation and caching (RFC 7231, RFC 7234)
+	"Location":      true, // Redirect target
+	"Server":        true, // Server identification
+	"Date":          true, // Message origination date
+	"Etag":          true, // Entity tag for caching
+	"Last-Modified": true, // Last modification date
+	"Expires":       true, // Expiration date
+	"Age":           true, // Cache age
+
+	// Custom cache headers
+	"X-Cache":      true, // Cache hit/miss indicator
+	"X-Cache-Hits": true, // Cache hit counter
+}
+
 // NewModule creates a new ReverseProxyModule with default settings.
 // This is the primary constructor for the reverseproxy module and should be used
 // when registering the module with the application.
@@ -1869,6 +1909,43 @@ func singleJoiningSlash(a, b string) string {
 	return a + b
 }
 
+// copyResponseHeaders intelligently copies HTTP headers from source to target,
+// handling single-value and multi-value headers appropriately.
+//
+// Single-value headers (defined in singleValueHTTPHeaders) use Header.Set() to
+// prevent duplicates, taking the last value if the backend sent multiple values.
+// This is critical for CORS headers where duplicates cause browser errors.
+//
+// Multi-value headers (like Set-Cookie, Link, Warning) use Header.Add() to preserve
+// all values, as these headers are designed to have multiple instances per RFC 7230.
+//
+// This approach aligns with standard proxy behavior (Nginx, HAProxy, Envoy) and
+// HTTP specifications while protecting against misconfigured backends.
+//
+// Example use cases:
+//   - Deduplicating CORS headers from backends that incorrectly send duplicates
+//   - Preserving multiple Set-Cookie headers when proxying auth services
+//   - Maintaining proper cache headers when serving from cache
+func copyResponseHeaders(source, target http.Header) {
+	for key, values := range source {
+		if singleValueHTTPHeaders[key] {
+			// Use Set for single-value headers (prevents duplicates)
+			if len(values) > 0 {
+				// Use the last value if backend sent duplicates
+				// This matches the behavior of most HTTP clients
+				target.Set(key, values[len(values)-1])
+			}
+		} else {
+			// Use Add for multi-value headers (preserves all values)
+			// This is critical for headers like Set-Cookie where multiple
+			// values are expected and semantically meaningful
+			for _, value := range values {
+				target.Add(key, value)
+			}
+		}
+	}
+}
+
 // applyPathRewritingForBackend applies path rewriting rules for a specific backend and endpoint
 func (m *ReverseProxyModule) applyPathRewritingForBackend(originalPath string, config *ReverseProxyConfig, backendID string, endpoint string) string {
 	if config == nil {
@@ -2127,12 +2204,8 @@ func (w *bufferingResponseWriter) flushTo(target http.ResponseWriter) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Copy headers
-	for key, values := range w.header {
-		for _, value := range values {
-			target.Header().Add(key, value)
-		}
-	}
+	// Copy headers using smart deduplication
+	copyResponseHeaders(w.header, target.Header())
 
 	// Write status
 	if w.status == 0 {
@@ -2768,11 +2841,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 			}
 
 			// Copy response to the original ResponseWriter
-			for k, vals := range resp.Header {
-				for _, v := range vals {
-					w.Header().Add(k, v)
-				}
-			}
+			copyResponseHeaders(resp.Header, w.Header())
 			w.WriteHeader(resp.StatusCode)
 			if resp.Body != nil {
 				defer resp.Body.Close()
@@ -3056,11 +3125,7 @@ func (m *ReverseProxyModule) RegisterCustomEndpoint(pattern string, mapping Endp
 		}
 
 		// Write headers
-		for key, values := range result.Headers {
-			for _, value := range values {
-				w.Header().Add(key, value)
-			}
-		}
+		copyResponseHeaders(result.Headers, w.Header())
 
 		// Ensure Content-Type is set if not specified by transformer
 		if w.Header().Get("Content-Type") == "" {
@@ -3765,11 +3830,7 @@ func (m *ReverseProxyModule) withCache(handler http.HandlerFunc, backend string)
 		// Check for cached response
 		if cachedResp, found := m.responseCache.Get(cacheKey); found && cachedResp != nil {
 			// Serve from cache
-			for key, values := range cachedResp.Headers {
-				for _, value := range values {
-					w.Header().Add(key, value)
-				}
-			}
+			copyResponseHeaders(cachedResp.Headers, w.Header())
 			w.Header().Set("X-Cache", "HIT")
 			w.WriteHeader(cachedResp.StatusCode)
 			if _, err := w.Write(cachedResp.Body); err != nil {
@@ -3797,11 +3858,7 @@ func (m *ReverseProxyModule) withCache(handler http.HandlerFunc, backend string)
 		}
 
 		// Send response to client
-		for key, values := range recorder.headers {
-			for _, value := range values {
-				w.Header().Add(key, value)
-			}
-		}
+		copyResponseHeaders(recorder.headers, w.Header())
 		w.Header().Set("X-Cache", "MISS")
 		w.WriteHeader(recorder.statusCode)
 		if _, err := w.Write(recorder.body); err != nil {
@@ -4034,11 +4091,7 @@ func (m *ReverseProxyModule) handleDryRunRequest(ctx context.Context, w http.Res
 
 	// Copy the recorded response to the original response writer
 	// Copy headers
-	for key, vals := range recorder.Header() {
-		for _, v := range vals {
-			w.Header().Add(key, v)
-		}
-	}
+	copyResponseHeaders(recorder.Header(), w.Header())
 	w.WriteHeader(recorder.Code)
 	if _, err := w.Write(recorder.Body.Bytes()); err != nil {
 		m.app.Logger().Error("Failed to write response body", "error", err)

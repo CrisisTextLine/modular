@@ -88,9 +88,20 @@ reverseproxy:
 	err = os.WriteFile(tenant2ConfigPath, []byte(tenant2ConfigYAML), 0644)
 	require.NoError(t, err)
 
+	// Create and populate global config BEFORE wrapping in providers
+	// This avoids mutating config after it's been wrapped
+	globalCfg := ProvideConfig().(*ReverseProxyConfig)
+	globalCfg.BackendServices = map[string]string{
+		"api": globalBackend.URL,
+	}
+	globalCfg.DefaultBackend = "api"
+	globalCfg.TenantIDHeader = "X-Affiliate-Id"
+	globalCfg.RequireTenantID = true
+
 	// Create a real application (not a mock)
-	// We need to provide a config provider for the global config
-	globalCfg := ProvideConfig()
+	// Use IsolatedConfigProvider to ensure deep copies are returned on every GetConfig()
+	// Note: Using the same globalCfg instance for both providers is safe because
+	// IsolatedConfigProvider performs deep copies, preventing shared state issues
 	app := modular.NewStdApplication(modular.NewIsolatedConfigProvider(globalCfg), NewMockLogger())
 
 	// Register the reverseproxy config section with IsolatedConfigProvider to prevent sharing
@@ -109,16 +120,6 @@ reverseproxy:
 	})
 	err = app.RegisterService("tenantConfigLoader", tenantConfigLoader)
 	require.NoError(t, err)
-
-	// Manually populate global config from the YAML file for testing
-	// In a real app, this would be done by the config feeders
-	globalRPCfg := globalCfg.(*ReverseProxyConfig)
-	globalRPCfg.BackendServices = map[string]string{
-		"api": globalBackend.URL,
-	}
-	globalRPCfg.DefaultBackend = "api"
-	globalRPCfg.TenantIDHeader = "X-Affiliate-Id"
-	globalRPCfg.RequireTenantID = true
 
 	// Create and register the reverseproxy module
 	rpModule := NewModule()

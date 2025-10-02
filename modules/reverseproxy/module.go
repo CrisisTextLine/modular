@@ -272,57 +272,10 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 		}
 	}
 
-	// Create tenant-specific backend proxies
-	for tenantID, tenantCfg := range m.tenants {
-		if tenantCfg == nil || tenantCfg.BackendServices == nil {
-			continue
-		}
-
-		// Process each backend in tenant config
-		for backendID, serviceURL := range tenantCfg.BackendServices {
-			// Skip if URL is not provided
-			if serviceURL == "" {
-				continue
-			}
-
-			// Create a new proxy for this tenant's backend
-			backendURL, err := url.Parse(serviceURL)
-			if err != nil {
-				app.Logger().Error("Failed to parse tenant backend URL",
-					"tenant", tenantID, "backend", backendID, "url", serviceURL, "error", err)
-				continue
-			}
-
-			proxy := m.createReverseProxyForBackend(backendURL, backendID, "")
-
-			// Ensure tenant map exists for this backend
-			m.tenantProxiesMutex.Lock()
-			if _, exists := m.tenantBackendProxies[tenantID]; !exists {
-				m.tenantBackendProxies[tenantID] = make(map[string]*httputil.ReverseProxy)
-			}
-
-			// Store the tenant-specific proxy
-			m.tenantBackendProxies[tenantID][backendID] = proxy
-			m.tenantProxiesMutex.Unlock()
-
-			// If there's no global URL for this backend, create one in the global map
-			m.backendProxiesMutex.Lock()
-			if _, exists := m.backendProxies[backendID]; !exists {
-				app.Logger().Info("Using tenant-specific backend URL as global",
-					"tenant", tenantID, "backend", backendID, "url", serviceURL)
-				m.backendProxies[backendID] = proxy
-			}
-			m.backendProxiesMutex.Unlock()
-
-			// Initialize route map for this backend
-			if _, ok := m.backendRoutes[backendID]; !ok {
-				m.backendRoutes[backendID] = make(map[string]http.HandlerFunc)
-			}
-
-			app.Logger().Debug("Created tenant-specific proxy",
-				"tenant", tenantID, "backend", backendID, "url", serviceURL)
-		}
-	}
+	// Create tenant-specific backend proxies for any tenants already registered
+	// (This handles the rare case of tenants registered before Init, though typically
+	// tenants are registered after Init via FileBasedTenantConfigLoader)
+	m.createTenantProxies(context.Background())
 
 	// Set default backend for the module
 	m.defaultBackend = m.config.DefaultBackend
@@ -556,6 +509,10 @@ func (m *ReverseProxyModule) Start(ctx context.Context) error {
 	// Load tenant-specific configurations
 	m.loadTenantConfigs()
 
+	// Create tenant-specific backend proxies after loading configs
+	// This handles tenants that were registered after Init()
+	m.createTenantProxies(ctx)
+
 	// Setup routes for all backends
 	if err := m.setupBackendRoutes(); err != nil {
 		return err
@@ -756,6 +713,78 @@ func (m *ReverseProxyModule) loadTenantConfigs() {
 		m.tenants[tenantID] = mergedCfg
 		if m.app != nil && m.app.Logger() != nil {
 			m.app.Logger().Debug("Loaded and merged tenant config", "tenantID", tenantID, "defaultBackend", mergedCfg.DefaultBackend)
+		}
+	}
+}
+
+// createTenantProxies creates reverse proxies for all tenant-specific backend services.
+// This method should be called after loadTenantConfigs() to ensure tenant proxies are
+// created for any tenants that were registered after Init() was called.
+func (m *ReverseProxyModule) createTenantProxies(ctx context.Context) {
+	for tenantID, tenantCfg := range m.tenants {
+		if tenantCfg == nil || tenantCfg.BackendServices == nil {
+			continue
+		}
+
+		// Process each backend in tenant config
+		for backendID, serviceURL := range tenantCfg.BackendServices {
+			// Skip if URL is not provided
+			if serviceURL == "" {
+				continue
+			}
+
+			// Check if proxy already exists for this tenant and backend
+			m.tenantProxiesMutex.RLock()
+			_, proxyExists := m.tenantBackendProxies[tenantID][backendID]
+			m.tenantProxiesMutex.RUnlock()
+
+			// Skip if proxy already exists (avoid recreating unnecessarily)
+			if proxyExists {
+				continue
+			}
+
+			// Create a new proxy for this tenant's backend
+			backendURL, err := url.Parse(serviceURL)
+			if err != nil {
+				if m.app != nil && m.app.Logger() != nil {
+					m.app.Logger().Error("Failed to parse tenant backend URL",
+						"tenant", tenantID, "backend", backendID, "url", serviceURL, "error", err)
+				}
+				continue
+			}
+
+			proxy := m.createReverseProxyForBackend(ctx, backendURL, backendID, "")
+
+			// Ensure tenant map exists for this backend
+			m.tenantProxiesMutex.Lock()
+			if _, exists := m.tenantBackendProxies[tenantID]; !exists {
+				m.tenantBackendProxies[tenantID] = make(map[string]*httputil.ReverseProxy)
+			}
+
+			// Store the tenant-specific proxy
+			m.tenantBackendProxies[tenantID][backendID] = proxy
+			m.tenantProxiesMutex.Unlock()
+
+			// If there's no global URL for this backend, create one in the global map
+			m.backendProxiesMutex.Lock()
+			if _, exists := m.backendProxies[backendID]; !exists {
+				if m.app != nil && m.app.Logger() != nil {
+					m.app.Logger().Info("Using tenant-specific backend URL as global",
+						"tenant", tenantID, "backend", backendID, "url", serviceURL)
+				}
+				m.backendProxies[backendID] = proxy
+			}
+			m.backendProxiesMutex.Unlock()
+
+			// Initialize route map for this backend if needed
+			if _, ok := m.backendRoutes[backendID]; !ok {
+				m.backendRoutes[backendID] = make(map[string]http.HandlerFunc)
+			}
+
+			if m.app != nil && m.app.Logger() != nil {
+				m.app.Logger().Debug("Created tenant-specific proxy",
+					"tenant", tenantID, "backend", backendID, "url", serviceURL)
+			}
 		}
 	}
 }
@@ -1444,11 +1473,11 @@ func (m *ReverseProxyModule) SetHttpClient(client *http.Client) {
 }
 
 // createReverseProxyForBackend creates a reverse proxy for a specific backend with per-backend configuration.
-func (m *ReverseProxyModule) createReverseProxyForBackend(target *url.URL, backendID string, endpoint string) *httputil.ReverseProxy {
+func (m *ReverseProxyModule) createReverseProxyForBackend(ctx context.Context, target *url.URL, backendID string, endpoint string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
 	// Emit proxy created event
-	m.emitEvent(context.Background(), EventTypeProxyCreated, map[string]interface{}{ //nolint:contextcheck // proxy creation occurs during module initialization
+	m.emitEvent(ctx, EventTypeProxyCreated, map[string]interface{}{
 		"backend_id": backendID,
 		"target_url": target.String(),
 		"endpoint":   endpoint,
@@ -1662,7 +1691,7 @@ func (m *ReverseProxyModule) createBackendProxy(backendID, serviceURL string) er
 	m.backendProxiesMutex.Unlock()
 
 	// Set up proxy for this backend
-	proxy := m.createReverseProxyForBackend(backendURL, backendID, "")
+	proxy := m.createReverseProxyForBackend(context.Background(), backendURL, backendID, "") //nolint:contextcheck // backend creation occurs during module initialization
 
 	// Store the proxy for this backend
 	m.backendProxiesMutex.Lock()

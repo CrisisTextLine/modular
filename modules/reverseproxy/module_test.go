@@ -1010,6 +1010,169 @@ func (tr *testRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+// TestTenantSpecificBackendProxiesCreated tests that tenant-specific backend proxies
+// are created when a tenant configuration overrides a backend service URL.
+// This reproduces GitHub issue #111.
+//
+// The bug occurs in the standard startup flow when using FileBasedTenantConfigLoader:
+//  1. Init() runs - no tenants yet (they haven't been loaded from files)
+//  2. Framework loads tenant configs - calls OnTenantRegistered() for each tenant
+//  3. Start() runs - should create tenant proxies but was NOT doing so (BUG)
+//
+// This test validates that Start() now properly creates tenant proxies for tenants
+// that were registered after Init() but before Start() - which is the standard flow
+// for FileBasedTenantConfigLoader and affects all users of that loader.
+func TestTenantSpecificBackendProxiesCreated(t *testing.T) {
+	// Setup mock backend servers
+	globalBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"backend":"global"}`))
+	}))
+	defer globalBackend.Close()
+
+	acmeBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"backend":"acme"}`))
+	}))
+	defer acmeBackend.Close()
+
+	// Create module
+	module := NewModule()
+
+	// Create global config with a backend service
+	globalConfig := &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"api": globalBackend.URL,
+		},
+		DefaultBackend:  "api",
+		TenantIDHeader:  "X-Tenant-Id",
+		RequireTenantID: true,
+		Routes: map[string]string{
+			"/api/test": "api",
+		},
+	}
+
+	// Create mock app with global config
+	mockApp := NewMockTenantApplication()
+	mockApp.configSections["reverseproxy"] = &mockConfigProvider{
+		config: globalConfig,
+	}
+
+	// Set up tenant configuration that overrides the "api" backend
+	tenantID := modular.TenantID("acme")
+	tenantConfig := &ReverseProxyConfig{
+		BackendServices: map[string]string{
+			"api": acmeBackend.URL, // Override with tenant-specific URL
+		},
+	}
+
+	// Register tenant config
+	err := mockApp.RegisterTenant(tenantID, map[string]modular.ConfigProvider{
+		"reverseproxy": NewStdConfigProvider(tenantConfig),
+	})
+	require.NoError(t, err)
+
+	// Set up router service
+	mockRouter := &testRouter{
+		routes: make(map[string]http.HandlerFunc),
+	}
+
+	// Initialize proxy maps
+	module.tenants = make(map[modular.TenantID]*ReverseProxyConfig)
+	module.tenantBackendProxies = make(map[modular.TenantID]map[string]*httputil.ReverseProxy)
+	module.backendProxies = make(map[string]*httputil.ReverseProxy)
+	module.backendRoutes = make(map[string]map[string]http.HandlerFunc)
+	module.compositeRoutes = make(map[string]http.HandlerFunc)
+	module.router = mockRouter
+
+	// Initialize module FIRST (without tenant registered yet)
+	err = module.Init(mockApp)
+	require.NoError(t, err)
+
+	// NOW register tenant AFTER Init has run
+	// This simulates the scenario where tenants are dynamically added
+	module.OnTenantRegistered(tenantID)
+
+	// Call Start() - this should load tenant configs and CREATE proxies
+	// BUT this is where the BUG is - Start() loads configs but doesn't create proxies!
+	err = module.Start(context.Background())
+	require.NoError(t, err)
+
+	// Verify tenant config was merged
+	tenantCfg, exists := module.tenants[tenantID]
+	require.True(t, exists, "Tenant config should exist")
+	require.NotNil(t, tenantCfg, "Tenant config should not be nil")
+	assert.Equal(t, acmeBackend.URL, tenantCfg.BackendServices["api"],
+		"Tenant config should have the overridden backend URL")
+
+	// THIS IS THE BUG: After Init(), tenant-specific proxies should be created
+	// The test will verify whether they exist
+	tenantProxies, tenantProxiesExist := module.tenantBackendProxies[tenantID]
+
+	// THIS IS THE KEY ASSERTION - tenant proxies should exist after Init()
+	require.True(t, tenantProxiesExist, "Tenant proxy map should exist after Init()")
+	require.NotNil(t, tenantProxies, "Tenant proxies should not be nil")
+
+	// The tenant-specific 'api' proxy should exist
+	apiProxy, apiProxyExists := tenantProxies["api"]
+	require.True(t, apiProxyExists, "Tenant-specific 'api' proxy should exist")
+	require.NotNil(t, apiProxy, "Tenant-specific 'api' proxy should not be nil")
+
+	// Now test the proxy resolution
+	// Without tenant ID - should use global proxy
+	globalProxy, exists := module.getProxyForBackendAndTenant("api", "")
+	assert.True(t, exists, "Global proxy should exist")
+	assert.NotNil(t, globalProxy, "Global proxy should not be nil")
+
+	// With tenant ID - should use tenant-specific proxy
+	tenantProxy, exists := module.getProxyForBackendAndTenant("api", tenantID)
+	assert.True(t, exists, "Tenant proxy should exist after manual creation")
+	assert.NotNil(t, tenantProxy, "Tenant proxy should not be nil")
+
+	// The two proxies should be different (pointing to different backends)
+	assert.NotEqual(t, globalProxy, tenantProxy,
+		"Global and tenant proxies should be different instances")
+
+	// Test actual requests
+	// Create a test handler that uses the proxy resolution
+	testHandler := func(w http.ResponseWriter, r *http.Request) {
+		tenantID := modular.TenantID(r.Header.Get("X-Tenant-Id"))
+		proxy, exists := module.getProxyForBackendAndTenant("api", tenantID)
+		if !exists {
+			http.Error(w, "Backend not found", http.StatusNotFound)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}
+
+	// Test request without tenant ID (should route to global)
+	req := httptest.NewRequest("GET", "http://example.com/api/test", nil)
+	w := httptest.NewRecorder()
+	testHandler(w, req)
+
+	resp := w.Result()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"backend":"global"`,
+		"Request without tenant ID should route to global backend")
+
+	// Test request with tenant ID (should route to tenant-specific backend)
+	tenantReq := httptest.NewRequest("GET", "http://example.com/api/test", nil)
+	tenantReq.Header.Set("X-Tenant-Id", string(tenantID))
+	tenantW := httptest.NewRecorder()
+	testHandler(tenantW, tenantReq)
+
+	tenantResp := tenantW.Result()
+	assert.Equal(t, http.StatusOK, tenantResp.StatusCode)
+	tenantBody, err := io.ReadAll(tenantResp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(tenantBody), `"backend":"acme"`,
+		"Request with tenant ID should route to tenant-specific backend")
+}
+
 // TestSetupResponseCacheWithTenantOverrides tests that cache is initialized
 // when any tenant has caching enabled, even if global caching is disabled
 func TestSetupResponseCacheWithTenantOverrides(t *testing.T) {

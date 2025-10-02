@@ -1,6 +1,7 @@
 package reverseproxy
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -70,7 +71,7 @@ func TestPerBackendPathRewriting(t *testing.T) {
 		// Create the reverse proxy for API backend
 		apiURL, err := url.Parse(apiServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 		// Create a request that should be rewritten
 		req := httptest.NewRequest("GET", "http://client.example.com/api/v1/products/123", nil)
@@ -96,7 +97,7 @@ func TestPerBackendPathRewriting(t *testing.T) {
 		// Create the reverse proxy for User backend
 		userURL, err := url.Parse(userServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxyForBackend(userURL, "user", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), userURL, "user", "")
 
 		// Create a request that should be rewritten
 		req := httptest.NewRequest("GET", "http://client.example.com/user/v1/profile/456", nil)
@@ -173,7 +174,7 @@ func TestPerBackendHostnameHandling(t *testing.T) {
 		// Create the reverse proxy for API backend
 		apiURL, err := url.Parse(apiServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 		// Create a request with original hostname
 		req := httptest.NewRequest("GET", "http://client.example.com/api/products", nil)
@@ -199,7 +200,7 @@ func TestPerBackendHostnameHandling(t *testing.T) {
 		// Create the reverse proxy for User backend
 		userURL, err := url.Parse(userServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxyForBackend(userURL, "user", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), userURL, "user", "")
 
 		// Create a request with original hostname
 		req := httptest.NewRequest("GET", "http://client.example.com/user/profile", nil)
@@ -262,7 +263,7 @@ func TestPerBackendCustomHostname(t *testing.T) {
 		// Create the reverse proxy for API backend
 		apiURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 		// Create a request with original hostname
 		req := httptest.NewRequest("GET", "http://client.example.com/api/products", nil)
@@ -335,7 +336,7 @@ func TestPerBackendHeaderRewriting(t *testing.T) {
 		// Create the reverse proxy for API backend
 		apiURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 		// Create a request with original headers
 		req := httptest.NewRequest("GET", "http://client.example.com/api/products", nil)
@@ -425,7 +426,7 @@ func TestPerEndpointConfiguration(t *testing.T) {
 		// Create the reverse proxy for API backend with users endpoint
 		apiURL, err := url.Parse(backendServer.URL)
 		require.NoError(t, err)
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "users")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "users")
 
 		// Create a request to users endpoint
 		req := httptest.NewRequest("GET", "http://client.example.com/api/v1/users/123", nil)
@@ -492,7 +493,7 @@ func TestHeaderRewritingEdgeCases(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create proxy
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 		// Create request with headers
 		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
@@ -540,7 +541,7 @@ func TestHeaderRewritingEdgeCases(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create proxy
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 		// Create request with headers
 		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
@@ -589,7 +590,7 @@ func TestHeaderRewritingEdgeCases(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create proxy
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 		// Create request with headers in different cases
 		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
@@ -649,7 +650,7 @@ func TestHeaderRewritingEdgeCases(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create proxy
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 		// Create request
 		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
@@ -734,7 +735,7 @@ func TestHeaderRewritingEdgeCases(t *testing.T) {
 				require.NoError(t, err)
 
 				// Create proxy
-				proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+				proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 				// Create request
 				req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)
@@ -787,7 +788,7 @@ func TestHeaderRewritingEdgeCases(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create proxy
-		proxy := module.createReverseProxyForBackend(apiURL, "api", "")
+		proxy := module.createReverseProxyForBackend(context.Background(), apiURL, "api", "")
 
 		// Create request
 		req := httptest.NewRequest("GET", "http://client.example.com/api/test", nil)

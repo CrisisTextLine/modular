@@ -3,7 +3,7 @@ module github.com/CrisisTextLine/modular/modules/auth
 go 1.25
 
 require (
-	github.com/CrisisTextLine/modular v1.11.4
+	github.com/CrisisTextLine/modular v1.11.5
 	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/cucumber/godog v0.15.1
 	github.com/golang-jwt/jwt/v5 v5.2.3

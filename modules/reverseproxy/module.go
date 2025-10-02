@@ -735,7 +735,8 @@ func (m *ReverseProxyModule) createTenantProxies(ctx context.Context) {
 
 			// Check if proxy already exists for this tenant and backend
 			m.tenantProxiesMutex.RLock()
-			_, proxyExists := m.tenantBackendProxies[tenantID][backendID]
+			tenantProxies, tenantMapExists := m.tenantBackendProxies[tenantID]
+			proxyExists := tenantMapExists && tenantProxies != nil && tenantProxies[backendID] != nil
 			m.tenantProxiesMutex.RUnlock()
 
 			// Skip if proxy already exists (avoid recreating unnecessarily)

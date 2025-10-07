@@ -3,6 +3,7 @@ package modular
 import (
 	"context"
 	"fmt"
+	"sort"
 	"testing"
 )
 
@@ -58,7 +59,13 @@ func ExampleApplication_GetAllModules() {
 	modules := app.GetAllModules()
 
 	fmt.Println("Registered modules:")
+	// Sort module names for deterministic output
+	names := make([]string, 0, len(modules))
 	for name := range modules {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		fmt.Println("-", name)
 	}
 
@@ -67,8 +74,8 @@ func ExampleApplication_GetAllModules() {
 
 	// Output:
 	// Registered modules:
-	// - database
 	// - api
+	// - database
 	// - worker
 	// Total: 3 modules
 }

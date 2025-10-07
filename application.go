@@ -183,7 +183,7 @@ type Application interface {
 	// Example:
 	//   uptime := time.Since(app.StartTime())
 	StartTime() time.Time
-  
+
 	// GetModule returns the module with the given name, or nil if not found.
 	// This allows modules to access each other when the service provider
 	// pattern is insufficient or overly complex.

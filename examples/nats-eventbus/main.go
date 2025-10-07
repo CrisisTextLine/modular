@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -32,6 +33,14 @@ func (l *testLogger) Warn(msg string, args ...interface{}) {
 
 func (l *testLogger) Error(msg string, args ...interface{}) {
 	fmt.Printf("ERROR: %s %v\n", msg, args)
+}
+
+// isShuttingDown checks if an error indicates the system is shutting down
+func isShuttingDown(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "event bus not started")
 }
 
 // AppConfig defines the main application configuration
@@ -65,13 +74,13 @@ type AnalyticsEvent struct {
 
 // EventTracker tracks published and consumed events for validation
 type EventTracker struct {
-	mu                sync.Mutex
-	publishedOrders   int
+	mu                 sync.Mutex
+	publishedOrders    int
 	publishedAnalytics int
-	publishedNotifs   int
-	consumedOrders    int
-	consumedAnalytics int
-	consumedNotifs    int
+	publishedNotifs    int
+	consumedOrders     int
+	consumedAnalytics  int
+	consumedNotifs     int
 }
 
 func (et *EventTracker) PublishedOrder() {
@@ -197,6 +206,9 @@ func main() {
 	// Check if NATS service is available
 	checkNATSAvailability()
 
+	// Give the eventbus a moment to fully initialize connections
+	time.Sleep(500 * time.Millisecond)
+
 	// Create event tracker for validation
 	tracker := &EventTracker{}
 
@@ -231,27 +243,27 @@ func main() {
 	// Graceful shutdown
 	fmt.Println("\n🛑 Shutting down services...")
 
-	// Stop application
-	err = app.Stop()
-	if err != nil {
-		log.Printf("Warning during shutdown: %v", err)
-	}
-
-	// Wait for services to complete
+	// Wait for services to complete (they will stop when they receive the signal)
 	wg.Wait()
 
 	// Wait a moment for async processing to complete
 	fmt.Println("⏳ Waiting for event processing to complete...")
 	time.Sleep(2 * time.Second)
 
+	// Stop application after services have stopped
+	err = app.Stop()
+	if err != nil {
+		log.Printf("Warning during shutdown: %v", err)
+	}
+
 	// Validate event correlation
 	pubOrders, pubAnalytics, pubNotifs, consOrders, consAnalytics, consNotifs := tracker.GetStats()
-	
+
 	fmt.Println("\n📊 Event Correlation Report:")
 	fmt.Printf("  Orders:      Published: %d, Consumed: %d ✓\n", pubOrders, consOrders)
 	fmt.Printf("  Analytics:   Published: %d, Consumed: %d ✓\n", pubAnalytics, consAnalytics)
 	fmt.Printf("  Notifications: Published: %d, Consumed: %d ✓\n", pubNotifs, consNotifs)
-	
+
 	if tracker.Validate() {
 		fmt.Println("\n✅ Validation PASSED: All published events were consumed")
 	} else {
@@ -288,7 +300,10 @@ func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule,
 			fmt.Printf("📤 [PUBLISHED] order.created: %s (amount: $%.2f)\n", orderEvent.OrderID, orderEvent.Amount)
 			err := eventBus.Publish(ctx, "order.created", orderEvent)
 			if err != nil {
-				fmt.Printf("Error publishing order event: %v\n", err)
+				// Errors during shutdown are expected, don't print them
+				if !isShuttingDown(err) {
+					fmt.Printf("Error publishing order event: %v\n", err)
+				}
 			} else {
 				tracker.PublishedOrder()
 			}
@@ -306,7 +321,10 @@ func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule,
 			fmt.Printf("📤 [PUBLISHED] analytics.order: %s\n", orderEvent.OrderID)
 			err = eventBus.Publish(ctx, "analytics.order", analyticsEvent)
 			if err != nil {
-				fmt.Printf("Error publishing analytics event: %v\n", err)
+				// Errors during shutdown are expected, don't print them
+				if !isShuttingDown(err) {
+					fmt.Printf("Error publishing analytics event: %v\n", err)
+				}
 			} else {
 				tracker.PublishedAnalytics()
 			}
@@ -325,7 +343,10 @@ func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule,
 				fmt.Printf("📤 [PUBLISHED] notification.system: %s\n", notifEvent.Message)
 				err = eventBus.Publish(ctx, "notification.system", notifEvent)
 				if err != nil {
-					fmt.Printf("Error publishing notification event: %v\n", err)
+					// Errors during shutdown are expected, don't print them
+					if !isShuttingDown(err) {
+						fmt.Printf("Error publishing notification event: %v\n", err)
+					}
 				} else {
 					tracker.PublishedNotif()
 				}

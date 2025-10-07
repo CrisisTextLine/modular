@@ -33,6 +33,7 @@ jobs:
           - observer-pattern
           - health-aware-reverse-proxy
           - multi-engine-eventbus
+          - nats-eventbus
           - logmasker-example
     steps:
       - name: Checkout code
@@ -329,6 +330,66 @@ jobs:
                 kill $PID 2>/dev/null || true
               else
                 echo "❌ multi-engine-eventbus failed to handle missing services"
+                exit 1
+              fi
+            fi
+            
+          elif [ "${{ matrix.example }}" = "nats-eventbus" ]; then
+            # NATS eventbus example - test with NATS service
+            echo "🔄 Testing nats-eventbus with NATS service..."
+            
+            # Make run-demo.sh executable
+            chmod +x run-demo.sh
+            
+            # Check if Docker is available for NATS
+            if command -v docker &> /dev/null; then
+              echo "Docker available, testing with NATS service"
+              
+              # Start NATS and test the application
+              ./run-demo.sh start
+              
+              # Wait for NATS to be ready
+              sleep 5
+              
+              # Run the application for 10 seconds
+              timeout 10s ./example > app.log 2>&1 &
+              PID=$!
+              sleep 8
+              
+              # Check if process is still running
+              if kill -0 $PID 2>/dev/null; then
+                echo "✅ nats-eventbus demo running successfully with NATS"
+                kill $PID 2>/dev/null || true
+                
+                # Check logs for expected output
+                if grep -q "Publisher Service started" app.log && grep -q "Subscriber Service started" app.log; then
+                  echo "✅ Both publisher and subscriber services started"
+                else
+                  echo "⚠️ Services may not have started as expected"
+                  cat app.log
+                fi
+              else
+                echo "❌ nats-eventbus failed to run with NATS"
+                cat app.log
+                ./run-demo.sh cleanup
+                exit 1
+              fi
+              
+              # Clean up NATS container
+              ./run-demo.sh cleanup
+            else
+              echo "Docker not available, testing graceful degradation"
+              
+              # Test without NATS (should handle gracefully)
+              timeout 5s ./example &
+              PID=$!
+              sleep 3
+              
+              if kill -0 $PID 2>/dev/null; then
+                echo "✅ nats-eventbus handles missing NATS service gracefully"
+                kill $PID 2>/dev/null || true
+              else
+                echo "❌ nats-eventbus failed to handle missing NATS service"
                 exit 1
               fi
             fi

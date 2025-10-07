@@ -126,18 +126,9 @@ func TestNatsEventBusInterface(t *testing.T) {
 
 // TestNatsTopicToSubject tests the topic to subject conversion
 func TestNatsTopicToSubject(t *testing.T) {
-	config := map[string]interface{}{
-		"url": "nats://localhost:4222",
-	}
-
-	bus, err := NewNatsEventBus(config)
-	if err != nil {
-		t.Skipf("Skipping test - NATS not available: %v", err)
-		return
-	}
-	defer bus.Stop(context.Background())
-
-	natsBus := bus.(*NatsEventBus)
+	// Create a NatsEventBus instance without actually connecting
+	// We can test the topicToSubject method which doesn't require a connection
+	natsBus := &NatsEventBus{}
 
 	tests := []struct {
 		name     string
@@ -149,6 +140,8 @@ func TestNatsTopicToSubject(t *testing.T) {
 		{"all topics wildcard", "*", ">"},
 		{"nested exact", "events.user.created", "events.user.created"},
 		{"nested wildcard", "events.user.*", "events.user.>"},
+		{"multiple segments with wildcard", "app.services.api.*", "app.services.api.>"},
+		{"single segment", "test", "test"},
 	}
 
 	for _, tt := range tests {
@@ -490,4 +483,180 @@ func TestNatsEventBusTopics(t *testing.T) {
 	// Clean up
 	_ = bus.Unsubscribe(ctx, sub1)
 	_ = bus.Unsubscribe(ctx, sub2)
+}
+
+
+// TestNatsConfigDefaults tests that default configuration values are properly set
+func TestNatsConfigDefaults(t *testing.T) {
+	config := map[string]interface{}{}
+	
+	bus, err := NewNatsEventBus(config)
+	if err != nil {
+		// Expected when NATS is not running, but we can still verify the error
+		assert.Contains(t, err.Error(), "failed to connect to NATS")
+		return
+	}
+	
+	natsBus, ok := bus.(*NatsEventBus)
+	require.True(t, ok)
+	
+	// Verify defaults
+	assert.Equal(t, "nats://localhost:4222", natsBus.config.URL)
+	assert.Equal(t, "modular-eventbus", natsBus.config.ConnectionName)
+	assert.Equal(t, 10, natsBus.config.MaxReconnects)
+	assert.Equal(t, 2, natsBus.config.ReconnectWait)
+	assert.Equal(t, true, natsBus.config.AllowReconnect)
+	assert.Equal(t, 20, natsBus.config.PingInterval)
+	assert.Equal(t, 2, natsBus.config.MaxPingsOut)
+	assert.Equal(t, 5, natsBus.config.SubscribeTimeout)
+	
+	_ = bus.Stop(context.Background())
+}
+
+// TestNatsSubscriptionMethods tests the subscription interface methods
+func TestNatsSubscriptionMethods(t *testing.T) {
+	sub := &natsSubscription{
+		id:      "test-id",
+		topic:   "test.topic",
+		isAsync: true,
+		done:    make(chan struct{}),
+	}
+	
+	assert.Equal(t, "test-id", sub.ID())
+	assert.Equal(t, "test.topic", sub.Topic())
+	assert.True(t, sub.IsAsync())
+	
+	// Test cancel
+	err := sub.Cancel()
+	assert.NoError(t, err)
+	assert.True(t, sub.cancelled)
+	
+	// Test cancel is idempotent
+	err = sub.Cancel()
+	assert.NoError(t, err)
+}
+
+// TestNatsConfigurationParsing tests various configuration scenarios
+func TestNatsConfigurationParsing(t *testing.T) {
+	tests := []struct {
+		name           string
+		config         map[string]interface{}
+		expectedURL    string
+		expectedName   string
+		expectedReconn int
+	}{
+		{
+			name:           "minimal config",
+			config:         map[string]interface{}{"url": "nats://test:4222"},
+			expectedURL:    "nats://test:4222",
+			expectedName:   "modular-eventbus",
+			expectedReconn: 10,
+		},
+		{
+			name: "custom name",
+			config: map[string]interface{}{
+				"url":            "nats://test:4222",
+				"connectionName": "my-app",
+			},
+			expectedURL:    "nats://test:4222",
+			expectedName:   "my-app",
+			expectedReconn: 10,
+		},
+		{
+			name: "custom reconnect settings",
+			config: map[string]interface{}{
+				"url":           "nats://test:4222",
+				"maxReconnects": 5,
+			},
+			expectedURL:    "nats://test:4222",
+			expectedName:   "modular-eventbus",
+			expectedReconn: 5,
+		},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bus, err := NewNatsEventBus(tt.config)
+			if err != nil {
+				// Expected when NATS is not running
+				t.Logf("NATS not available: %v", err)
+				return
+			}
+			
+			natsBus, ok := bus.(*NatsEventBus)
+			require.True(t, ok)
+			
+			assert.Equal(t, tt.expectedURL, natsBus.config.URL)
+			assert.Equal(t, tt.expectedName, natsBus.config.ConnectionName)
+			assert.Equal(t, tt.expectedReconn, natsBus.config.MaxReconnects)
+			
+			_ = bus.Stop(context.Background())
+		})
+	}
+}
+
+// TestNatsErrorCases tests error handling
+func TestNatsErrorCases(t *testing.T) {
+	t.Run("operations fail when not started", func(t *testing.T) {
+		config := map[string]interface{}{"url": "nats://localhost:4222"}
+		bus, err := NewNatsEventBus(config)
+		if err != nil {
+			t.Skip("NATS not available")
+		}
+		
+		natsBus, ok := bus.(*NatsEventBus)
+		require.True(t, ok)
+		
+		ctx := context.Background()
+		
+		// Don't start the bus
+		
+		// Publish should fail
+		event := Event{Topic: "test", Payload: "data"}
+		err = natsBus.Publish(ctx, event)
+		assert.Error(t, err)
+		assert.Equal(t, ErrEventBusNotStarted, err)
+		
+		// Subscribe should fail
+		handler := func(ctx context.Context, event Event) error { return nil }
+		_, err = natsBus.Subscribe(ctx, "test", handler)
+		assert.Error(t, err)
+		assert.Equal(t, ErrEventBusNotStarted, err)
+		
+		// SubscribeAsync should fail
+		_, err = natsBus.SubscribeAsync(ctx, "test", handler)
+		assert.Error(t, err)
+		assert.Equal(t, ErrEventBusNotStarted, err)
+		
+		// Unsubscribe should fail
+		err = natsBus.Unsubscribe(ctx, &natsSubscription{})
+		assert.Error(t, err)
+		assert.Equal(t, ErrEventBusNotStarted, err)
+	})
+	
+	t.Run("nil handler rejected", func(t *testing.T) {
+		config := map[string]interface{}{"url": "nats://localhost:4222"}
+		bus, err := NewNatsEventBus(config)
+		if err != nil {
+			t.Skip("NATS not available")
+		}
+		defer bus.Stop(context.Background())
+		
+		err = bus.Start(context.Background())
+		if err != nil {
+			t.Skip("NATS connection failed")
+		}
+		
+		ctx := context.Background()
+		
+		// Subscribe with nil handler should fail
+		_, err = bus.Subscribe(ctx, "test", nil)
+		assert.Error(t, err)
+		assert.Equal(t, ErrEventHandlerNil, err)
+		
+		// SubscribeAsync with nil handler should fail
+		_, err = bus.SubscribeAsync(ctx, "test", nil)
+		assert.Error(t, err)
+		assert.Equal(t, ErrEventHandlerNil, err)
+	})
 }

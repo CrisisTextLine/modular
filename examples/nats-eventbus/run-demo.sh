@@ -102,8 +102,14 @@ run_with_nats() {
     
     # Run the application
     echo -e "${GREEN}✅ Starting NATS EventBus Demo...${NC}"
+    echo -e "${BLUE}📊 Application output (will run for 15 seconds):${NC}"
     echo ""
-    ./nats-demo
+    
+    # Run the demo for 15 seconds to show event publishing/consumption
+    timeout 15s ./nats-demo || true
+    
+    echo ""
+    echo -e "${GREEN}✅ Demo completed${NC}"
 }
 
 # Function to cleanup everything

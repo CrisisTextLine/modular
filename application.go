@@ -175,6 +175,14 @@ type Application interface {
 	// This enables interface-based service discovery for modules that need to
 	// aggregate services by capability rather than name.
 	GetServicesByInterface(interfaceType reflect.Type) []*ServiceRegistryEntry
+
+	// StartTime returns the time when the application was started.
+	// Returns zero time if the application has not been started yet.
+	// This can be used to calculate application uptime.
+	//
+	// Example:
+	//   uptime := time.Since(app.StartTime())
+	StartTime() time.Time
 }
 
 // TenantApplication extends Application with multi-tenant functionality.
@@ -257,6 +265,7 @@ type StdApplication struct {
 	verboseConfig       bool          // Flag for verbose configuration debugging
 	initialized         bool          // Tracks whether Init has already been successfully executed
 	configFeeders       []Feeder      // Optional per-application feeders (override global ConfigFeeders if non-nil)
+	startTime           time.Time     // Tracks when the application was started
 }
 
 // NewStdApplication creates a new application instance with the provided configuration and logger.
@@ -581,6 +590,9 @@ func (app *StdApplication) initTenantConfigurations() error {
 
 // Start starts the application
 func (app *StdApplication) Start() error {
+	// Record the start time
+	app.startTime = time.Now()
+
 	// Create cancellable context for the application
 	ctx, cancel := context.WithCancel(context.Background())
 	app.ctx = ctx
@@ -1530,4 +1542,9 @@ func (app *StdApplication) GetServicesByInterface(interfaceType reflect.Type) []
 		return app.enhancedSvcRegistry.GetServicesByInterface(interfaceType)
 	}
 	return nil
+}
+
+// StartTime returns the time when the application was started
+func (app *StdApplication) StartTime() time.Time {
+	return app.startTime
 }

@@ -45,6 +45,26 @@ This directory contains practical examples demonstrating various features and us
 
 **Best for**: Debugging, monitoring, and compliance requirements
 
+### [NATS EventBus](./nats-eventbus/) - Messaging Example
+**Demonstrates**: Event-driven architecture with NATS
+- NATS engine integration with EventBus module
+- Publisher/subscriber pattern with two services
+- Wildcard topic subscriptions
+- Asynchronous event processing
+- Docker Compose setup with NATS server
+- Real-time service communication
+
+**Best for**: Building microservices with event-driven messaging
+
+### [Multi-Engine EventBus](./multi-engine-eventbus/) - Advanced Messaging
+**Demonstrates**: Multiple concurrent messaging engines
+- Multiple engines (Memory, Redis) running simultaneously
+- Topic-based routing to different engines
+- Engine-specific configuration
+- Graceful degradation without external services
+
+**Best for**: Complex messaging architectures with multiple backends
+
 ## 🚀 Getting Started
 
 Each example is self-contained and can be run independently:
@@ -88,7 +108,9 @@ All examples are automatically validated through CI/CD to ensure they:
 1. **[Basic App](./basic-app/)** - Start here to understand core concepts
 2. **[Reverse Proxy](./reverse-proxy/)** - Learn about networking modules
 3. **[HTTP Client](./http-client/)** - Explore client-side functionality
-4. **[Advanced Logging](./advanced-logging/)** - Master debugging and monitoring
+4. **[NATS EventBus](./nats-eventbus/)** - Learn event-driven messaging
+5. **[Multi-Engine EventBus](./multi-engine-eventbus/)** - Advanced messaging patterns
+6. **[Advanced Logging](./advanced-logging/)** - Master debugging and monitoring
 
 ## 🛠️ Building Your Own
 
@@ -129,6 +151,7 @@ Examples demonstrate these module categories:
 | **Web Servers** | basic-app, reverse-proxy | httpserver, chimux |
 | **HTTP Clients** | http-client, advanced-logging | httpclient |
 | **Routing & Middleware** | reverse-proxy, http-client | chimux, reverseproxy |
+| **Messaging** | nats-eventbus, multi-engine-eventbus | eventbus |
 | **Custom Modules** | basic-app | webserver, router, api |
 
 ## 🎯 Common Patterns

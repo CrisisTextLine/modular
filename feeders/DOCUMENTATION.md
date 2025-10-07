@@ -119,6 +119,7 @@ config.AddFeeder(feeders.NewDotEnvFeeder(".env"))
 
 // Environment-based overrides
 config.AddFeeder(feeders.NewEnvFeeder())
+// Note: Include underscores in prefix/suffix as desired
 config.AddFeeder(feeders.NewAffixedEnvFeeder("APP_", "_PROD"))
 
 // Feed the configuration
@@ -137,10 +138,11 @@ YAML values → DotEnv values → OS Env values → Affixed Env values
 ### EnvFeeder
 Uses env tags directly: `env:"DATABASE_URL"`
 
-### AffixedEnvFeeder  
-Constructs: `PREFIX__ENVTAG__SUFFIX`
-- Example: `PROD_` + `HOST` + `_ENV` = `PROD__HOST__ENV`
-- Uses double underscores between components
+### AffixedEnvFeeder
+Constructs: `PREFIX + ENVTAG + SUFFIX`
+- Example with prefix `"PROD_"`, tag `"HOST"`, suffix `"_ENV"`: `PROD_HOST_ENV`
+- **Users must include separators (like underscores) in their prefix/suffix**
+- Framework no longer automatically adds underscores between components
 
 ### InstanceAwareEnvFeeder
 Constructs: `MODULE_INSTANCE_FIELD`
@@ -148,7 +150,9 @@ Constructs: `MODULE_INSTANCE_FIELD`
 
 ### TenantAffixedEnvFeeder
 Combines tenant ID with affixed pattern:
-- Example: `APP_TENANT123__CONFIG__PROD`
+- Example with prefix function `tenantId + "_"` and tag `"CONFIG"`: `TENANT123_CONFIG`
+- Prefix/suffix functions must include any desired separators
+- Preserves pre-configured prefix/suffix when used with tenant config loader
 
 ## Error Handling
 

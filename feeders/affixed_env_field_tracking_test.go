@@ -15,13 +15,13 @@ type TestAffixedEnvConfig struct {
 }
 
 func TestAffixedEnvFeeder_FieldTracking(t *testing.T) {
-	// Set up environment variables with prefix and suffix
+	// Set up environment variables with prefix and suffix (framework no longer adds underscores)
 	envVars := map[string]string{
-		"APP__NAME__PROD":    "test-app",
-		"APP__PORT__PROD":    "8080",
-		"APP__ENABLED__PROD": "true",
-		"APP__DEBUG__PROD":   "verbose",
-		"OTHER_VAR":          "ignored", // Should not be matched
+		"APP_NAME_PROD":    "test-app",
+		"APP_PORT_PROD":    "8080",
+		"APP_ENABLED_PROD": "true",
+		"APP_DEBUG_PROD":   "verbose",
+		"OTHER_VAR":        "ignored", // Should not be matched
 	}
 
 	// Set environment variables for test
@@ -102,29 +102,29 @@ func TestAffixedEnvFeeder_FieldTracking(t *testing.T) {
 			if fmt.Sprintf("%v", pop.Value) != "test-app" {
 				t.Errorf("Expected tracked value 'test-app' for Name, got %v", pop.Value)
 			}
-			if pop.SourceKey != "APP__NAME__PROD" {
-				t.Errorf("Expected SourceKey 'APP__NAME__PROD' for Name, got %s", pop.SourceKey)
+			if pop.SourceKey != "APP_NAME_PROD" {
+				t.Errorf("Expected SourceKey 'APP_NAME_PROD' for Name, got %s", pop.SourceKey)
 			}
 		case "Port":
 			if fmt.Sprintf("%v", pop.Value) != "8080" {
 				t.Errorf("Expected tracked value '8080' for Port, got %v", pop.Value)
 			}
-			if pop.SourceKey != "APP__PORT__PROD" {
-				t.Errorf("Expected SourceKey 'APP__PORT__PROD' for Port, got %s", pop.SourceKey)
+			if pop.SourceKey != "APP_PORT_PROD" {
+				t.Errorf("Expected SourceKey 'APP_PORT_PROD' for Port, got %s", pop.SourceKey)
 			}
 		case "Enabled":
 			if fmt.Sprintf("%v", pop.Value) != "true" {
 				t.Errorf("Expected tracked value 'true' for Enabled, got %v", pop.Value)
 			}
-			if pop.SourceKey != "APP__ENABLED__PROD" {
-				t.Errorf("Expected SourceKey 'APP__ENABLED__PROD' for Enabled, got %s", pop.SourceKey)
+			if pop.SourceKey != "APP_ENABLED_PROD" {
+				t.Errorf("Expected SourceKey 'APP_ENABLED_PROD' for Enabled, got %s", pop.SourceKey)
 			}
 		case "Debug":
 			if fmt.Sprintf("%v", pop.Value) != "verbose" {
 				t.Errorf("Expected tracked value 'verbose' for Debug, got %v", pop.Value)
 			}
-			if pop.SourceKey != "APP__DEBUG__PROD" {
-				t.Errorf("Expected SourceKey 'APP__DEBUG__PROD' for Debug, got %s", pop.SourceKey)
+			if pop.SourceKey != "APP_DEBUG_PROD" {
+				t.Errorf("Expected SourceKey 'APP_DEBUG_PROD' for Debug, got %s", pop.SourceKey)
 			}
 		}
 	}
@@ -141,12 +141,12 @@ func TestAffixedEnvFeeder_SetFieldTracker(t *testing.T) {
 }
 
 func TestAffixedEnvFeeder_WithoutFieldTracker(t *testing.T) {
-	// Set up environment variables
-	os.Setenv("TEST__NAME__DEV", "test-app")
-	os.Setenv("TEST__PORT__DEV", "8080")
+	// Set up environment variables (framework no longer adds underscores)
+	os.Setenv("TEST_NAME_DEV", "test-app")
+	os.Setenv("TEST_PORT_DEV", "8080")
 	defer func() {
-		os.Unsetenv("TEST__NAME__DEV")
-		os.Unsetenv("TEST__PORT__DEV")
+		os.Unsetenv("TEST_NAME_DEV")
+		os.Unsetenv("TEST_PORT_DEV")
 	}()
 
 	// Create feeder without field tracker

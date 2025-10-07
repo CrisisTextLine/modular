@@ -27,11 +27,11 @@ func TestEnvVarConstruction(t *testing.T) {
 
 	// Test what AffixedEnvFeeder constructs
 	// With prefix "PROD_" and suffix "_ENV", for field tagged env:"HOST"
-	// It should construct: ToUpper("PROD_") + "_" + ToUpper("HOST") + "_" + ToUpper("_ENV")
-	// = "PROD_" + "_" + "HOST" + "_" + "_ENV" = "PROD__HOST__ENV"
+	// It should construct: ToUpper("PROD_") + ToUpper("HOST") + ToUpper("_ENV")
+	// = "PROD_" + "HOST" + "_ENV" = "PROD_HOST_ENV" (framework no longer adds underscores)
 
-	expectedVar1 := "PROD__HOST__ENV"
-	expectedVar2 := "PROD__PORT__ENV"
+	expectedVar1 := "PROD_HOST_ENV"
+	expectedVar2 := "PROD_PORT_ENV"
 
 	testValue1, testExists1 := catalog.Get(expectedVar1)
 	testValue2, testExists2 := catalog.Get(expectedVar2)

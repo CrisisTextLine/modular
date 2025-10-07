@@ -19,6 +19,7 @@ The EventBus Module provides a publish-subscribe messaging system for Modular ap
 - **Redis**: Distributed messaging using Redis pub/sub
 - **Kafka**: Enterprise messaging using Apache Kafka
 - **Kinesis**: AWS-native streaming using Amazon Kinesis
+- **NATS**: Lightweight, high-performance messaging using NATS
 - **Custom**: Support for custom engine implementations
 
 ### Advanced Features
@@ -89,6 +90,16 @@ eventbus:
         region: "us-east-1"
         streamName: "events-stream"
         shardCount: 2
+    - name: "nats-messaging"
+      type: "nats"
+      config:
+        url: "nats://localhost:4222"
+        connectionName: "modular-eventbus"
+        maxReconnects: 10
+        reconnectWait: 2
+        allowReconnect: true
+        pingInterval: 20
+        maxPingsOut: 2
     - name: "custom-engine"
       type: "custom"
       config:
@@ -335,6 +346,34 @@ Sample output:
 ⚙️  [MEMORY-RELIABLE] System info: database - Connection established
 ```
 
+### NATS Messaging Application
+
+See [examples/nats-eventbus/](../../examples/nats-eventbus/) for a complete NATS-based messaging application featuring:
+
+- Two services communicating via NATS
+- Publisher service generating order events
+- Subscriber service processing events
+- Wildcard topic subscriptions
+- Async event handlers
+- Docker Compose setup with NATS
+
+```bash
+cd examples/nats-eventbus
+./run-demo.sh run
+```
+
+Sample output:
+```
+🚀 Started NATS EventBus Demo in development environment
+📊 NATS EventBus Configuration:
+  - NATS server: localhost:4222
+  - All topics routed through NATS
+
+📤 [PUBLISHED] order.created: ORDER-1 (amount: $100.99)
+📨 [ORDER SERVICE] Processing order: ORDER-1
+📨 [ANALYTICS SERVICE] Recording event: order_created
+```
+
 ## Engine Implementations
 
 ### Memory Engine (Built-in)
@@ -360,6 +399,14 @@ Sample output:
 - Multiple shard support for scalability
 - Automatic stream management
 - Perfect for AWS-based applications with analytics needs
+
+### NATS Engine
+- Lightweight, high-performance messaging using NATS
+- Support for wildcards and hierarchical subjects
+- Automatic reconnection and connection management
+- Ideal for microservices and real-time messaging
+- Optional authentication with username/password or token
+- JetStream support for persistent messaging
 
 ### Custom Engine
 - Example implementation with metrics and filtering
@@ -409,6 +456,7 @@ eventbus:
 - **Redis**: Good for distributed applications with moderate throughput  
 - **Kafka**: Ideal for high-throughput, durable messaging
 - **Kinesis**: Best for AWS-native applications with streaming analytics
+- **NATS**: Perfect for lightweight, cloud-native microservices
 - **Custom**: Use for specialized requirements
 
 ### Configuration Tuning

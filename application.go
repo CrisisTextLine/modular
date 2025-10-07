@@ -183,6 +183,39 @@ type Application interface {
 	// Example:
 	//   uptime := time.Since(app.StartTime())
 	StartTime() time.Time
+  
+	// GetModule returns the module with the given name, or nil if not found.
+	// This allows modules to access each other when the service provider
+	// pattern is insufficient or overly complex.
+	//
+	// Use cases include:
+	//   - Direct module method calls not in a common interface
+	//   - Optional module dependencies (check if module exists)
+	//   - Debugging/introspection needs
+	//
+	// Callers must use type assertions to access module-specific methods:
+	//   if jobsMod, ok := app.GetModule("jobs").(*JobsModule); ok {
+	//       status, err := jobsMod.GetHealthStatus(ctx)
+	//   }
+	//
+	// Note: Prefer the service provider pattern for well-defined interfaces.
+	// Use GetModule() for module-specific functionality or optional dependencies.
+	GetModule(name string) Module
+
+	// GetAllModules returns a map of all registered modules by name.
+	// Returns a copy of the module registry to prevent external modification.
+	//
+	// Useful for:
+	//   - Debugging and introspection
+	//   - Administrative interfaces
+	//   - Module discovery at runtime
+	//
+	// Example:
+	//   modules := app.GetAllModules()
+	//   for name, mod := range modules {
+	//       fmt.Printf("Module: %s, Dependencies: %v\n", name, mod.Dependencies())
+	//   }
+	GetAllModules() map[string]Module
 }
 
 // TenantApplication extends Application with multi-tenant functionality.
@@ -1547,4 +1580,19 @@ func (app *StdApplication) GetServicesByInterface(interfaceType reflect.Type) []
 // StartTime returns the time when the application was started
 func (app *StdApplication) StartTime() time.Time {
 	return app.startTime
+}
+
+// GetModule returns the module with the given name, or nil if not found
+func (app *StdApplication) GetModule(name string) Module {
+	return app.moduleRegistry[name]
+}
+
+// GetAllModules returns a map of all registered modules by name.
+// Returns a copy to prevent external modification of the module registry.
+func (app *StdApplication) GetAllModules() map[string]Module {
+	result := make(map[string]Module, len(app.moduleRegistry))
+	for k, v := range app.moduleRegistry {
+		result[k] = v
+	}
+	return result
 }

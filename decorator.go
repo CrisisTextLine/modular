@@ -127,6 +127,15 @@ func (d *BaseApplicationDecorator) StartTime() time.Time {
 	return d.inner.StartTime()
 }
 
+// Module access methods
+func (d *BaseApplicationDecorator) GetModule(name string) Module {
+	return d.inner.GetModule(name)
+}
+
+func (d *BaseApplicationDecorator) GetAllModules() map[string]Module {
+	return d.inner.GetAllModules()
+}
+
 // TenantAware methods - if inner supports TenantApplication interface
 func (d *BaseApplicationDecorator) GetTenantService() (TenantService, error) {
 	if tenantApp, ok := d.inner.(TenantApplication); ok {

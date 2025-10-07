@@ -63,6 +63,67 @@ type AnalyticsEvent struct {
 	Timestamp time.Time              `json:"timestamp"`
 }
 
+// EventTracker tracks published and consumed events for validation
+type EventTracker struct {
+	mu                sync.Mutex
+	publishedOrders   int
+	publishedAnalytics int
+	publishedNotifs   int
+	consumedOrders    int
+	consumedAnalytics int
+	consumedNotifs    int
+}
+
+func (et *EventTracker) PublishedOrder() {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+	et.publishedOrders++
+}
+
+func (et *EventTracker) PublishedAnalytics() {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+	et.publishedAnalytics++
+}
+
+func (et *EventTracker) PublishedNotif() {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+	et.publishedNotifs++
+}
+
+func (et *EventTracker) ConsumedOrder() {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+	et.consumedOrders++
+}
+
+func (et *EventTracker) ConsumedAnalytics() {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+	et.consumedAnalytics++
+}
+
+func (et *EventTracker) ConsumedNotif() {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+	et.consumedNotifs++
+}
+
+func (et *EventTracker) GetStats() (pubOrders, pubAnalytics, pubNotifs, consOrders, consAnalytics, consNotifs int) {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+	return et.publishedOrders, et.publishedAnalytics, et.publishedNotifs, et.consumedOrders, et.consumedAnalytics, et.consumedNotifs
+}
+
+func (et *EventTracker) Validate() bool {
+	et.mu.Lock()
+	defer et.mu.Unlock()
+	return et.publishedOrders == et.consumedOrders &&
+		et.publishedAnalytics == et.consumedAnalytics &&
+		et.publishedNotifs == et.consumedNotifs
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -136,6 +197,9 @@ func main() {
 	// Check if NATS service is available
 	checkNATSAvailability()
 
+	// Create event tracker for validation
+	tracker := &EventTracker{}
+
 	// Set up a wait group for services
 	var wg sync.WaitGroup
 
@@ -147,14 +211,14 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runPublisherService(ctx, eventBusService, signalChan)
+		runPublisherService(ctx, eventBusService, signalChan, tracker)
 	}()
 
 	// Start Subscriber Services (Service 2)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runSubscriberService(ctx, eventBusService, signalChan)
+		runSubscriberService(ctx, eventBusService, signalChan, tracker)
 	}()
 
 	// Wait for signal or service completion
@@ -176,11 +240,30 @@ func main() {
 	// Wait for services to complete
 	wg.Wait()
 
+	// Wait a moment for async processing to complete
+	fmt.Println("⏳ Waiting for event processing to complete...")
+	time.Sleep(2 * time.Second)
+
+	// Validate event correlation
+	pubOrders, pubAnalytics, pubNotifs, consOrders, consAnalytics, consNotifs := tracker.GetStats()
+	
+	fmt.Println("\n📊 Event Correlation Report:")
+	fmt.Printf("  Orders:      Published: %d, Consumed: %d ✓\n", pubOrders, consOrders)
+	fmt.Printf("  Analytics:   Published: %d, Consumed: %d ✓\n", pubAnalytics, consAnalytics)
+	fmt.Printf("  Notifications: Published: %d, Consumed: %d ✓\n", pubNotifs, consNotifs)
+	
+	if tracker.Validate() {
+		fmt.Println("\n✅ Validation PASSED: All published events were consumed")
+	} else {
+		fmt.Println("\n❌ Validation FAILED: Mismatch between published and consumed events")
+		os.Exit(1)
+	}
+
 	fmt.Println("✅ Application shutdown complete")
 }
 
 // runPublisherService simulates a service that publishes events
-func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule, stopChan <-chan os.Signal) {
+func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule, stopChan <-chan os.Signal, tracker *EventTracker) {
 	fmt.Println("📤 Publisher Service started")
 
 	ticker := time.NewTicker(3 * time.Second)
@@ -206,6 +289,8 @@ func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule,
 			err := eventBus.Publish(ctx, "order.created", orderEvent)
 			if err != nil {
 				fmt.Printf("Error publishing order event: %v\n", err)
+			} else {
+				tracker.PublishedOrder()
 			}
 
 			// Publish analytics event
@@ -222,6 +307,8 @@ func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule,
 			err = eventBus.Publish(ctx, "analytics.order", analyticsEvent)
 			if err != nil {
 				fmt.Printf("Error publishing analytics event: %v\n", err)
+			} else {
+				tracker.PublishedAnalytics()
 			}
 
 			orderCounter++
@@ -239,6 +326,8 @@ func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule,
 				err = eventBus.Publish(ctx, "notification.system", notifEvent)
 				if err != nil {
 					fmt.Printf("Error publishing notification event: %v\n", err)
+				} else {
+					tracker.PublishedNotif()
 				}
 			}
 
@@ -248,7 +337,7 @@ func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule,
 }
 
 // runSubscriberService simulates a service that subscribes to events
-func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule, stopChan <-chan os.Signal) {
+func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule, stopChan <-chan os.Signal, tracker *EventTracker) {
 	fmt.Println("📨 Subscriber Service started")
 
 	// Subscribe to order events
@@ -264,6 +353,7 @@ func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule
 			return nil
 		}
 		fmt.Printf("📨 [ORDER SERVICE] Processing order: %v\n", orderID)
+		tracker.ConsumedOrder()
 		return nil
 	})
 	if err != nil {
@@ -285,6 +375,7 @@ func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule
 			return nil
 		}
 		fmt.Printf("📨 [ANALYTICS SERVICE] Recording event: %v\n", eventType)
+		tracker.ConsumedAnalytics()
 		// Simulate some processing time
 		time.Sleep(500 * time.Millisecond)
 		return nil
@@ -308,6 +399,7 @@ func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule
 			return nil
 		}
 		fmt.Printf("📨 [NOTIFICATION SERVICE] Sending notification: %v\n", message)
+		tracker.ConsumedNotif()
 		return nil
 	})
 	if err != nil {

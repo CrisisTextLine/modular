@@ -253,8 +253,16 @@ func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule
 
 	// Subscribe to order events
 	orderSub, err := eventBus.Subscribe(ctx, "order.*", func(ctx context.Context, event eventbus.Event) error {
-		orderEvent := event.Payload.(map[string]interface{})
-		orderID := orderEvent["orderId"]
+		// Payload can be either a map (from NATS) or the original struct (from memory)
+		var orderID interface{}
+		if payloadMap, ok := event.Payload.(map[string]interface{}); ok {
+			orderID = payloadMap["orderId"]
+		} else if orderEvent, ok := event.Payload.(OrderEvent); ok {
+			orderID = orderEvent.OrderID
+		} else {
+			fmt.Printf("📨 [ORDER SERVICE] Unknown payload type: %T\n", event.Payload)
+			return nil
+		}
 		fmt.Printf("📨 [ORDER SERVICE] Processing order: %v\n", orderID)
 		return nil
 	})
@@ -266,8 +274,16 @@ func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule
 
 	// Subscribe to analytics events asynchronously
 	analyticsSub, err := eventBus.SubscribeAsync(ctx, "analytics.*", func(ctx context.Context, event eventbus.Event) error {
-		analyticsEvent := event.Payload.(map[string]interface{})
-		eventType := analyticsEvent["eventType"]
+		// Payload can be either a map (from NATS) or the original struct (from memory)
+		var eventType interface{}
+		if payloadMap, ok := event.Payload.(map[string]interface{}); ok {
+			eventType = payloadMap["eventType"]
+		} else if analyticsEvent, ok := event.Payload.(AnalyticsEvent); ok {
+			eventType = analyticsEvent.EventType
+		} else {
+			fmt.Printf("📨 [ANALYTICS SERVICE] Unknown payload type: %T\n", event.Payload)
+			return nil
+		}
 		fmt.Printf("📨 [ANALYTICS SERVICE] Recording event: %v\n", eventType)
 		// Simulate some processing time
 		time.Sleep(500 * time.Millisecond)
@@ -281,8 +297,16 @@ func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule
 
 	// Subscribe to notification events
 	notifSub, err := eventBus.Subscribe(ctx, "notification.*", func(ctx context.Context, event eventbus.Event) error {
-		notifEvent := event.Payload.(map[string]interface{})
-		message := notifEvent["message"]
+		// Payload can be either a map (from NATS) or the original struct (from memory)
+		var message interface{}
+		if payloadMap, ok := event.Payload.(map[string]interface{}); ok {
+			message = payloadMap["message"]
+		} else if notifEvent, ok := event.Payload.(NotificationEvent); ok {
+			message = notifEvent.Message
+		} else {
+			fmt.Printf("📨 [NOTIFICATION SERVICE] Unknown payload type: %T\n", event.Payload)
+			return nil
+		}
 		fmt.Printf("📨 [NOTIFICATION SERVICE] Sending notification: %v\n", message)
 		return nil
 	})

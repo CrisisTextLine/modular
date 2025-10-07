@@ -174,7 +174,7 @@ func (n *NatsEventBus) Start(ctx context.Context) error {
 
 	// Check if connection is valid
 	if n.conn.Status() != nats.CONNECTED {
-		return fmt.Errorf("NATS connection is not established")
+		return ErrNATSConnectionNotEstablished
 	}
 
 	n.ctx, n.cancel = context.WithCancel(ctx)

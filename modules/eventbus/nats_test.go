@@ -17,16 +17,16 @@ func TestNatsEventBusCreation(t *testing.T) {
 		}
 
 		bus, err := NewNatsEventBus(config)
-		
+
 		// We expect this to fail if NATS is not running, which is fine
 		// The important part is that the function doesn't panic
 		if err != nil {
 			t.Logf("Expected error when NATS is not available: %v", err)
 			return
 		}
-		
+
 		require.NotNil(t, bus)
-		
+
 		// Clean up
 		if bus != nil {
 			_ = bus.Stop(context.Background())
@@ -46,15 +46,15 @@ func TestNatsEventBusCreation(t *testing.T) {
 		}
 
 		bus, err := NewNatsEventBus(config)
-		
+
 		// We expect this to fail if NATS is not running
 		if err != nil {
 			t.Logf("Expected error when NATS is not available: %v", err)
 			return
 		}
-		
+
 		require.NotNil(t, bus)
-		
+
 		// Clean up
 		if bus != nil {
 			_ = bus.Stop(context.Background())
@@ -69,15 +69,15 @@ func TestNatsEventBusCreation(t *testing.T) {
 		}
 
 		bus, err := NewNatsEventBus(config)
-		
+
 		// We expect this to fail if NATS is not running or auth fails
 		if err != nil {
 			t.Logf("Expected error when NATS is not available or auth fails: %v", err)
 			return
 		}
-		
+
 		require.NotNil(t, bus)
-		
+
 		// Clean up
 		if bus != nil {
 			_ = bus.Stop(context.Background())
@@ -91,15 +91,15 @@ func TestNatsEventBusCreation(t *testing.T) {
 		}
 
 		bus, err := NewNatsEventBus(config)
-		
+
 		// We expect this to fail if NATS is not running or auth fails
 		if err != nil {
 			t.Logf("Expected error when NATS is not available or auth fails: %v", err)
 			return
 		}
-		
+
 		require.NotNil(t, bus)
-		
+
 		// Clean up
 		if bus != nil {
 			_ = bus.Stop(context.Background())

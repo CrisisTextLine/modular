@@ -122,6 +122,15 @@ func (d *BaseApplicationDecorator) GetServicesByInterface(interfaceType reflect.
 	return d.inner.GetServicesByInterface(interfaceType)
 }
 
+// Module access methods
+func (d *BaseApplicationDecorator) GetModule(name string) Module {
+	return d.inner.GetModule(name)
+}
+
+func (d *BaseApplicationDecorator) GetAllModules() map[string]Module {
+	return d.inner.GetAllModules()
+}
+
 // TenantAware methods - if inner supports TenantApplication interface
 func (d *BaseApplicationDecorator) GetTenantService() (TenantService, error) {
 	if tenantApp, ok := d.inner.(TenantApplication); ok {

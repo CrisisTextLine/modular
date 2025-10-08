@@ -39,6 +39,8 @@ func NewTenantAffixedEnvFeeder(prefix, suffix func(string) string) *TenantAffixe
 
 // Feed implements the basic Feeder interface but requires tenant context
 // For TenantAffixedEnvFeeder, use FeedKey instead to provide tenant context
+// This method succeeds without doing anything if called without tenant context,
+// since FeedKey will be called next by ComplexFeeder-aware config loaders
 func (f *TenantAffixedEnvFeeder) Feed(structure interface{}) error {
 	if f.verboseDebug && f.logger != nil {
 		f.logger.Debug("TenantAffixedEnvFeeder: Feed called without tenant context, checking if prefix/suffix are set")
@@ -52,11 +54,11 @@ func (f *TenantAffixedEnvFeeder) Feed(structure interface{}) error {
 		return f.AffixedEnvFeeder.Feed(structure)
 	}
 
-	// Otherwise, fall back to empty tenant ID for backward compatibility
+	// No prefix/suffix set - succeed gracefully, FeedKey will be called next
 	if f.verboseDebug && f.logger != nil {
-		f.logger.Debug("TenantAffixedEnvFeeder: No prefix/suffix set, using FeedKey with empty tenant ID")
+		f.logger.Debug("TenantAffixedEnvFeeder: No prefix/suffix set, skipping Feed (FeedKey will be called next)")
 	}
-	return f.FeedKey("", structure)
+	return nil
 }
 
 // SetVerboseDebug enables or disables verbose debug logging
@@ -81,24 +83,32 @@ func (f *TenantAffixedEnvFeeder) SetFieldTracker(tracker FieldTracker) {
 }
 
 // FeedKey implements the ComplexFeeder interface for tenant-specific feeding
+// Note: When called from tenant config loader, prefix/suffix are already configured
+// The key parameter here is actually the config section name, not tenant ID
 func (f *TenantAffixedEnvFeeder) FeedKey(tenantID string, structure interface{}) error {
 	if f.verboseDebug && f.logger != nil {
-		f.logger.Debug("TenantAffixedEnvFeeder: Starting FeedKey process", "tenantID", tenantID, "structureType", reflect.TypeOf(structure))
+		f.logger.Debug("TenantAffixedEnvFeeder: FeedKey called", "key", tenantID, "structureType", reflect.TypeOf(structure), "currentPrefix", f.Prefix, "currentSuffix", f.Suffix)
 	}
 
-	// Set tenant-specific prefix and suffix using the provided functions
-	if f.SetPrefixFunc != nil {
-		f.SetPrefixFunc(tenantID)
-		if f.verboseDebug && f.logger != nil {
-			f.logger.Debug("TenantAffixedEnvFeeder: Set prefix for tenant", "tenantID", tenantID, "prefix", f.Prefix)
+	// If prefix or suffix are already set, use them (tenant loader pre-configured them)
+	// Otherwise, set them using the key parameter (for backward compatibility)
+	if f.Prefix == "" && f.Suffix == "" {
+		// Set tenant-specific prefix and suffix using the provided functions
+		if f.SetPrefixFunc != nil {
+			f.SetPrefixFunc(tenantID)
+			if f.verboseDebug && f.logger != nil {
+				f.logger.Debug("TenantAffixedEnvFeeder: Set prefix from key", "key", tenantID, "prefix", f.Prefix)
+			}
 		}
-	}
 
-	if f.SetSuffixFunc != nil {
-		f.SetSuffixFunc(tenantID)
-		if f.verboseDebug && f.logger != nil {
-			f.logger.Debug("TenantAffixedEnvFeeder: Set suffix for tenant", "tenantID", tenantID, "suffix", f.Suffix)
+		if f.SetSuffixFunc != nil {
+			f.SetSuffixFunc(tenantID)
+			if f.verboseDebug && f.logger != nil {
+				f.logger.Debug("TenantAffixedEnvFeeder: Set suffix from key", "key", tenantID, "suffix", f.Suffix)
+			}
 		}
+	} else if f.verboseDebug && f.logger != nil {
+		f.logger.Debug("TenantAffixedEnvFeeder: Using pre-configured prefix/suffix", "prefix", f.Prefix, "suffix", f.Suffix)
 	}
 
 	// Now call the underlying Feed method with the configured prefix/suffix
@@ -106,9 +116,9 @@ func (f *TenantAffixedEnvFeeder) FeedKey(tenantID string, structure interface{})
 
 	if f.verboseDebug && f.logger != nil {
 		if err != nil {
-			f.logger.Debug("TenantAffixedEnvFeeder: FeedKey completed with error", "tenantID", tenantID, "error", err)
+			f.logger.Debug("TenantAffixedEnvFeeder: FeedKey completed with error", "key", tenantID, "error", err)
 		} else {
-			f.logger.Debug("TenantAffixedEnvFeeder: FeedKey completed successfully", "tenantID", tenantID)
+			f.logger.Debug("TenantAffixedEnvFeeder: FeedKey completed successfully", "key", tenantID)
 		}
 	}
 

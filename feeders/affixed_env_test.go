@@ -26,7 +26,7 @@ func TestAffixedEnvFeeder(t *testing.T) {
 		t.Setenv("APP_SETTING_TEST", "true")
 
 		var config Config
-		feeder := NewAffixedEnvFeeder("APP", "TEST")
+		feeder := NewAffixedEnvFeeder("APP_", "_TEST")
 		err := feeder.Feed(&config)
 
 		if err != nil {
@@ -50,7 +50,7 @@ func TestAffixedEnvFeeder(t *testing.T) {
 		t.Setenv("APP_HOST", "localhost")
 
 		var config Config
-		feeder := NewAffixedEnvFeeder("APP", "")
+		feeder := NewAffixedEnvFeeder("APP_", "")
 		err := feeder.Feed(&config)
 
 		if err != nil {
@@ -65,7 +65,7 @@ func TestAffixedEnvFeeder(t *testing.T) {
 		t.Setenv("HOST_TEST", "localhost")
 
 		var config Config
-		feeder := NewAffixedEnvFeeder("", "TEST")
+		feeder := NewAffixedEnvFeeder("", "_TEST")
 		err := feeder.Feed(&config)
 
 		if err != nil {
@@ -87,7 +87,7 @@ func TestAffixedEnvFeeder(t *testing.T) {
 	})
 
 	t.Run("invalid structure", func(t *testing.T) {
-		feeder := NewAffixedEnvFeeder("APP", "TEST")
+		feeder := NewAffixedEnvFeeder("APP_", "_TEST")
 		err := feeder.Feed("not a struct pointer")
 
 		if !errors.Is(err, ErrEnvInvalidStructure) {
@@ -103,7 +103,7 @@ func TestAffixedEnvFeeder(t *testing.T) {
 		}
 
 		var config Config
-		feeder := NewAffixedEnvFeeder("VERBOSE", "TEST")
+		feeder := NewAffixedEnvFeeder("VERBOSE_", "_TEST")
 		logger := &MockLogger{}
 
 		// Enable verbose debugging

@@ -182,7 +182,7 @@ BASE_PORT=3000
 
 	// Set OS environment variables
 	t.Setenv("OS_OVERRIDE_HOST", "os-host")
-	t.Setenv("PROD__CONFIG__ENV", "production") // For AffixedEnvFeeder
+	t.Setenv("PROD_CONFIG_ENV", "production") // For AffixedEnvFeeder (framework no longer adds underscores)
 
 	type Config struct {
 		BaseHost     string `env:"BASE_HOST"`

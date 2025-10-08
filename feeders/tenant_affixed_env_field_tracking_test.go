@@ -16,14 +16,14 @@ type TestTenantAffixedEnvConfig struct {
 func TestTenantAffixedEnvFeeder_FieldTracking(t *testing.T) {
 	// Set up environment variables for tenant "test123"
 	// The AffixedEnvFeeder converts prefix/suffix to uppercase and constructs env vars as:
-	// ToUpper(prefix) + "_" + ToUpper(envTag) + "_" + ToUpper(suffix)
+	// ToUpper(prefix) + ToUpper(envTag) + ToUpper(suffix) (framework no longer adds underscores)
 	// With prefix "APP_test123_" -> "APP_TEST123_" and suffix "_PROD" -> "_PROD":
-	// APP_TEST123_ + _ + NAME + _ + _PROD = APP_TEST123__NAME__PROD
+	// APP_TEST123_ + NAME + _PROD = APP_TEST123_NAME_PROD
 	envVars := map[string]string{
-		"APP_TEST123__NAME__PROD":    "tenant-app",
-		"APP_TEST123__PORT__PROD":    "9090",
-		"APP_TEST123__ENABLED__PROD": "true",
-		"OTHER_VAR":                  "ignored", // Should not be matched
+		"APP_TEST123_NAME_PROD":    "tenant-app",
+		"APP_TEST123_PORT_PROD":    "9090",
+		"APP_TEST123_ENABLED_PROD": "true",
+		"OTHER_VAR":                "ignored", // Should not be matched
 	}
 
 	// Set environment variables for test
@@ -116,22 +116,22 @@ func TestTenantAffixedEnvFeeder_FieldTracking(t *testing.T) {
 			if fmt.Sprintf("%v", pop.Value) != "tenant-app" {
 				t.Errorf("Expected tracked value 'tenant-app' for Name, got %v", pop.Value)
 			}
-			if pop.SourceKey != "APP_TEST123__NAME__PROD" {
-				t.Errorf("Expected SourceKey 'APP_TEST123__NAME__PROD' for Name, got %s", pop.SourceKey)
+			if pop.SourceKey != "APP_TEST123_NAME_PROD" {
+				t.Errorf("Expected SourceKey 'APP_TEST123_NAME_PROD' for Name, got %s", pop.SourceKey)
 			}
 		case "Port":
 			if fmt.Sprintf("%v", pop.Value) != "9090" {
 				t.Errorf("Expected tracked value '9090' for Port, got %v", pop.Value)
 			}
-			if pop.SourceKey != "APP_TEST123__PORT__PROD" {
-				t.Errorf("Expected SourceKey 'APP_TEST123__PORT__PROD' for Port, got %s", pop.SourceKey)
+			if pop.SourceKey != "APP_TEST123_PORT_PROD" {
+				t.Errorf("Expected SourceKey 'APP_TEST123_PORT_PROD' for Port, got %s", pop.SourceKey)
 			}
 		case "Enabled":
 			if fmt.Sprintf("%v", pop.Value) != "true" {
 				t.Errorf("Expected tracked value 'true' for Enabled, got %v", pop.Value)
 			}
-			if pop.SourceKey != "APP_TEST123__ENABLED__PROD" {
-				t.Errorf("Expected SourceKey 'APP_TEST123__ENABLED__PROD' for Enabled, got %s", pop.SourceKey)
+			if pop.SourceKey != "APP_TEST123_ENABLED_PROD" {
+				t.Errorf("Expected SourceKey 'APP_TEST123_ENABLED_PROD' for Enabled, got %s", pop.SourceKey)
 			}
 		}
 	}

@@ -98,9 +98,9 @@ DATABASE_PORT=5432
 		// Set up environment variables with prefix/suffix pattern
 		// AffixedEnvFeeder with prefix "PROD_" and suffix "_ENV"
 		// constructs: prefix + "_" + envTag + "_" + suffix
-		// For env:"HOST" -> "PROD_" + "_" + "HOST" + "_" + "_ENV" = "PROD__HOST__ENV"
-		t.Setenv("PROD__HOST__ENV", "prod.example.com")
-		t.Setenv("PROD__PORT__ENV", "3306")
+		// For env:"HOST" -> "PROD_" + "HOST" + "_ENV" = "PROD_HOST_ENV" (framework no longer adds underscores)
+		t.Setenv("PROD_HOST_ENV", "prod.example.com")
+		t.Setenv("PROD_PORT_ENV", "3306")
 
 		var config AppConfig
 

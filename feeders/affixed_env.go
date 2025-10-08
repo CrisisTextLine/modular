@@ -164,12 +164,13 @@ func (f *AffixedEnvFeeder) processField(field reflect.Value, fieldType *reflect.
 // setFieldFromEnv sets a field value from an environment variable
 func (f *AffixedEnvFeeder) setFieldFromEnv(field reflect.Value, fieldType *reflect.StructField, envTag, fieldPath, prefix, suffix string) error {
 	// Build environment variable name
+	// Note: Users must include any separators (like underscores) in their prefix/suffix
 	envName := strings.ToUpper(envTag)
 	if prefix != "" {
-		envName = prefix + "_" + envName
+		envName = prefix + envName
 	}
 	if suffix != "" {
-		envName = envName + "_" + suffix
+		envName = envName + suffix
 	}
 
 	if f.verboseDebug && f.logger != nil {

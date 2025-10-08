@@ -1,12 +1,16 @@
-module multi-engine-eventbus
+module nats-eventbus
 
 go 1.25
 
 toolchain go1.25.0
 
+replace github.com/CrisisTextLine/modular => ../../
+
+replace github.com/CrisisTextLine/modular/modules/eventbus => ../../modules/eventbus
+
 require (
 	github.com/CrisisTextLine/modular v1.11.6
-	github.com/CrisisTextLine/modular/modules/eventbus v0.0.0
+	github.com/CrisisTextLine/modular/modules/eventbus v1.5.5
 )
 
 require (
@@ -70,7 +74,3 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/CrisisTextLine/modular => ../../
-
-replace github.com/CrisisTextLine/modular/modules/eventbus => ../../modules/eventbus

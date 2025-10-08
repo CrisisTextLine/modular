@@ -33,6 +33,7 @@ jobs:
           - observer-pattern
           - health-aware-reverse-proxy
           - multi-engine-eventbus
+          - nats-eventbus
           - logmasker-example
     steps:
       - name: Checkout code
@@ -329,6 +330,45 @@ jobs:
                 kill $PID 2>/dev/null || true
               else
                 echo "❌ multi-engine-eventbus failed to handle missing services"
+                exit 1
+              fi
+            fi
+            
+          elif [ "${{ matrix.example }}" = "nats-eventbus" ]; then
+            # NATS eventbus example - test with NATS service
+            echo "🔄 Testing nats-eventbus with NATS service..."
+            
+            # Make run-demo.sh executable
+            chmod +x run-demo.sh
+            
+            # Check if Docker is available for NATS
+            if command -v docker &> /dev/null; then
+              echo "Docker available, testing with NATS service"
+              
+              # Run the demo using the script which displays output
+              if timeout 60s ./run-demo.sh run; then
+                echo "✅ nats-eventbus demo completed successfully with NATS"
+                # Clean up NATS container
+                ./run-demo.sh cleanup 2>/dev/null || true
+              else
+                echo "❌ nats-eventbus demo failed"
+                # Clean up NATS container on failure
+                ./run-demo.sh cleanup 2>/dev/null || true
+                exit 1
+              fi
+            else
+              echo "Docker not available, testing graceful degradation"
+              
+              # Test without NATS (should handle gracefully)
+              timeout 5s ./example &
+              PID=$!
+              sleep 3
+              
+              if kill -0 $PID 2>/dev/null; then
+                echo "✅ nats-eventbus handles missing NATS service gracefully"
+                kill $PID 2>/dev/null || true
+              else
+                echo "❌ nats-eventbus failed to handle missing NATS service"
                 exit 1
               fi
             fi

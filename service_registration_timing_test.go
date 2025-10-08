@@ -376,7 +376,7 @@ func TestServiceRegistrationTimingWithoutDependencies(t *testing.T) {
 
 	// Initialize application - this currently fails because of alphabetical ordering
 	err := app.Init()
-	
+
 	// This test documents the current behavior: it fails
 	if err == nil {
 		t.Error("Expected Init to fail due to missing service (alphabetical ordering), but it succeeded")

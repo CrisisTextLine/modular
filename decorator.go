@@ -3,6 +3,7 @@ package modular
 import (
 	"context"
 	"reflect"
+	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
@@ -120,6 +121,10 @@ func (d *BaseApplicationDecorator) GetServiceEntry(serviceName string) (*Service
 
 func (d *BaseApplicationDecorator) GetServicesByInterface(interfaceType reflect.Type) []*ServiceRegistryEntry {
 	return d.inner.GetServicesByInterface(interfaceType)
+}
+
+func (d *BaseApplicationDecorator) StartTime() time.Time {
+	return d.inner.StartTime()
 }
 
 // Module access methods

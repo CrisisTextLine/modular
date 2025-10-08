@@ -41,6 +41,11 @@ func Test_ApplicationLifecycle(t *testing.T) {
 			t.Error("Start() did not call Start on second module")
 		}
 
+		// Verify start time was recorded
+		if app.StartTime().IsZero() {
+			t.Error("Start() did not record start time")
+		}
+
 		// Test Stop
 		if err := app.Stop(); err != nil {
 			t.Errorf("Stop() error = %v, expected no error", err)
@@ -104,5 +109,47 @@ func Test_ApplicationLifecycle(t *testing.T) {
 		if err := app.Stop(); err == nil {
 			t.Error("Stop() expected error for failing module, got nil")
 		}
+	})
+}
+
+// Test_ApplicationStartTime tests the StartTime method
+func Test_ApplicationStartTime(t *testing.T) {
+	t.Run("StartTime before Start", func(t *testing.T) {
+		app := &StdApplication{
+			cfgProvider:    NewStdConfigProvider(testCfg{Str: "test"}),
+			cfgSections:    make(map[string]ConfigProvider),
+			svcRegistry:    make(ServiceRegistry),
+			moduleRegistry: make(ModuleRegistry),
+			logger:         &logger{t},
+		}
+
+		// StartTime should return zero time before Start is called
+		if !app.StartTime().IsZero() {
+			t.Error("StartTime() should return zero time before Start is called")
+		}
+	})
+
+	t.Run("StartTime after Start", func(t *testing.T) {
+		app := &StdApplication{
+			cfgProvider:    NewStdConfigProvider(testCfg{Str: "test"}),
+			cfgSections:    make(map[string]ConfigProvider),
+			svcRegistry:    make(ServiceRegistry),
+			moduleRegistry: make(ModuleRegistry),
+			logger:         &logger{t},
+		}
+
+		// Start the application
+		if err := app.Start(); err != nil {
+			t.Fatalf("Start() error = %v, expected no error", err)
+		}
+
+		// StartTime should return a non-zero time after Start is called
+		startTime := app.StartTime()
+		if startTime.IsZero() {
+			t.Error("StartTime() should return non-zero time after Start is called")
+		}
+
+		// Stop the application for cleanup
+		_ = app.Stop()
 	})
 }

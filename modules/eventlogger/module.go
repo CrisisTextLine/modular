@@ -114,6 +114,7 @@ package eventlogger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -122,6 +123,9 @@ import (
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
+
+// ErrQueueCorruption indicates the event queue is in an invalid state
+var ErrQueueCorruption = errors.New("event queue corruption: empty queue marked as full")
 
 // ModuleName is the unique identifier for the eventlogger module.
 const ModuleName = "eventlogger"
@@ -621,10 +625,10 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 						m.logger.Error("Event queue corruption detected",
 							"queue_length", len(m.eventQueue),
 							"queue_max_size", m.queueMaxSize,
-							"error", "empty queue marked as full")
+							"error", ErrQueueCorruption.Error())
 					}
-					queueResult = fmt.Errorf("event queue corruption: empty queue (len=%d) marked as full (max=%d)",
-						len(m.eventQueue), m.queueMaxSize)
+					queueResult = fmt.Errorf("%w: len=%d, max=%d",
+						ErrQueueCorruption, len(m.eventQueue), m.queueMaxSize)
 					return
 				}
 			}

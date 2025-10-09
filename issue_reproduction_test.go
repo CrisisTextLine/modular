@@ -58,7 +58,7 @@ func TestIssueReproduction(t *testing.T) {
 		// Configure feeders WITH PRIORITY: YAML has higher priority
 		cfg := &TestConfig{}
 		config := NewConfig()
-		config.AddFeeder(feeders.NewEnvFeeder().WithPriority(50))      // Lower priority
+		config.AddFeeder(feeders.NewEnvFeeder().WithPriority(50))           // Lower priority
 		config.AddFeeder(feeders.NewYamlFeeder(yamlPath).WithPriority(100)) // Higher priority
 		config.AddStructKey("_main", cfg)
 

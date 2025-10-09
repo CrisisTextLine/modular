@@ -119,16 +119,19 @@ run_with_nats() {
     # - 130: Process was terminated by SIGINT (128 + 2)
     # - 137: Process was killed by SIGKILL (128 + 9)
     # - 143: Process was terminated by SIGTERM (128 + 15)
-    # We accept 0, 124, 130, 137, and 143 as success (expected termination paths)
-    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 124 ] || [ $EXIT_CODE -eq 130 ] || [ $EXIT_CODE -eq 137 ] || [ $EXIT_CODE -eq 143 ]; then
-        echo ""
-        echo -e "${GREEN}✅ Demo completed successfully${NC}"
-        return 0
-    else
-        echo ""
-        echo -e "${RED}❌ Demo failed with exit code $EXIT_CODE${NC}"
-        return 1
-    fi
+    # We accept these as success (expected termination paths)
+    case $EXIT_CODE in
+        0|124|130|137|143)
+            echo ""
+            echo -e "${GREEN}✅ Demo completed successfully${NC}"
+            return 0
+            ;;
+        *)
+            echo ""
+            echo -e "${RED}❌ Demo failed with exit code $EXIT_CODE${NC}"
+            return 1
+            ;;
+    esac
 }
 
 # Function to cleanup everything

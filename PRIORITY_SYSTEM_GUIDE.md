@@ -235,7 +235,7 @@ A: Original order is preserved (stable sort). Later feeder wins.
 **Q: Does this work with module-specific configuration?**  
 A: Yes, priority applies to all configuration feeding, including module configs.
 
-**Q: Can I change priority after creating a feeder?**  
+**Q: Can I change priority after creating a feeder?**
 A: Yes, call `WithPriority()` again. It returns the feeder for chaining.
 
 ## Troubleshooting

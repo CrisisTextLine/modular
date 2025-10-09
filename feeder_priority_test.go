@@ -294,3 +294,166 @@ func TestFeederPriorityBackwardCompatibility(t *testing.T) {
 		}
 	})
 }
+
+// TestAffixedEnvFeederPriority tests the AffixedEnvFeeder priority functionality
+func TestAffixedEnvFeederPriority(t *testing.T) {
+	type TestConfig struct {
+		APIKey string `env:"API_KEY"`
+	}
+
+	t.Run("affixed_env_feeder_with_priority", func(t *testing.T) {
+		// Set up environment variable with prefix
+		t.Setenv("PREFIX_API_KEY", "prefixed-value")
+		t.Setenv("API_KEY", "plain-value")
+
+		// Create YAML config
+		yamlContent := `apiKey: "yaml-value"`
+		yamlPath := t.TempDir() + "/config.yaml"
+		if err := os.WriteFile(yamlPath, []byte(yamlContent), 0644); err != nil {
+			t.Fatalf("Failed to write YAML file: %v", err)
+		}
+
+		// Test 1: AffixedEnvFeeder with higher priority should win
+		testFeeders := []Feeder{
+			feeders.NewYamlFeeder(yamlPath).WithPriority(50),                      // Lower priority
+			feeders.NewAffixedEnvFeeder("PREFIX_", "").WithPriority(100),          // Higher priority - should win
+		}
+
+		cfg := &TestConfig{}
+		config := NewConfig()
+		for _, feeder := range testFeeders {
+			config.AddFeeder(feeder)
+		}
+		config.AddStructKey("_main", cfg)
+
+		if err := config.Feed(); err != nil {
+			t.Fatalf("Failed to feed config: %v", err)
+		}
+
+		// AffixedEnvFeeder should win due to higher priority
+		if cfg.APIKey != "prefixed-value" {
+			t.Errorf("Expected AffixedEnvFeeder value 'prefixed-value', got '%s'", cfg.APIKey)
+		}
+	})
+
+	t.Run("affixed_env_feeder_builder_pattern", func(t *testing.T) {
+		// Test that the builder pattern works correctly
+		t.Setenv("PREFIX_API_KEY", "builder-test")
+
+		// This is the proper way to use WithPriority with AffixedEnvFeeder
+		feeder := feeders.NewAffixedEnvFeeder("PREFIX_", "").WithPriority(100)
+
+		// Verify priority was set
+		prioritized, ok := interface{}(feeder).(PrioritizedFeeder)
+		if !ok {
+			t.Fatal("AffixedEnvFeeder does not implement PrioritizedFeeder interface")
+		}
+
+		if prioritized.Priority() != 100 {
+			t.Errorf("Expected priority 100, got %d", prioritized.Priority())
+		}
+
+		// Test feeding
+		cfg := &TestConfig{}
+		if err := feeder.Feed(cfg); err != nil {
+			t.Fatalf("Failed to feed config: %v", err)
+		}
+
+		if cfg.APIKey != "builder-test" {
+			t.Errorf("Expected 'builder-test', got '%s'", cfg.APIKey)
+		}
+	})
+
+	t.Run("affixed_env_feeder_chaining", func(t *testing.T) {
+		// Test that chaining works as expected - this is the correct usage pattern
+		t.Setenv("TEST_API_KEY_PROD", "chained-value")
+
+		cfg := &TestConfig{}
+		config := NewConfig()
+
+		// Correct: Chain directly when adding to config
+		config.AddFeeder(feeders.NewAffixedEnvFeeder("TEST_", "_PROD").WithPriority(200))
+		config.AddStructKey("_main", cfg)
+
+		if err := config.Feed(); err != nil {
+			t.Fatalf("Failed to feed config: %v", err)
+		}
+
+		if cfg.APIKey != "chained-value" {
+			t.Errorf("Expected 'chained-value', got '%s'", cfg.APIKey)
+		}
+	})
+}
+
+// TestTenantAffixedEnvFeederPriority tests the TenantAffixedEnvFeeder priority functionality
+func TestTenantAffixedEnvFeederPriority(t *testing.T) {
+	type TestConfig struct {
+		APIKey string `env:"API_KEY"`
+	}
+
+	t.Run("tenant_affixed_env_feeder_with_priority", func(t *testing.T) {
+		// Set up environment variable with tenant prefix
+		t.Setenv("TENANT1_API_KEY", "tenant1-value")
+		t.Setenv("API_KEY", "plain-value")
+
+		// Create YAML config
+		yamlContent := `apiKey: "yaml-value"`
+		yamlPath := t.TempDir() + "/config.yaml"
+		if err := os.WriteFile(yamlPath, []byte(yamlContent), 0644); err != nil {
+			t.Fatalf("Failed to write YAML file: %v", err)
+		}
+
+		// Create tenant affixed feeder that adds "TENANT1_" prefix
+		tenantFeeder := feeders.NewTenantAffixedEnvFeeder(
+			func(tenantID string) string { return "TENANT1_" },
+			func(tenantID string) string { return "" },
+		).WithPriority(100)
+
+		// Set the prefix before using
+		tenantFeeder.SetPrefixFunc("tenant1")
+
+		// Test priority was set correctly
+		prioritized, ok := interface{}(tenantFeeder).(PrioritizedFeeder)
+		if !ok {
+			t.Fatal("TenantAffixedEnvFeeder does not implement PrioritizedFeeder interface")
+		}
+
+		if prioritized.Priority() != 100 {
+			t.Errorf("Expected priority 100, got %d", prioritized.Priority())
+		}
+
+		// Test with config
+		cfg := &TestConfig{}
+		config := NewConfig()
+		config.AddFeeder(feeders.NewYamlFeeder(yamlPath).WithPriority(50))
+		config.AddFeeder(tenantFeeder)
+		config.AddStructKey("_main", cfg)
+
+		if err := config.Feed(); err != nil {
+			t.Fatalf("Failed to feed config: %v", err)
+		}
+
+		// TenantAffixedEnvFeeder should win due to higher priority
+		if cfg.APIKey != "tenant1-value" {
+			t.Errorf("Expected TenantAffixedEnvFeeder value 'tenant1-value', got '%s'", cfg.APIKey)
+		}
+	})
+
+	t.Run("tenant_affixed_env_feeder_priority_chaining", func(t *testing.T) {
+		// Verify that WithPriority returns the same feeder for chaining
+		feeder := feeders.NewTenantAffixedEnvFeeder(
+			func(tenantID string) string { return "PREFIX_" },
+			func(tenantID string) string { return "" },
+		)
+
+		chainedFeeder := feeder.WithPriority(200)
+
+		if chainedFeeder != feeder {
+			t.Error("WithPriority should return the same feeder instance for chaining")
+		}
+
+		if chainedFeeder.Priority() != 200 {
+			t.Errorf("Expected priority 200, got %d", chainedFeeder.Priority())
+		}
+	})
+}

@@ -109,10 +109,15 @@ run_with_nats() {
     # Send SIGINT for graceful shutdown, then SIGKILL if it doesn't respond
     timeout -s INT -k 10s 15s ./nats-demo
     EXIT_CODE=$?
-    
-    # timeout returns 124 if it had to kill the process, 0 if process exited cleanly
-    # We accept both as the demo may complete or be interrupted
-    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 124 ] || [ $EXIT_CODE -eq 137 ]; then
+
+    # timeout returns various exit codes:
+    # - 0: Process exited cleanly before timeout
+    # - 124: Process was terminated by timeout with default signal
+    # - 130: Process was terminated by SIGINT (128 + 2)
+    # - 137: Process was killed by SIGKILL (128 + 9)
+    # - 143: Process was terminated by SIGTERM (128 + 15)
+    # We accept 0, 124, 130, 137, and 143 as success (expected termination paths)
+    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 124 ] || [ $EXIT_CODE -eq 130 ] || [ $EXIT_CODE -eq 137 ] || [ $EXIT_CODE -eq 143 ]; then
         echo ""
         echo -e "${GREEN}✅ Demo completed successfully${NC}"
         return 0

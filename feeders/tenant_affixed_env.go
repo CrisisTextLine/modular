@@ -19,9 +19,9 @@ type TenantAffixedEnvFeeder struct {
 // The prefix function is used to modify the prefix of the environment variables
 // The suffix function is used to modify the suffix of the environment variables
 func NewTenantAffixedEnvFeeder(prefix, suffix func(string) string) *TenantAffixedEnvFeeder {
-	affixedFeeder := NewAffixedEnvFeeder("", "") // Initialize with empty prefix and suffix
+	affixedFeeder := NewAffixedEnvFeeder("", "") // Returns *AffixedEnvFeeder
 	result := TenantAffixedEnvFeeder{
-		AffixedEnvFeeder: &affixedFeeder, // Take address of the value
+		AffixedEnvFeeder: affixedFeeder,
 		verboseDebug:     false,
 		logger:           nil,
 	}
@@ -80,6 +80,24 @@ func (f *TenantAffixedEnvFeeder) SetFieldTracker(tracker FieldTracker) {
 	if f.AffixedEnvFeeder != nil {
 		f.AffixedEnvFeeder.SetFieldTracker(tracker)
 	}
+}
+
+// WithPriority sets the priority for this feeder and returns the feeder for chaining.
+// Higher priority values mean the feeder will be applied later, allowing it to override
+// values from lower priority feeders.
+func (f *TenantAffixedEnvFeeder) WithPriority(priority int) *TenantAffixedEnvFeeder {
+	if f.AffixedEnvFeeder != nil {
+		f.AffixedEnvFeeder.WithPriority(priority)
+	}
+	return f
+}
+
+// Priority returns the priority value for this feeder.
+func (f *TenantAffixedEnvFeeder) Priority() int {
+	if f.AffixedEnvFeeder != nil {
+		return f.AffixedEnvFeeder.Priority()
+	}
+	return 0
 }
 
 // FeedKey implements the ComplexFeeder interface for tenant-specific feeding

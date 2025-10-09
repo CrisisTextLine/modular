@@ -608,16 +608,25 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 					// Remove oldest event and add new one at the end
 					// Use slice reslicing to drop first element, then append new event
 					m.eventQueue = append(m.eventQueue[1:], event)
+					if m.logger != nil {
+						m.logger.Debug("Event queue full, dropped oldest event",
+							"queue_size", m.queueMaxSize, "new_event", event.Type())
+					}
+					queueResult = nil
+					return
 				} else {
-					// Queue is empty but at limit (shouldn't happen, but handle it)
-					m.eventQueue = append(m.eventQueue, event)
+					// This should never happen: queue is at max size but has no elements
+					// This indicates a corrupted state - fail fast with detailed error
+					if m.logger != nil {
+						m.logger.Error("Event queue corruption detected",
+							"queue_length", len(m.eventQueue),
+							"queue_max_size", m.queueMaxSize,
+							"error", "empty queue marked as full")
+					}
+					queueResult = fmt.Errorf("event queue corruption: empty queue (len=%d) marked as full (max=%d)",
+						len(m.eventQueue), m.queueMaxSize)
+					return
 				}
-				if m.logger != nil {
-					m.logger.Debug("Event queue full, dropped oldest event",
-						"queue_size", m.queueMaxSize, "new_event", event.Type())
-				}
-				queueResult = nil
-				return
 			}
 		}
 

@@ -22,8 +22,6 @@ var ErrFieldCannotBeSet = errors.New("field cannot be set")
 var ErrEnvEmptyPrefixAndSuffix = errors.New("env: prefix or suffix cannot be empty")
 
 // AffixedEnvFeeder is a feeder that reads environment variables with a prefix and/or suffix
-//
-//nolint:recvcheck // WithPriority intentionally uses value receiver to maintain backward compatibility
 type AffixedEnvFeeder struct {
 	Prefix       string
 	Suffix       string
@@ -36,8 +34,8 @@ type AffixedEnvFeeder struct {
 }
 
 // NewAffixedEnvFeeder creates a new AffixedEnvFeeder with the specified prefix and suffix
-func NewAffixedEnvFeeder(prefix, suffix string) AffixedEnvFeeder {
-	return AffixedEnvFeeder{
+func NewAffixedEnvFeeder(prefix, suffix string) *AffixedEnvFeeder {
+	return &AffixedEnvFeeder{
 		Prefix:       prefix,
 		Suffix:       suffix,
 		verboseDebug: false,
@@ -47,13 +45,12 @@ func NewAffixedEnvFeeder(prefix, suffix string) AffixedEnvFeeder {
 	}
 }
 
-// WithPriority sets the priority for this feeder and returns a pointer to the feeder for chaining.
+// WithPriority sets the priority for this feeder and returns the feeder for chaining.
 // Higher priority values mean the feeder will be applied later, allowing it to override
 // values from lower priority feeders.
-// Note: This method returns a pointer to allow method chaining and priority modification.
-func (f AffixedEnvFeeder) WithPriority(priority int) *AffixedEnvFeeder {
+func (f *AffixedEnvFeeder) WithPriority(priority int) *AffixedEnvFeeder {
 	f.priority = priority
-	return &f
+	return f
 }
 
 // Priority returns the priority value for this feeder.

@@ -346,7 +346,8 @@ jobs:
               echo "Docker available, testing with NATS service"
               
               # Run the demo using the script which displays output
-              if timeout 60s ./run-demo.sh run; then
+              # Increased timeout to 120s to account for Docker image pull time in CI
+              if timeout 120s ./run-demo.sh run; then
                 echo "✅ nats-eventbus demo completed successfully with NATS"
                 # Clean up NATS container
                 ./run-demo.sh cleanup 2>/dev/null || true

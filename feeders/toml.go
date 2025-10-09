@@ -18,6 +18,7 @@ type TomlFeeder struct {
 		Debug(msg string, args ...any)
 	}
 	fieldTracker FieldTracker
+	priority     int
 }
 
 // NewTomlFeeder creates a new TomlFeeder that reads from the specified TOML file
@@ -27,7 +28,21 @@ func NewTomlFeeder(filePath string) *TomlFeeder {
 		verboseDebug: false,
 		logger:       nil,
 		fieldTracker: nil,
+		priority:     0, // Default priority
 	}
+}
+
+// WithPriority sets the priority for this feeder and returns the feeder for chaining.
+// Higher priority values mean the feeder will be applied later, allowing it to override
+// values from lower priority feeders.
+func (t *TomlFeeder) WithPriority(priority int) *TomlFeeder {
+	t.priority = priority
+	return t
+}
+
+// Priority returns the priority value for this feeder.
+func (t *TomlFeeder) Priority() int {
+	return t.priority
 }
 
 // SetVerboseDebug enables or disables verbose debug logging

@@ -13,6 +13,7 @@ type EnvFeeder struct {
 		Debug(msg string, args ...any)
 	}
 	fieldTracker FieldTracker
+	priority     int
 }
 
 // NewEnvFeeder creates a new EnvFeeder that reads from environment variables
@@ -20,7 +21,21 @@ func NewEnvFeeder() *EnvFeeder {
 	return &EnvFeeder{
 		verboseDebug: false,
 		logger:       nil,
+		priority:     0, // Default priority
 	}
+}
+
+// WithPriority sets the priority for this feeder and returns the feeder for chaining.
+// Higher priority values mean the feeder will be applied later, allowing it to override
+// values from lower priority feeders.
+func (f *EnvFeeder) WithPriority(priority int) *EnvFeeder {
+	f.priority = priority
+	return f
+}
+
+// Priority returns the priority value for this feeder.
+func (f *EnvFeeder) Priority() int {
+	return f.priority
 }
 
 // SetVerboseDebug enables or disables verbose debug logging

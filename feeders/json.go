@@ -58,6 +58,7 @@ type JSONFeeder struct {
 		Debug(msg string, args ...any)
 	}
 	fieldTracker FieldTracker
+	priority     int
 }
 
 // NewJSONFeeder creates a new JSONFeeder that reads from the specified JSON file
@@ -67,7 +68,21 @@ func NewJSONFeeder(filePath string) *JSONFeeder {
 		verboseDebug: false,
 		logger:       nil,
 		fieldTracker: nil,
+		priority:     0, // Default priority
 	}
+}
+
+// WithPriority sets the priority for this feeder and returns the feeder for chaining.
+// Higher priority values mean the feeder will be applied later, allowing it to override
+// values from lower priority feeders.
+func (j *JSONFeeder) WithPriority(priority int) *JSONFeeder {
+	j.priority = priority
+	return j
+}
+
+// Priority returns the priority value for this feeder.
+func (j *JSONFeeder) Priority() int {
+	return j.priority
 }
 
 // SetVerboseDebug enables or disables verbose debug logging

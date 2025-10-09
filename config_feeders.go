@@ -50,6 +50,36 @@ type ModuleAwareFeeder interface {
 	FeedWithModuleContext(structure interface{}, moduleName string) error
 }
 
+// PrioritizedFeeder extends the Feeder interface with priority control.
+// Feeders with higher priority values will be applied later, allowing them to override
+// values set by lower priority feeders. This enables explicit control over configuration
+// precedence when using multiple feeders.
+//
+// Default priority is 0. When feeders have the same priority, they are applied in
+// the order they were added (maintaining backward compatibility).
+//
+// All standard feeders implement this interface and provide a WithPriority() method
+// for setting the priority value using the builder pattern:
+//
+//	feeders.NewYamlFeeder("config.yaml").WithPriority(100)  // High priority
+//	feeders.NewEnvFeeder().WithPriority(50)                 // Lower priority
+//
+// In this example, YAML configuration will override environment variables because
+// it has higher priority.
+//
+// Note: WithPriority() is not part of this interface because it's a builder method
+// that returns the concrete feeder type for method chaining. All standard feeders
+// (EnvFeeder, YamlFeeder, JSONFeeder, TomlFeeder, DotEnvFeeder, AffixedEnvFeeder,
+// TenantAffixedEnvFeeder) provide this method with a consistent signature:
+//
+//	WithPriority(priority int) *FeederType
+type PrioritizedFeeder interface {
+	Feeder
+	// Priority returns the priority value for this feeder.
+	// Higher values mean higher priority (applied later, overrides earlier feeders).
+	Priority() int
+}
+
 // InstancePrefixFunc is a function that generates a prefix for an instance key
 type InstancePrefixFunc = feeders.InstancePrefixFunc
 

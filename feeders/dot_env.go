@@ -18,6 +18,7 @@ type DotEnvFeeder struct {
 	}
 	fieldTracker FieldTracker
 	envVars      map[string]string // in-memory storage of parsed .env variables
+	priority     int
 }
 
 // NewDotEnvFeeder creates a new DotEnvFeeder that reads from the specified .env file
@@ -28,7 +29,21 @@ func NewDotEnvFeeder(filePath string) *DotEnvFeeder {
 		logger:       nil,
 		fieldTracker: nil,
 		envVars:      make(map[string]string),
+		priority:     0, // Default priority
 	}
+}
+
+// WithPriority sets the priority for this feeder and returns the feeder for chaining.
+// Higher priority values mean the feeder will be applied later, allowing it to override
+// values from lower priority feeders.
+func (f *DotEnvFeeder) WithPriority(priority int) *DotEnvFeeder {
+	f.priority = priority
+	return f
+}
+
+// Priority returns the priority value for this feeder.
+func (f *DotEnvFeeder) Priority() int {
+	return f.priority
 }
 
 // SetVerboseDebug enables or disables verbose debug logging

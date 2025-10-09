@@ -56,6 +56,11 @@ func main() {
 	}
 
 	// Inject feeders per application (avoid global mutation)
+	// Note: You can use .WithPriority(n) to control precedence explicitly:
+	//   - Higher priority = applied later = overrides lower priority
+	//   - Default priority = 0
+	// Example: feeders.NewYamlFeeder("config.yaml").WithPriority(50)
+	//          feeders.NewEnvFeeder().WithPriority(100) // Env overrides YAML
 	if stdApp, ok := app.(*modular.StdApplication); ok {
 		stdApp.SetConfigFeeders([]modular.Feeder{
 			feeders.NewYamlFeeder("config.yaml"),

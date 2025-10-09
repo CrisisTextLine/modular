@@ -105,14 +105,22 @@ run_with_nats() {
     echo -e "${BLUE}📊 Application output (will run for 15 seconds):${NC}"
     echo ""
     
-    # Run the demo for a short time to validate functionality
-    # Using a shorter timeout (5s) for CI to reduce test time and avoid validation issues
-    # The demo will be killed after 5s which is enough to verify pub/sub is working
-    timeout -s KILL 5s ./nats-demo > /dev/null 2>&1 || true
+    # Run the demo for 15 seconds to allow proper pub/sub validation
+    # Send SIGINT for graceful shutdown, then SIGKILL if it doesn't respond
+    timeout -s INT -k 10s 15s ./nats-demo
+    EXIT_CODE=$?
     
-    echo ""
-    echo -e "${GREEN}✅ Demo completed successfully${NC}"
-    return 0
+    # timeout returns 124 if it had to kill the process, 0 if process exited cleanly
+    # We accept both as the demo may complete or be interrupted
+    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 124 ] || [ $EXIT_CODE -eq 137 ]; then
+        echo ""
+        echo -e "${GREEN}✅ Demo completed successfully${NC}"
+        return 0
+    else
+        echo ""
+        echo -e "${RED}❌ Demo failed with exit code $EXIT_CODE${NC}"
+        return 1
+    fi
 }
 
 # Function to cleanup everything

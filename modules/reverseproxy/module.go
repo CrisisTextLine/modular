@@ -272,10 +272,11 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 			DisableCompression:  false,            // Enable compression by default
 		}
 
-		// Configure the HTTP client with the transport and reasonable timeouts
+		// Configure the HTTP client with the transport
+		// Note: No client-level timeout is set here. Instead, we use per-request
+		// context timeouts which allow different routes to have different timeout values.
 		m.httpClient = &http.Client{
 			Transport: transport,
-			Timeout:   30 * time.Second, // Overall request timeout
 		}
 
 		app.Logger().Info("Using default HTTP client (no httpclient service available)")

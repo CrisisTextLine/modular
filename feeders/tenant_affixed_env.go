@@ -19,9 +19,9 @@ type TenantAffixedEnvFeeder struct {
 // The prefix function is used to modify the prefix of the environment variables
 // The suffix function is used to modify the suffix of the environment variables
 func NewTenantAffixedEnvFeeder(prefix, suffix func(string) string) *TenantAffixedEnvFeeder {
-	affixedFeeder := NewAffixedEnvFeeder("", "") // Initialize with empty prefix and suffix (already returns pointer)
+	affixedFeeder := NewAffixedEnvFeeder("", "") // Initialize with empty prefix and suffix
 	result := TenantAffixedEnvFeeder{
-		AffixedEnvFeeder: affixedFeeder, // Already a pointer
+		AffixedEnvFeeder: &affixedFeeder, // Take address of the value
 		verboseDebug:     false,
 		logger:           nil,
 	}

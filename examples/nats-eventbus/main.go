@@ -219,18 +219,21 @@ func main() {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 
+	// Create a stop channel that will be closed to signal all goroutines to stop
+	stopChan := make(chan struct{})
+
 	// Start Publisher Service (Service 1)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runPublisherService(ctx, eventBusService, signalChan, tracker)
+		runPublisherService(ctx, eventBusService, stopChan, tracker)
 	}()
 
 	// Start Subscriber Services (Service 2)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runSubscriberService(ctx, eventBusService, signalChan, tracker)
+		runSubscriberService(ctx, eventBusService, stopChan, tracker)
 	}()
 
 	// Wait for signal or service completion
@@ -240,8 +243,9 @@ func main() {
 	// Wait for shutdown signal
 	<-signalChan
 
-	// Graceful shutdown
+	// Graceful shutdown - close the stop channel to broadcast to all goroutines
 	fmt.Println("\n🛑 Shutting down services...")
+	close(stopChan)
 
 	// Wait for services to complete (they will stop when they receive the signal)
 	wg.Wait()
@@ -275,7 +279,7 @@ func main() {
 }
 
 // runPublisherService simulates a service that publishes events
-func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule, stopChan <-chan os.Signal, tracker *EventTracker) {
+func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule, stopChan <-chan struct{}, tracker *EventTracker) {
 	fmt.Println("📤 Publisher Service started")
 
 	ticker := time.NewTicker(3 * time.Second)
@@ -358,7 +362,7 @@ func runPublisherService(ctx context.Context, eventBus *eventbus.EventBusModule,
 }
 
 // runSubscriberService simulates a service that subscribes to events
-func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule, stopChan <-chan os.Signal, tracker *EventTracker) {
+func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule, stopChan <-chan struct{}, tracker *EventTracker) {
 	fmt.Println("📨 Subscriber Service started")
 
 	// Subscribe to order events

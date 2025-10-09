@@ -204,7 +204,7 @@ func (m *mockApplicationForNilSubjectTest) GetServicesByInterface(interfaceType 
 	return nil
 }
 func (m *mockApplicationForNilSubjectTest) StartTime() time.Time {
-  return time.Time{}
+	return time.Time{}
 }
 func (m *mockApplicationForNilSubjectTest) GetModule(name string) Module {
 	return nil

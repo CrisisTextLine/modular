@@ -343,7 +343,7 @@ func (m *serviceConsumerWithDeclaredRequires) RequiresServices() []ServiceDepend
 	return m.requiredServices
 }
 
-// Test service registration timing without explicit Dependencies() - demonstrates the bug
+// Test service registration timing without explicit Dependencies() - demonstrates the failure scenario
 // When a module accesses services via GetService() during Init() but doesn't declare
 // RequiresServices(), the initialization order may be wrong
 func TestServiceRegistrationTimingWithoutDependencies(t *testing.T) {
@@ -363,7 +363,7 @@ func TestServiceRegistrationTimingWithoutDependencies(t *testing.T) {
 
 	// Create consumer module that requires the service during Init
 	// NOTE: This module does NOT use Dependencies() or RequiresServices()
-	// This is the bug scenario described in the issue!
+	// This demonstrates the failure scenario described in the issue.
 	consumerModule := &serviceConsumerModule{
 		name:            "consumer",
 		requiredService: "test.service",

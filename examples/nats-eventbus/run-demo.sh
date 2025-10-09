@@ -107,8 +107,11 @@ run_with_nats() {
     
     # Run the demo for 15 seconds to allow proper pub/sub validation
     # Send SIGINT for graceful shutdown, then SIGKILL if it doesn't respond
+    # Temporarily disable exit-on-error to capture timeout exit code
+    set +e
     timeout -s INT -k 10s 15s ./nats-demo
     EXIT_CODE=$?
+    set -e
 
     # timeout returns various exit codes:
     # - 0: Process exited cleanly before timeout

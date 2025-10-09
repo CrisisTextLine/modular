@@ -3,6 +3,7 @@ package modular
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 )
@@ -499,6 +500,9 @@ func (c *Config) Feed() error {
 		c.Logger.Debug("Starting config feed process", "structKeysCount", len(c.StructKeys), "feedersCount", len(c.Feeders))
 	}
 
+	// Sort feeders by priority (ascending order, so higher priority applies last)
+	sortedFeeders := c.sortFeedersByPriority()
+
 	// If we have struct keys, feed them directly with field tracking
 	if len(c.StructKeys) > 0 {
 		if c.VerboseDebug && c.Logger != nil {
@@ -511,7 +515,7 @@ func (c *Config) Feed() error {
 				c.Logger.Debug("Processing struct key", "key", key, "targetType", reflect.TypeOf(target))
 			}
 
-			for i, f := range c.Feeders {
+			for i, f := range sortedFeeders {
 				if c.VerboseDebug && c.Logger != nil {
 					c.Logger.Debug("Applying feeder to struct", "key", key, "feederIndex", i, "feederType", fmt.Sprintf("%T", f))
 				}
@@ -610,6 +614,44 @@ func (c *Config) Feed() error {
 	}
 
 	return nil
+}
+
+// sortFeedersByPriority sorts feeders by priority in ascending order.
+// Higher priority values are applied later, allowing them to override lower priority feeders.
+// Feeders without priority (not implementing PrioritizedFeeder) default to priority 0.
+// When priorities are equal, original order is preserved (stable sort).
+func (c *Config) sortFeedersByPriority() []Feeder {
+	// Create a copy of feeders to avoid modifying the original slice
+	sortedFeeders := make([]Feeder, len(c.Feeders))
+	copy(sortedFeeders, c.Feeders)
+
+	// Sort by priority (ascending, so highest priority applies last)
+	sort.SliceStable(sortedFeeders, func(i, j int) bool {
+		priI := 0
+		if pf, ok := sortedFeeders[i].(PrioritizedFeeder); ok {
+			priI = pf.Priority()
+		}
+
+		priJ := 0
+		if pf, ok := sortedFeeders[j].(PrioritizedFeeder); ok {
+			priJ = pf.Priority()
+		}
+
+		return priI < priJ
+	})
+
+	if c.VerboseDebug && c.Logger != nil {
+		c.Logger.Debug("Feeders sorted by priority")
+		for i, f := range sortedFeeders {
+			pri := 0
+			if pf, ok := f.(PrioritizedFeeder); ok {
+				pri = pf.Priority()
+			}
+			c.Logger.Debug("Feeder order", "index", i, "type", fmt.Sprintf("%T", f), "priority", pri)
+		}
+	}
+
+	return sortedFeeders
 }
 
 // ConfigSetup is an interface that configs can implement

@@ -315,8 +315,8 @@ func TestAffixedEnvFeederPriority(t *testing.T) {
 
 		// Test 1: AffixedEnvFeeder with higher priority should win
 		testFeeders := []Feeder{
-			feeders.NewYamlFeeder(yamlPath).WithPriority(50),                      // Lower priority
-			feeders.NewAffixedEnvFeeder("PREFIX_", "").WithPriority(100),          // Higher priority - should win
+			feeders.NewYamlFeeder(yamlPath).WithPriority(50),             // Lower priority
+			feeders.NewAffixedEnvFeeder("PREFIX_", "").WithPriority(100), // Higher priority - should win
 		}
 
 		cfg := &TestConfig{}

@@ -2878,7 +2878,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 					}
 				}
 				// Emit failed event for tenant path when circuit is open
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2890,7 +2890,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 			} else if err != nil {
 				// Some other error occurred
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2915,7 +2915,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 
 			// Emit event based on response status
 			if resp.StatusCode >= 400 {
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2924,7 +2924,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 					"error":   fmt.Sprintf("upstream returned status %d", resp.StatusCode),
 				})
 			} else {
-				m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestProxied, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2939,7 +2939,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 
 			// Emit success or failure event based on status code
 			if sw.status >= 400 {
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2948,7 +2948,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 					"error":   fmt.Sprintf("upstream returned status %d", sw.status),
 				})
 			} else {
-				m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestProxied, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,

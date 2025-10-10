@@ -1897,6 +1897,21 @@ func (m *ReverseProxyModule) selectBackendFromGroup(ctx context.Context, group s
 	return selected, idx, len(backends)
 }
 
+// sanitizeForLogging removes newline and carriage return characters from a string
+// to prevent log injection attacks
+func sanitizeForLogging(s string) string {
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
+}
+
+// obfuscateTenantID creates a reproducible hash of a tenant ID for logging purposes,
+// allowing operators to correlate requests by tenant without exposing the raw tenant ID
+func obfuscateTenantID(tenantID modular.TenantID) string {
+	hash := sha256.Sum256([]byte(tenantID))
+	return hex.EncodeToString(hash[:8]) // Use first 8 bytes for brevity
+}
+
 // Helper function to correctly join URL paths
 func singleJoiningSlash(a, b string) string {
 	aslash := strings.HasSuffix(a, "/")
@@ -2793,10 +2808,12 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 
 		// Debug timeout configuration
 		if m.app != nil && m.app.Logger() != nil {
+			safePath := sanitizeForLogging(r.URL.Path)
+			obfuscatedTenantID := obfuscateTenantID(tenantID)
 			m.app.Logger().Info("Request timeout configuration",
-				"path", r.URL.Path,
+				"path", safePath,
 				"backend", backend,
-				"tenant", tenantID,
+				"tenant_hash", obfuscatedTenantID,
 				"timeout", requestTimeout,
 				"timeout_source", timeoutSource)
 		}

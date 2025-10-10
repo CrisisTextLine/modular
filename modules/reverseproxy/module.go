@@ -2763,6 +2763,49 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 			"tenant":  string(tenantID),
 		})
 
+		// Apply timeout configuration - check for route-specific timeout first
+		var requestTimeout time.Duration
+		var timeoutSource string
+		if m.config.RouteConfigs != nil {
+			// Find matching route config by checking all patterns
+			for routePattern, routeConfig := range m.config.RouteConfigs {
+				if m.matchesRoute(r.URL.Path, routePattern) && routeConfig.Timeout > 0 {
+					requestTimeout = routeConfig.Timeout
+					timeoutSource = fmt.Sprintf("route %s", routePattern)
+					break
+				}
+			}
+		}
+
+		// Fall back to global timeout if no route-specific timeout
+		if requestTimeout == 0 {
+			if m.config.GlobalTimeout > 0 {
+				requestTimeout = m.config.GlobalTimeout
+				timeoutSource = "global"
+			} else if m.config.RequestTimeout > 0 {
+				requestTimeout = m.config.RequestTimeout
+				timeoutSource = "request"
+			} else {
+				requestTimeout = 30 * time.Second // Default fallback
+				timeoutSource = "default"
+			}
+		}
+
+		// Debug timeout configuration
+		if m.app != nil && m.app.Logger() != nil {
+			m.app.Logger().Info("Request timeout configuration",
+				"path", r.URL.Path,
+				"backend", backend,
+				"tenant", tenantID,
+				"timeout", requestTimeout,
+				"timeout_source", timeoutSource)
+		}
+
+		// Create context with timeout
+		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+		defer cancel()
+		r = r.WithContext(ctx)
+
 		// Record request to backend for health checking
 		if m.healthChecker != nil {
 			m.healthChecker.RecordBackendRequest(backend)

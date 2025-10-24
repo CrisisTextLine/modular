@@ -11,15 +11,15 @@ type Option func(*ApplicationBuilder) error
 
 // ApplicationBuilder helps construct applications with various decorators and options
 type ApplicationBuilder struct {
-	baseApp          Application
-	logger           Logger
-	configProvider   ConfigProvider
-	modules          []Module
-	configDecorators []ConfigDecorator
-	observers        []ObserverFunc
-	tenantLoader     TenantLoader
-	enableObserver   bool
-	enableTenant     bool
+	baseApp           Application
+	logger            Logger
+	configProvider    ConfigProvider
+	modules           []Module
+	configDecorators  []ConfigDecorator
+	observers         []ObserverFunc
+	tenantLoader      TenantLoader
+	enableObserver    bool
+	enableTenant      bool
 	configLoadedHooks []func(Application) error // Hooks to run after config loading
 }
 
@@ -173,19 +173,20 @@ func WithTenantAware(loader TenantLoader) Option {
 // Multiple hooks can be registered and will be executed in registration order.
 //
 // Example:
-//   app, err := modular.NewApplication(
-//       modular.WithLogger(defaultLogger),
-//       modular.WithConfigProvider(configProvider),
-//       modular.WithOnConfigLoaded(func(app modular.Application) error {
-//           config := app.ConfigProvider().GetConfig().(*AppConfig)
-//           if config.LogFormat == "json" {
-//               newLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-//               app.SetLogger(newLogger)
-//           }
-//           return nil
-//       }),
-//       modular.WithModules(modules...),
-//   )
+//
+//	app, err := modular.NewApplication(
+//	    modular.WithLogger(defaultLogger),
+//	    modular.WithConfigProvider(configProvider),
+//	    modular.WithOnConfigLoaded(func(app modular.Application) error {
+//	        config := app.ConfigProvider().GetConfig().(*AppConfig)
+//	        if config.LogFormat == "json" {
+//	            newLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+//	            app.SetLogger(newLogger)
+//	        }
+//	        return nil
+//	    }),
+//	    modular.WithModules(modules...),
+//	)
 func WithOnConfigLoaded(hooks ...func(Application) error) Option {
 	return func(b *ApplicationBuilder) error {
 		b.configLoadedHooks = append(b.configLoadedHooks, hooks...)

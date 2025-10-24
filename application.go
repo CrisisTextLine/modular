@@ -234,7 +234,7 @@ type Application interface {
 	// Example:
 	//   app.OnConfigLoaded(func(app Application) error {
 	//       config := app.ConfigProvider().GetConfig().(*AppConfig)
-	//       
+	//
 	//       // Reconfigure logger based on loaded config
 	//       var handler slog.Handler
 	//       if config.LogFormat == "json" {
@@ -242,7 +242,7 @@ type Application interface {
 	//       } else {
 	//           handler = slog.NewTextHandler(os.Stdout, nil)
 	//       }
-	//       
+	//
 	//       newLogger := slog.New(handler)
 	//       app.SetLogger(newLogger)
 	//       return nil
@@ -330,11 +330,11 @@ type StdApplication struct {
 	logger              Logger
 	ctx                 context.Context
 	cancel              context.CancelFunc
-	tenantService       TenantService // Added tenant service reference
-	verboseConfig       bool          // Flag for verbose configuration debugging
-	initialized         bool          // Tracks whether Init has already been successfully executed
-	configFeeders       []Feeder      // Optional per-application feeders (override global ConfigFeeders if non-nil)
-	startTime           time.Time     // Tracks when the application was started
+	tenantService       TenantService             // Added tenant service reference
+	verboseConfig       bool                      // Flag for verbose configuration debugging
+	initialized         bool                      // Tracks whether Init has already been successfully executed
+	configFeeders       []Feeder                  // Optional per-application feeders (override global ConfigFeeders if non-nil)
+	startTime           time.Time                 // Tracks when the application was started
 	configLoadedHooks   []func(Application) error // Hooks to run after config loading but before module initialization
 }
 
@@ -379,7 +379,7 @@ func NewStdApplication(cp ConfigProvider, logger Logger) Application {
 		svcRegistry:         enhancedRegistry.AsServiceRegistry(), // Backwards compatible view
 		moduleRegistry:      make(ModuleRegistry),
 		logger:              logger,
-		configFeeders:       nil,                        // default to nil to signal use of package-level ConfigFeeders
+		configFeeders:       nil,                                // default to nil to signal use of package-level ConfigFeeders
 		configLoadedHooks:   make([]func(Application) error, 0), // Initialize hooks slice
 	}
 

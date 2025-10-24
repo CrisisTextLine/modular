@@ -186,3 +186,8 @@ func (d *BaseApplicationDecorator) GetObservers() []ObserverInfo {
 	}
 	return nil
 }
+
+// OnConfigLoaded forwards the hook registration to the inner application
+func (d *BaseApplicationDecorator) OnConfigLoaded(hook func(Application) error) {
+	d.inner.OnConfigLoaded(hook)
+}

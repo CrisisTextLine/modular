@@ -209,7 +209,7 @@ func TestCircuitBreakerWithRequestTimeoutMethod(t *testing.T) {
 	// Create a circuit breaker with default config
 	cb := NewCircuitBreaker("test-backend", nil)
 
-	// Default timeout should be 5s (from NewCircuitBreaker)
+	// Verify the initial request timeout value before calling WithRequestTimeout
 	assert.Equal(t, 5*time.Second, cb.requestTimeout)
 
 	// Use WithRequestTimeout to change it

@@ -267,6 +267,7 @@ type CircuitBreakerConfig struct {
 	FailureThreshold        int           `json:"failure_threshold" yaml:"failure_threshold" toml:"failure_threshold" env:"FAILURE_THRESHOLD"`
 	SuccessThreshold        int           `json:"success_threshold" yaml:"success_threshold" toml:"success_threshold" env:"SUCCESS_THRESHOLD"`
 	OpenTimeout             time.Duration `json:"open_timeout" yaml:"open_timeout" toml:"open_timeout" env:"OPEN_TIMEOUT"`
+	RequestTimeout          time.Duration `json:"request_timeout" yaml:"request_timeout" toml:"request_timeout" env:"REQUEST_TIMEOUT"`
 	HalfOpenAllowedRequests int           `json:"half_open_allowed_requests" yaml:"half_open_allowed_requests" toml:"half_open_allowed_requests" env:"HALF_OPEN_ALLOWED_REQUESTS"`
 	WindowSize              int           `json:"window_size" yaml:"window_size" toml:"window_size" env:"WINDOW_SIZE"`
 	SuccessRateThreshold    float64       `json:"success_rate_threshold" yaml:"success_rate_threshold" toml:"success_rate_threshold" env:"SUCCESS_RATE_THRESHOLD"`

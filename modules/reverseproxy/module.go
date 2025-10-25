@@ -380,6 +380,11 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 				cbConfig = m.config.CircuitBreakerConfig
 			}
 
+			// Use module's request timeout if circuit breaker config doesn't specify one
+			if cbConfig.RequestTimeout == 0 && m.config.RequestTimeout > 0 {
+				cbConfig.RequestTimeout = m.config.RequestTimeout
+			}
+
 			// Create circuit breaker for this backend
 			cb := NewCircuitBreakerWithConfig(backendID, cbConfig, m.metrics)
 			cb.eventEmitter = func(eventType string, data map[string]interface{}) {
@@ -2375,6 +2380,11 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 			if existingCB, exists := m.circuitBreakers[finalBackend]; exists {
 				cb = existingCB
 			} else {
+				// Use module's request timeout if circuit breaker config doesn't specify one
+				if cbConfig.RequestTimeout == 0 && m.config.RequestTimeout > 0 {
+					cbConfig.RequestTimeout = m.config.RequestTimeout
+				}
+
 				// Create new circuit breaker with config and store for reuse
 				cb = NewCircuitBreakerWithConfig(finalBackend, cbConfig, m.metrics)
 				cb.eventEmitter = func(eventType string, data map[string]interface{}) { //nolint:contextcheck // circuit breaker events occur outside request handling
@@ -2760,6 +2770,11 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 		if existingCB, exists := m.circuitBreakers[backend]; exists {
 			cb = existingCB
 		} else {
+			// Use module's request timeout if circuit breaker config doesn't specify one
+			if cbConfig.RequestTimeout == 0 && m.config.RequestTimeout > 0 {
+				cbConfig.RequestTimeout = m.config.RequestTimeout
+			}
+
 			// Create new circuit breaker with config and store for reuse
 			cb = NewCircuitBreakerWithConfig(backend, cbConfig, m.metrics)
 			cb.eventEmitter = func(eventType string, data map[string]interface{}) {

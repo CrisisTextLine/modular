@@ -85,7 +85,7 @@ func NewCircuitBreaker(backendName string, metricsCollector *MetricsCollector) *
 
 // NewCircuitBreakerWithConfig creates a new CircuitBreaker with custom settings.
 func NewCircuitBreakerWithConfig(backendName string, config CircuitBreakerConfig, metricsCollector *MetricsCollector) *CircuitBreaker {
-	// Use configured request timeout, default to DefaultRequestTimeout if not set
+	// Use configured request timeout; if config.RequestTimeout is zero (not configured), use DefaultRequestTimeout
 	requestTimeout := config.RequestTimeout
 	if requestTimeout == 0 {
 		requestTimeout = DefaultRequestTimeout

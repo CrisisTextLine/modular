@@ -212,3 +212,4 @@ func (m *mockApplicationForNilSubjectTest) GetModule(name string) Module {
 func (m *mockApplicationForNilSubjectTest) GetAllModules() map[string]Module {
 	return nil
 }
+func (m *mockApplicationForNilSubjectTest) OnConfigLoaded(hook func(Application) error) {}

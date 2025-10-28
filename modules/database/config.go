@@ -71,4 +71,9 @@ type AWSIAMAuthConfig struct {
 	// ConnectionTimeout specifies the timeout for database connection tests (in seconds)
 	// Default is 5 seconds
 	ConnectionTimeout time.Duration `json:"connection_timeout" yaml:"connection_timeout" env:"AWS_IAM_AUTH_CONNECTION_TIMEOUT" default:"5s"`
+
+	// ConnectionCloseGracePeriod specifies the grace period to wait before closing old connections after token refresh
+	// This allows in-flight queries to complete before the old connection pool is closed
+	// Default is 5 seconds
+	ConnectionCloseGracePeriod time.Duration `json:"connection_close_grace_period" yaml:"connection_close_grace_period" env:"AWS_IAM_AUTH_CONNECTION_CLOSE_GRACE_PERIOD" default:"5s"`
 }

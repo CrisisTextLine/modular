@@ -47,7 +47,7 @@ eventlogger:
     - module.registered
     - service.registered
     - application.started
-  eventTypeBlacklist:              # Optional: Blacklist - Exclude specific event types (applied after whitelist)
+  eventTypeBlacklist:              # Optional: Blacklist - Exclude specific event types (overrides whitelist)
     - com.modular.eventlogger.event.received
     - com.modular.eventlogger.output.success
   excludeOwnEvents: false          # Automatically exclude EventLogger's own operational events

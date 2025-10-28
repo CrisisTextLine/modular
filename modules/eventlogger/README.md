@@ -43,10 +43,14 @@ eventlogger:
   startupSync: false               # Emit startup operational events synchronously (no async delay)
   shutdownEmitStopped: true        # Emit logger.stopped operational event on Stop()
   shutdownDrainTimeout: 2s         # Max time to drain buffered events on Stop (0 = wait forever)
-  eventTypeFilters:                # Optional: Only log specific event types
+  eventTypeFilters:                # Optional: Whitelist - Only log specific event types
     - module.registered
     - service.registered
     - application.started
+  eventTypeBlacklist:              # Optional: Blacklist - Exclude specific event types (applied after whitelist)
+    - com.modular.eventlogger.event.received
+    - com.modular.eventlogger.output.success
+  excludeOwnEvents: false          # Automatically exclude EventLogger's own operational events
   outputTargets:
     - type: console                # Console output
       level: INFO
@@ -120,8 +124,8 @@ if err != nil {
 
 ### Event Type Filtering
 
+**Whitelist Filtering** - Only log specific event types:
 ```go
-// Configure to only log specific event types
 config := &eventlogger.EventLoggerConfig{
     EventTypeFilters: []string{
         "module.registered",
@@ -131,6 +135,66 @@ config := &eventlogger.EventLoggerConfig{
     },
 }
 ```
+
+**Blacklist Filtering** - Exclude specific event types:
+```go
+config := &eventlogger.EventLoggerConfig{
+    // Log everything except these specific events
+    EventTypeBlacklist: []string{
+        "com.modular.eventlogger.event.received",
+        "com.modular.eventlogger.event.processed",
+        "com.modular.eventlogger.output.success",
+    },
+}
+```
+
+**Automatic Self-Event Exclusion** - Prevent event amplification by excluding EventLogger's own operational events:
+```go
+config := &eventlogger.EventLoggerConfig{
+    // Automatically exclude EventLogger operational events
+    ExcludeOwnEvents: true,
+}
+```
+
+**Combined Filtering** - Use whitelist and blacklist together:
+```go
+config := &eventlogger.EventLoggerConfig{
+    // First apply whitelist
+    EventTypeFilters: []string{
+        "user.*",           // Allow all user events
+        "order.*",          // Allow all order events
+        "application.*",    // Allow all application events
+    },
+    // Then apply blacklist (takes precedence)
+    EventTypeBlacklist: []string{
+        "user.debug",       // Exclude user.debug even though user.* is whitelisted
+    },
+}
+```
+
+### Preventing Event Amplification
+
+The EventLogger emits operational events about its own processing (event.received, event.processed, output.success, etc.). In high-volume scenarios, these operational events can cause event amplification - where logging 1,000 business events generates 3,000+ operational events, which themselves get logged, creating a feedback loop.
+
+**Option 1: Use excludeOwnEvents** (Recommended for most cases)
+```yaml
+eventlogger:
+  enabled: true
+  excludeOwnEvents: true  # Simple one-line solution
+```
+
+**Option 2: Use Blacklist** (For fine-grained control)
+```yaml
+eventlogger:
+  enabled: true
+  eventTypeBlacklist:
+    - "com.modular.eventlogger.event.received"
+    - "com.modular.eventlogger.event.processed"
+    - "com.modular.eventlogger.output.success"
+    - "com.modular.eventlogger.buffer.full"
+    - "com.modular.eventlogger.event.dropped"
+```
+
 
 ## Output Formats
 
@@ -210,12 +274,24 @@ The module automatically maps event types to appropriate log levels:
 - **INFO**: `module.registered`, `service.registered`, `application.started`, etc.
 - **DEBUG**: `config.loaded`, `config.validated`
 
+## Filter Evaluation Order
+
+When multiple filtering options are configured, they are evaluated in the following order:
+
+1. **Whitelist Filter** (`eventTypeFilters`) - If configured, only events matching the whitelist are considered
+2. **ExcludeOwnEvents** - If enabled, EventLogger's own operational events are filtered out
+3. **Blacklist Filter** (`eventTypeBlacklist`) - If configured, events matching the blacklist are excluded (takes precedence over whitelist)
+4. **Log Level Filter** - Events must meet the minimum log level requirement
+
+**Example**: If an event type is in both the whitelist AND the blacklist, it will be **excluded** (blacklist wins).
+
 ## Performance Considerations
 
 - **Async Processing**: Events are processed asynchronously to avoid blocking the application
 - **Buffering**: Events are buffered in memory before writing to reduce I/O overhead
 - **Error Isolation**: Failures in one output target don't affect others
 - **Graceful Degradation**: Buffer overflow results in dropped events with warnings
+- **Filter Performance**: Event type filters use simple string matching for optimal performance
 
 ### Startup & Shutdown Behavior
 

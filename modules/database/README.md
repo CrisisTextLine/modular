@@ -210,13 +210,13 @@ database:
     postgres_rds:
       driver: "postgres"
       dsn: "postgres://iamuser@mydb.cluster-xyz.us-east-1.rds.amazonaws.com:5432/mydb?sslmode=require"
-      connection_max_lifetime: 480s   # 8 minutes (less than token refresh interval)
+      connection_max_lifetime: 480s   # 8 minutes (less than 10 minute token refresh interval)
       aws_iam_auth:
         enabled: true
         region: "us-east-1"
         db_user: "iamuser"
-        token_refresh_interval: 600            # 10 minutes
-        connection_close_grace_period: 5s      # Grace period for in-flight queries
+        token_refresh_interval: 600            # 10 minutes (600 seconds)
+        connection_close_grace_period: 5s      # 5 seconds grace period for in-flight queries
 ```
 
 **Best Practices:**

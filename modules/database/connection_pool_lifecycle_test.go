@@ -13,56 +13,55 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestLogMessage captures log messages for testing
-type TestLogMessage struct {
+// capturingLogger implements a logger that captures messages for testing
+type capturingLogger struct {
+	mu       sync.Mutex
+	messages []logMessage
+}
+
+type logMessage struct {
 	Level   string
 	Message string
 	Args    []interface{}
 }
 
-// TestingLogger implements a logger that captures messages for testing
-type TestingLogger struct {
-	mu       sync.Mutex
-	messages []TestLogMessage
-}
-
-func NewTestingLogger() *TestingLogger {
-	return &TestingLogger{
-		messages: make([]TestLogMessage, 0),
+func newCapturingLogger() *capturingLogger {
+	return &capturingLogger{
+		messages: make([]logMessage, 0),
 	}
 }
 
-func (l *TestingLogger) Debug(msg string, args ...interface{}) {
+func (l *capturingLogger) Debug(msg string, args ...interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.messages = append(l.messages, TestLogMessage{Level: "DEBUG", Message: msg, Args: args})
+	l.messages = append(l.messages, logMessage{Level: "DEBUG", Message: msg, Args: args})
 }
 
-func (l *TestingLogger) Info(msg string, args ...interface{}) {
+func (l *capturingLogger) Info(msg string, args ...interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.messages = append(l.messages, TestLogMessage{Level: "INFO", Message: msg, Args: args})
+	l.messages = append(l.messages, logMessage{Level: "INFO", Message: msg, Args: args})
 }
 
-func (l *TestingLogger) Warn(msg string, args ...interface{}) {
+func (l *capturingLogger) Warn(msg string, args ...interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.messages = append(l.messages, TestLogMessage{Level: "WARN", Message: msg, Args: args})
+	l.messages = append(l.messages, logMessage{Level: "WARN", Message: msg, Args: args})
 }
 
-func (l *TestingLogger) Error(msg string, args ...interface{}) {
+func (l *capturingLogger) Error(msg string, args ...interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.messages = append(l.messages, TestLogMessage{Level: "ERROR", Message: msg, Args: args})
+	l.messages = append(l.messages, logMessage{Level: "ERROR", Message: msg, Args: args})
 }
 
-func (l *TestingLogger) GetMessages() []TestLogMessage {
+func (l *capturingLogger) getMessages() []logMessage {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return append([]TestLogMessage{}, l.messages...)
+	return append([]logMessage{}, l.messages...)
 }
 
-func (l *TestingLogger) HasMessage(level, substring string) bool {
+func (l *capturingLogger) hasMessage(level, substring string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, msg := range l.messages {
@@ -77,7 +76,7 @@ func (l *TestingLogger) HasMessage(level, substring string) bool {
 // when IAM token is refreshed, allowing in-flight queries to complete
 func TestConnectionPoolGracefulTransition(t *testing.T) {
 	// Use SQLite for testing as it doesn't require external database
-	logger := NewTestingLogger()
+	logger := &testLogger{} // Use existing testLogger from bdd_core_test.go
 
 	config := ConnectionConfig{
 		Driver:                "sqlite",
@@ -167,7 +166,7 @@ func TestGracePeriodConfiguration(t *testing.T) {
 
 // TestTokenRefreshWithSimulatedInFlightQueries tests token refresh with simulated in-flight queries
 func TestTokenRefreshWithSimulatedInFlightQueries(t *testing.T) {
-	logger := NewTestingLogger()
+	logger := newCapturingLogger()
 
 	// Create mock token provider
 	mockProvider := NewMockIAMTokenProviderWithExpiry("initial-token", 5*time.Second)
@@ -236,7 +235,7 @@ func TestTokenRefreshWithSimulatedInFlightQueries(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond)
 
 	// Verify logging messages
-	messages := logger.GetMessages()
+	messages := logger.getMessages()
 	assert.NotEmpty(t, messages, "Should have log messages")
 
 	// Check for specific log messages indicating proper lifecycle
@@ -263,7 +262,7 @@ func TestTokenRefreshWithSimulatedInFlightQueries(t *testing.T) {
 
 // TestOnTokenRefreshErrorHandling tests error handling during token refresh
 func TestOnTokenRefreshErrorHandling(t *testing.T) {
-	logger := NewTestingLogger()
+	logger := newCapturingLogger()
 
 	testCases := []struct {
 		name           string
@@ -311,7 +310,7 @@ func TestOnTokenRefreshErrorHandling(t *testing.T) {
 			serviceImpl.onTokenRefresh("new-token", "test-endpoint")
 
 			// Verify expected behavior
-			messages := logger.GetMessages()
+			messages := logger.getMessages()
 			if tc.shouldLogError {
 				hasError := false
 				for _, msg := range messages {
@@ -328,7 +327,7 @@ func TestOnTokenRefreshErrorHandling(t *testing.T) {
 
 // TestConnectionStatsLogging tests that connection pool stats are logged before closure
 func TestConnectionStatsLogging(t *testing.T) {
-	logger := NewTestingLogger()
+	logger := newCapturingLogger()
 
 	config := ConnectionConfig{
 		Driver: "sqlite",
@@ -370,7 +369,7 @@ func TestConnectionStatsLogging(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Check for connection stats logging
-	messages := logger.GetMessages()
+	messages := logger.getMessages()
 	hasStatsLog := false
 
 	for _, msg := range messages {
@@ -385,14 +384,17 @@ func TestConnectionStatsLogging(t *testing.T) {
 
 // TestDefaultGracePeriod tests that the default grace period is applied when not configured
 func TestDefaultGracePeriod(t *testing.T) {
-	logger := NewTestingLogger()
+	logger := newCapturingLogger()
+
+	// Use a short grace period for testing to keep tests fast
+	testGracePeriod := 100 * time.Millisecond
 
 	config := ConnectionConfig{
 		Driver: "sqlite",
 		DSN:    ":memory:",
 		AWSIAMAuth: &AWSIAMAuthConfig{
-			Enabled: true,
-			// ConnectionCloseGracePeriod not set, should use default
+			Enabled:                    true,
+			ConnectionCloseGracePeriod: testGracePeriod,
 		},
 	}
 
@@ -422,14 +424,75 @@ func TestDefaultGracePeriod(t *testing.T) {
 	err = mockProvider.RefreshToken()
 	require.NoError(t, err)
 
-	// Wait for grace period (default should be 5 seconds)
-	// We'll wait 6 seconds to ensure the grace period completes
-	time.Sleep(6 * time.Second)
+	// Wait for grace period plus a small buffer
+	time.Sleep(testGracePeriod + 50*time.Millisecond)
 
 	duration := time.Since(startTime)
 
-	// Verify logging shows default grace period was used
-	messages := logger.GetMessages()
+	// Verify logging shows configured grace period was used
+	messages := logger.getMessages()
+	hasConfiguredGracePeriod := false
+
+	for _, msg := range messages {
+		if msg.Level == "DEBUG" && strings.Contains(msg.Message, "Waiting grace period") {
+			// Check that grace_period is in the args
+			for i := 0; i < len(msg.Args)-1; i += 2 {
+				if key, ok := msg.Args[i].(string); ok && key == "grace_period" {
+					if gp, ok := msg.Args[i+1].(time.Duration); ok {
+						hasConfiguredGracePeriod = gp == testGracePeriod
+					}
+				}
+			}
+		}
+	}
+
+	assert.True(t, hasConfiguredGracePeriod, "Should use configured grace period")
+	assert.GreaterOrEqual(t, duration.Milliseconds(), testGracePeriod.Milliseconds(), "Should wait at least the configured grace period")
+}
+
+// TestDefaultGracePeriodValue tests that when no grace period is configured, the default (5s) is used
+func TestDefaultGracePeriodValue(t *testing.T) {
+	logger := newCapturingLogger()
+
+	config := ConnectionConfig{
+		Driver: "sqlite",
+		DSN:    ":memory:",
+		AWSIAMAuth: &AWSIAMAuthConfig{
+			Enabled: true,
+			// ConnectionCloseGracePeriod not set, should use default of 5s
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := NewMockIAMTokenProviderWithExpiry("test-token", 5*time.Second)
+
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+
+	serviceImpl := &databaseServiceImpl{
+		config:           config,
+		logger:           logger,
+		ctx:              ctx,
+		cancel:           cancel,
+		awsTokenProvider: mockProvider,
+		endpoint:         "test-endpoint",
+		db:               db,
+	}
+
+	mockProvider.SetTokenRefreshCallback(serviceImpl.onTokenRefresh)
+
+	// Trigger token refresh
+	err = mockProvider.RefreshToken()
+	require.NoError(t, err)
+
+	// Wait a short time for the callback to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify logging shows default grace period (5s) was used
+	messages := logger.getMessages()
 	hasDefaultGracePeriod := false
 
 	for _, msg := range messages {
@@ -446,6 +509,5 @@ func TestDefaultGracePeriod(t *testing.T) {
 		}
 	}
 
-	assert.True(t, hasDefaultGracePeriod, "Should use default grace period of 5 seconds")
-	assert.GreaterOrEqual(t, duration.Seconds(), 5.0, "Should wait at least the default grace period")
+	assert.True(t, hasDefaultGracePeriod, "Should use default grace period of 5 seconds when not configured")
 }

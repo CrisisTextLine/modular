@@ -2793,12 +2793,18 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 			"tenant":  string(tenantID),
 		})
 
+		// Get tenant-specific merged config (fallback to global if not found)
+		tenantCfg := m.config
+		if mergedCfg, exists := m.tenants[tenantID]; exists && mergedCfg != nil {
+			tenantCfg = mergedCfg
+		}
+
 		// Apply timeout configuration - check for route-specific timeout first
 		var requestTimeout time.Duration
 		var timeoutSource string
-		if m.config.RouteConfigs != nil {
+		if tenantCfg.RouteConfigs != nil {
 			// Find matching route config by checking all patterns
-			for routePattern, routeConfig := range m.config.RouteConfigs {
+			for routePattern, routeConfig := range tenantCfg.RouteConfigs {
 				if m.matchesRoute(r.URL.Path, routePattern) && routeConfig.Timeout > 0 {
 					requestTimeout = routeConfig.Timeout
 					timeoutSource = fmt.Sprintf("route %s", routePattern)
@@ -2809,11 +2815,11 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 
 		// Fall back to global timeout if no route-specific timeout
 		if requestTimeout == 0 {
-			if m.config.GlobalTimeout > 0 {
-				requestTimeout = m.config.GlobalTimeout
+			if tenantCfg.GlobalTimeout > 0 {
+				requestTimeout = tenantCfg.GlobalTimeout
 				timeoutSource = "global"
-			} else if m.config.RequestTimeout > 0 {
-				requestTimeout = m.config.RequestTimeout
+			} else if tenantCfg.RequestTimeout > 0 {
+				requestTimeout = tenantCfg.RequestTimeout
 				timeoutSource = "request"
 			} else {
 				requestTimeout = 30 * time.Second // Default fallback

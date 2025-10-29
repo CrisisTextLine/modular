@@ -178,6 +178,8 @@ func TestTenantMetricsPathOverride(t *testing.T) {
 }
 
 // TestTenantFeatureFlagsOverride documents that tenant-specific feature flags are NOT currently merged
+// The mergeConfigs function doesn't perform deep merging of the FeatureFlags.Flags map,
+// resulting in zero values for the entire FeatureFlags struct in the merged configuration.
 // TODO: This is a known limitation that should be addressed in a separate issue
 func TestTenantFeatureFlagsOverride(t *testing.T) {
 	globalConfig := &ReverseProxyConfig{
@@ -202,11 +204,11 @@ func TestTenantFeatureFlagsOverride(t *testing.T) {
 
 	merged := mergeConfigs(globalConfig, tenantConfig)
 
-	// KNOWN LIMITATION: mergeConfigs doesn't currently merge FeatureFlags
-	// The merged config will have zero values for FeatureFlags
+	// KNOWN LIMITATION: mergeConfigs doesn't perform deep merging of FeatureFlags
+	// The merged config will have zero values for the entire FeatureFlags struct
 	assert.False(t, merged.FeatureFlags.Enabled, 
-		"KNOWN LIMITATION: FeatureFlags are not currently merged - this documents the current behavior")
-	t.Log("NOTE: FeatureFlags merging is not implemented. This is a separate issue to be addressed.")
+		"KNOWN LIMITATION: FeatureFlags struct is zero-valued in merged config because deep merging is not implemented")
+	t.Log("NOTE: FeatureFlags deep merging is not implemented. The entire FeatureFlags struct remains zero-valued in merged configs. This is a separate issue to be addressed.")
 }
 
 // TestTenantCircuitBreakerOverride verifies that tenant-specific circuit breaker config overrides global

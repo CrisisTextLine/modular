@@ -129,9 +129,9 @@ func TestTenantRequestTimeoutOverride(t *testing.T) {
 	// CRITICAL TEST: Verify tenant timeout (1s) was used, not global timeout (30s)
 	// Backend sleeps 2.5s, so with 1s timeout it should fail around 1s
 	// If global timeout (30s) was incorrectly used, duration would be ~2.5s
-	assert.True(t, duration < 2*time.Second, 
+	assert.True(t, duration < 2*time.Second,
 		"Expected timeout around 1s (tenant), got %v - tenant timeout not being used!", duration)
-	assert.True(t, duration >= 900*time.Millisecond, 
+	assert.True(t, duration >= 900*time.Millisecond,
 		"Timeout should be at least 900ms, got %v", duration)
 
 	// Status should indicate timeout (504 Gateway Timeout or 502 Bad Gateway)
@@ -154,7 +154,7 @@ func TestTenantCacheTTLOverride(t *testing.T) {
 	merged := mergeConfigs(globalConfig, tenantConfig)
 
 	assert.True(t, merged.CacheEnabled, "Cache should be enabled")
-	assert.Equal(t, 60*time.Second, merged.CacheTTL, 
+	assert.Equal(t, 60*time.Second, merged.CacheTTL,
 		"Merged config should use tenant's 60s CacheTTL, not global 120s")
 }
 
@@ -219,7 +219,7 @@ func TestTenantCircuitBreakerOverride(t *testing.T) {
 	tenantConfig := &ReverseProxyConfig{
 		CircuitBreakerConfig: CircuitBreakerConfig{
 			Enabled:          true,
-			FailureThreshold: 3,             // Override to 3
+			FailureThreshold: 3,                // Override to 3
 			OpenTimeout:      20 * time.Second, // Override to 20s
 		},
 	}
@@ -290,7 +290,7 @@ func TestTenantBackendServicesOverride(t *testing.T) {
 func TestTenantRoutesOverride(t *testing.T) {
 	globalConfig := &ReverseProxyConfig{
 		Routes: map[string]string{
-			"/api/v1/*":   "backend1",
+			"/api/v1/*":    "backend1",
 			"/api/admin/*": "admin",
 		},
 	}

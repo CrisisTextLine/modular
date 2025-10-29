@@ -3329,6 +3329,13 @@ func mergeConfigs(global, tenant *ReverseProxyConfig) *ReverseProxyConfig {
 		merged.RequestTimeout = global.RequestTimeout
 	}
 
+	// Global timeout - prefer tenant's if specified
+	if tenant.GlobalTimeout > 0 {
+		merged.GlobalTimeout = tenant.GlobalTimeout
+	} else {
+		merged.GlobalTimeout = global.GlobalTimeout
+	}
+
 	// Metrics settings
 	if tenant.MetricsEnabled {
 		merged.MetricsEnabled = true

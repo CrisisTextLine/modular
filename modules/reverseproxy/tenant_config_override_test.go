@@ -206,7 +206,7 @@ func TestTenantFeatureFlagsOverride(t *testing.T) {
 
 	// KNOWN LIMITATION: mergeConfigs doesn't perform deep merging of FeatureFlags
 	// The merged config will have zero values for the entire FeatureFlags struct
-	assert.False(t, merged.FeatureFlags.Enabled, 
+	assert.False(t, merged.FeatureFlags.Enabled,
 		"KNOWN LIMITATION: FeatureFlags struct is zero-valued in merged config because deep merging is not implemented")
 	t.Log("NOTE: FeatureFlags deep merging is not implemented. The entire FeatureFlags struct remains zero-valued in merged configs. This is a separate issue to be addressed.")
 }
@@ -368,6 +368,61 @@ func TestMergeConfigsRequestTimeout(t *testing.T) {
 			merged := mergeConfigs(globalConfig, tenantConfig)
 
 			assert.Equal(t, tt.expectedTimeout, merged.RequestTimeout, tt.description)
+		})
+	}
+}
+
+// TestMergeConfigsGlobalTimeout specifically tests the GlobalTimeout merge logic
+func TestMergeConfigsGlobalTimeout(t *testing.T) {
+	tests := []struct {
+		name            string
+		globalTimeout   time.Duration
+		tenantTimeout   time.Duration
+		expectedTimeout time.Duration
+		description     string
+	}{
+		{
+			name:            "tenant overrides global",
+			globalTimeout:   30 * time.Second,
+			tenantTimeout:   60 * time.Second,
+			expectedTimeout: 60 * time.Second,
+			description:     "When tenant specifies GlobalTimeout, it should override global",
+		},
+		{
+			name:            "tenant not specified, use global",
+			globalTimeout:   30 * time.Second,
+			tenantTimeout:   0,
+			expectedTimeout: 30 * time.Second,
+			description:     "When tenant doesn't specify GlobalTimeout (0), use global",
+		},
+		{
+			name:            "both zero",
+			globalTimeout:   0,
+			tenantTimeout:   0,
+			expectedTimeout: 0,
+			description:     "When both are zero, merged should be zero",
+		},
+		{
+			name:            "only tenant specified",
+			globalTimeout:   0,
+			tenantTimeout:   45 * time.Second,
+			expectedTimeout: 45 * time.Second,
+			description:     "When only tenant specifies GlobalTimeout, use tenant value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			globalConfig := &ReverseProxyConfig{
+				GlobalTimeout: tt.globalTimeout,
+			}
+			tenantConfig := &ReverseProxyConfig{
+				GlobalTimeout: tt.tenantTimeout,
+			}
+
+			merged := mergeConfigs(globalConfig, tenantConfig)
+
+			assert.Equal(t, tt.expectedTimeout, merged.GlobalTimeout, tt.description)
 		})
 	}
 }

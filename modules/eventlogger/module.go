@@ -850,11 +850,13 @@ func (m *EventLoggerModule) logEvent(ctx context.Context, event cloudevents.Even
 
 // shouldLogEvent determines if an event should be logged based on configuration.
 func (m *EventLoggerModule) shouldLogEvent(event cloudevents.Event) bool {
-	// Check event type filters
+	eventType := event.Type()
+
+	// Step 1: Apply whitelist filter (if configured)
 	if len(m.config.EventTypeFilters) > 0 {
 		found := false
 		for _, filter := range m.config.EventTypeFilters {
-			if filter == event.Type() {
+			if filter == eventType {
 				found = true
 				break
 			}
@@ -864,7 +866,22 @@ func (m *EventLoggerModule) shouldLogEvent(event cloudevents.Event) bool {
 		}
 	}
 
-	// Check log level
+	// Step 2: Apply excludeOwnEvents filter (if enabled)
+	if m.config.ExcludeOwnEvents && m.isOwnEvent(event) {
+		return false
+	}
+
+	// Step 3: Apply blacklist filter (if configured)
+	// Blacklist takes precedence over whitelist
+	if len(m.config.EventTypeBlacklist) > 0 {
+		for _, filter := range m.config.EventTypeBlacklist {
+			if filter == eventType {
+				return false
+			}
+		}
+	}
+
+	// Step 4: Check log level
 	eventLevel := m.getEventLevel(event)
 	return m.shouldLogLevel(eventLevel, m.config.LogLevel)
 }

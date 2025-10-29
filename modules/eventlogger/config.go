@@ -18,8 +18,14 @@ type EventLoggerConfig struct {
 	// OutputTargets specifies where to output logs
 	OutputTargets []OutputTargetConfig `yaml:"outputTargets" desc:"Output targets for event logs"`
 
-	// EventTypeFilters allows filtering which event types to log
+	// EventTypeFilters allows filtering which event types to log (whitelist)
 	EventTypeFilters []string `yaml:"eventTypeFilters" desc:"Event types to log (empty = all events)"`
+
+	// EventTypeBlacklist allows excluding specific event types from logging
+	EventTypeBlacklist []string `yaml:"eventTypeBlacklist" desc:"Event types to exclude from logging (applied after whitelist)"`
+
+	// ExcludeOwnEvents automatically excludes EventLogger's own operational events
+	ExcludeOwnEvents bool `yaml:"excludeOwnEvents" default:"false" desc:"Automatically exclude EventLogger's own operational events"`
 
 	// BufferSize sets the size of the event buffer for async processing
 	BufferSize int `yaml:"bufferSize" default:"100" desc:"Buffer size for async event processing"`

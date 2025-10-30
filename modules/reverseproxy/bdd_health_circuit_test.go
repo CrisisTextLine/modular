@@ -455,21 +455,24 @@ func (ctx *ReverseProxyBDDTestContext) aBackendBecomesUnhealthy() error {
 }
 
 func (ctx *ReverseProxyBDDTestContext) aBackendUnhealthyEventShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
-	foundUnhealthyEvent := false
+	// Retry mechanism to handle timing issues - events may be emitted asynchronously
+	maxAttempts := 10
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		events := ctx.eventObserver.GetEvents()
 
-	for _, event := range events {
-		if event.Type() == EventTypeBackendUnhealthy {
-			foundUnhealthyEvent = true
-			break
+		for _, event := range events {
+			if event.Type() == EventTypeBackendUnhealthy {
+				return nil
+			}
+		}
+
+		// If not found and not last attempt, wait a bit and retry
+		if attempt < maxAttempts-1 {
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
 
-	if !foundUnhealthyEvent {
-		return fmt.Errorf("no backend unhealthy events found")
-	}
-
-	return nil
+	return fmt.Errorf("no backend unhealthy events found")
 }
 
 func (ctx *ReverseProxyBDDTestContext) theEventShouldContainHealthFailureDetails() error {

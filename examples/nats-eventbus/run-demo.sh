@@ -105,11 +105,33 @@ run_with_nats() {
     echo -e "${BLUE}📊 Application output (will run for 15 seconds):${NC}"
     echo ""
     
-    # Run the demo for 15 seconds to show event publishing/consumption
-    timeout 15s ./nats-demo || true
-    
-    echo ""
-    echo -e "${GREEN}✅ Demo completed${NC}"
+    # Run the demo for 15 seconds to allow proper pub/sub validation
+    # Send SIGINT for graceful shutdown, then SIGKILL if it doesn't respond
+    # Temporarily disable exit-on-error to capture timeout exit code
+    set +e
+    timeout -s INT -k 10s 15s ./nats-demo
+    EXIT_CODE=$?
+    set -e
+
+    # timeout returns various exit codes:
+    # - 0: Process exited cleanly before timeout
+    # - 124: Process was terminated by timeout with default signal
+    # - 130: Process was terminated by SIGINT (128 + 2)
+    # - 137: Process was killed by SIGKILL (128 + 9)
+    # - 143: Process was terminated by SIGTERM (128 + 15)
+    # We accept these as success (expected termination paths)
+    case $EXIT_CODE in
+        0|124|130|137|143)
+            echo ""
+            echo -e "${GREEN}✅ Demo completed successfully${NC}"
+            return 0
+            ;;
+        *)
+            echo ""
+            echo -e "${RED}❌ Demo failed with exit code $EXIT_CODE${NC}"
+            return 1
+            ;;
+    esac
 }
 
 # Function to cleanup everything

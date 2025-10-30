@@ -114,6 +114,7 @@ package eventlogger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -122,6 +123,9 @@ import (
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
+
+// ErrQueueCorruption indicates the event queue is in an invalid state
+var ErrQueueCorruption = errors.New("event queue corruption: empty queue marked as full")
 
 // ModuleName is the unique identifier for the eventlogger module.
 const ModuleName = "eventlogger"
@@ -605,16 +609,29 @@ func (m *EventLoggerModule) OnEvent(ctx context.Context, event cloudevents.Event
 			} else {
 				// Queue is full - drop oldest event and add new one
 				if len(m.eventQueue) > 0 {
-					// Shift slice to remove first element (oldest)
+					// Remove oldest event and add new one at the end
+					// Use in-place copy for better performance (avoids allocation)
 					copy(m.eventQueue, m.eventQueue[1:])
 					m.eventQueue[len(m.eventQueue)-1] = event
+					if m.logger != nil {
+						m.logger.Debug("Event queue full, dropped oldest event",
+							"queue_size", m.queueMaxSize, "new_event", event.Type())
+					}
+					queueResult = nil
+					return
+				} else {
+					// This should never happen: queue is at max size but has no elements
+					// This indicates a corrupted state - fail fast with detailed error
+					if m.logger != nil {
+						m.logger.Error("Event queue corruption detected",
+							"queue_length", len(m.eventQueue),
+							"queue_max_size", m.queueMaxSize,
+							"error", ErrQueueCorruption.Error())
+					}
+					queueResult = fmt.Errorf("%w: len=%d, max=%d",
+						ErrQueueCorruption, len(m.eventQueue), m.queueMaxSize)
+					return
 				}
-				if m.logger != nil {
-					m.logger.Debug("Event queue full, dropped oldest event",
-						"queue_size", m.queueMaxSize, "new_event", event.Type())
-				}
-				queueResult = nil
-				return
 			}
 		}
 
@@ -833,11 +850,13 @@ func (m *EventLoggerModule) logEvent(ctx context.Context, event cloudevents.Even
 
 // shouldLogEvent determines if an event should be logged based on configuration.
 func (m *EventLoggerModule) shouldLogEvent(event cloudevents.Event) bool {
-	// Check event type filters
+	eventType := event.Type()
+
+	// Step 1: Apply whitelist filter (if configured)
 	if len(m.config.EventTypeFilters) > 0 {
 		found := false
 		for _, filter := range m.config.EventTypeFilters {
-			if filter == event.Type() {
+			if filter == eventType {
 				found = true
 				break
 			}
@@ -847,7 +866,22 @@ func (m *EventLoggerModule) shouldLogEvent(event cloudevents.Event) bool {
 		}
 	}
 
-	// Check log level
+	// Step 2: Apply excludeOwnEvents filter (if enabled)
+	if m.config.ExcludeOwnEvents && m.isOwnEvent(event) {
+		return false
+	}
+
+	// Step 3: Apply blacklist filter (if configured)
+	// Blacklist takes precedence over whitelist
+	if len(m.config.EventTypeBlacklist) > 0 {
+		for _, filter := range m.config.EventTypeBlacklist {
+			if filter == eventType {
+				return false
+			}
+		}
+	}
+
+	// Step 4: Check log level
 	eventLevel := m.getEventLevel(event)
 	return m.shouldLogLevel(eventLevel, m.config.LogLevel)
 }

@@ -380,6 +380,11 @@ func (m *ReverseProxyModule) Init(app modular.Application) error {
 				cbConfig = m.config.CircuitBreakerConfig
 			}
 
+			// Use module's request timeout if circuit breaker config doesn't specify one
+			if cbConfig.RequestTimeout == 0 && m.config.RequestTimeout > 0 {
+				cbConfig.RequestTimeout = m.config.RequestTimeout
+			}
+
 			// Create circuit breaker for this backend
 			cb := NewCircuitBreakerWithConfig(backendID, cbConfig, m.metrics)
 			cb.eventEmitter = func(eventType string, data map[string]interface{}) {
@@ -1897,6 +1902,21 @@ func (m *ReverseProxyModule) selectBackendFromGroup(ctx context.Context, group s
 	return selected, idx, len(backends)
 }
 
+// sanitizeForLogging removes newline and carriage return characters from a string
+// to prevent log injection attacks
+func sanitizeForLogging(s string) string {
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
+}
+
+// obfuscateTenantID creates a reproducible hash of a tenant ID for logging purposes,
+// allowing operators to correlate requests by tenant without exposing the raw tenant ID
+func obfuscateTenantID(tenantID modular.TenantID) string {
+	hash := sha256.Sum256([]byte(tenantID))
+	return hex.EncodeToString(hash[:8]) // Use first 8 bytes for brevity
+}
+
 // Helper function to correctly join URL paths
 func singleJoiningSlash(a, b string) string {
 	aslash := strings.HasSuffix(a, "/")
@@ -2360,6 +2380,11 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 			if existingCB, exists := m.circuitBreakers[finalBackend]; exists {
 				cb = existingCB
 			} else {
+				// Use module's request timeout if circuit breaker config doesn't specify one
+				if cbConfig.RequestTimeout == 0 && m.config.RequestTimeout > 0 {
+					cbConfig.RequestTimeout = m.config.RequestTimeout
+				}
+
 				// Create new circuit breaker with config and store for reuse
 				cb = NewCircuitBreakerWithConfig(finalBackend, cbConfig, m.metrics)
 				cb.eventEmitter = func(eventType string, data map[string]interface{}) { //nolint:contextcheck // circuit breaker events occur outside request handling
@@ -2745,6 +2770,11 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 		if existingCB, exists := m.circuitBreakers[backend]; exists {
 			cb = existingCB
 		} else {
+			// Use module's request timeout if circuit breaker config doesn't specify one
+			if cbConfig.RequestTimeout == 0 && m.config.RequestTimeout > 0 {
+				cbConfig.RequestTimeout = m.config.RequestTimeout
+			}
+
 			// Create new circuit breaker with config and store for reuse
 			cb = NewCircuitBreakerWithConfig(backend, cbConfig, m.metrics)
 			cb.eventEmitter = func(eventType string, data map[string]interface{}) {
@@ -2762,6 +2792,57 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 			"path":    r.URL.Path,
 			"tenant":  string(tenantID),
 		})
+
+		// Get tenant-specific merged config (fallback to global if not found)
+		tenantCfg := m.config
+		if mergedCfg, exists := m.tenants[tenantID]; exists && mergedCfg != nil {
+			tenantCfg = mergedCfg
+		}
+
+		// Apply timeout configuration - check for route-specific timeout first
+		var requestTimeout time.Duration
+		var timeoutSource string
+		if tenantCfg.RouteConfigs != nil {
+			// Find matching route config by checking all patterns
+			for routePattern, routeConfig := range tenantCfg.RouteConfigs {
+				if m.matchesRoute(r.URL.Path, routePattern) && routeConfig.Timeout > 0 {
+					requestTimeout = routeConfig.Timeout
+					timeoutSource = fmt.Sprintf("route %s", routePattern)
+					break
+				}
+			}
+		}
+
+		// Fall back to global timeout if no route-specific timeout
+		if requestTimeout == 0 {
+			if tenantCfg.GlobalTimeout > 0 {
+				requestTimeout = tenantCfg.GlobalTimeout
+				timeoutSource = "global"
+			} else if tenantCfg.RequestTimeout > 0 {
+				requestTimeout = tenantCfg.RequestTimeout
+				timeoutSource = "request"
+			} else {
+				requestTimeout = 30 * time.Second // Default fallback
+				timeoutSource = "default"
+			}
+		}
+
+		// Debug timeout configuration
+		if m.app != nil && m.app.Logger() != nil {
+			safePath := sanitizeForLogging(r.URL.Path)
+			obfuscatedTenantID := obfuscateTenantID(tenantID)
+			m.app.Logger().Info("Request timeout configuration",
+				"path", safePath,
+				"backend", backend,
+				"tenant_hash", obfuscatedTenantID,
+				"timeout", requestTimeout,
+				"timeout_source", timeoutSource)
+		}
+
+		// Create context with timeout
+		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+		defer cancel()
+		r = r.WithContext(ctx)
 
 		// Record request to backend for health checking
 		if m.healthChecker != nil {
@@ -2818,7 +2899,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 					}
 				}
 				// Emit failed event for tenant path when circuit is open
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2830,7 +2911,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 			} else if err != nil {
 				// Some other error occurred
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2855,7 +2936,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 
 			// Emit event based on response status
 			if resp.StatusCode >= 400 {
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2864,7 +2945,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 					"error":   fmt.Sprintf("upstream returned status %d", resp.StatusCode),
 				})
 			} else {
-				m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestProxied, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2879,7 +2960,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 
 			// Emit success or failure event based on status code
 			if sw.status >= 400 {
-				m.emitEvent(r.Context(), EventTypeRequestFailed, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestFailed, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -2888,7 +2969,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 					"error":   fmt.Sprintf("upstream returned status %d", sw.status),
 				})
 			} else {
-				m.emitEvent(r.Context(), EventTypeRequestProxied, map[string]interface{}{
+				m.emitEvent(ctx, EventTypeRequestProxied, map[string]interface{}{
 					"backend": backend,
 					"method":  r.Method,
 					"path":    r.URL.Path,
@@ -3246,6 +3327,13 @@ func mergeConfigs(global, tenant *ReverseProxyConfig) *ReverseProxyConfig {
 		merged.RequestTimeout = tenant.RequestTimeout
 	} else {
 		merged.RequestTimeout = global.RequestTimeout
+	}
+
+	// Global timeout - prefer tenant's if specified
+	if tenant.GlobalTimeout > 0 {
+		merged.GlobalTimeout = tenant.GlobalTimeout
+	} else {
+		merged.GlobalTimeout = global.GlobalTimeout
 	}
 
 	// Metrics settings

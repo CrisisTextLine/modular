@@ -30,17 +30,32 @@ type AffixedEnvFeeder struct {
 		Debug(msg string, args ...any)
 	}
 	fieldTracker FieldTracker
+	priority     int
 }
 
 // NewAffixedEnvFeeder creates a new AffixedEnvFeeder with the specified prefix and suffix
-func NewAffixedEnvFeeder(prefix, suffix string) AffixedEnvFeeder {
-	return AffixedEnvFeeder{
+func NewAffixedEnvFeeder(prefix, suffix string) *AffixedEnvFeeder {
+	return &AffixedEnvFeeder{
 		Prefix:       prefix,
 		Suffix:       suffix,
 		verboseDebug: false,
 		logger:       nil,
 		fieldTracker: nil,
+		priority:     0, // Default priority
 	}
+}
+
+// WithPriority sets the priority for this feeder and returns the feeder for chaining.
+// Higher priority values mean the feeder will be applied later, allowing it to override
+// values from lower priority feeders.
+func (f *AffixedEnvFeeder) WithPriority(priority int) *AffixedEnvFeeder {
+	f.priority = priority
+	return f
+}
+
+// Priority returns the priority value for this feeder.
+func (f *AffixedEnvFeeder) Priority() int {
+	return f.priority
 }
 
 // SetVerboseDebug enables or disables verbose debug logging

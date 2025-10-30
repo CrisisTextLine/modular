@@ -1,0 +1,5 @@
+# Logger format: text or json
+logFormat: text
+
+# Log level: debug, info, warn, error
+logLevel: info

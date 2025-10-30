@@ -11,15 +11,16 @@ type Option func(*ApplicationBuilder) error
 
 // ApplicationBuilder helps construct applications with various decorators and options
 type ApplicationBuilder struct {
-	baseApp          Application
-	logger           Logger
-	configProvider   ConfigProvider
-	modules          []Module
-	configDecorators []ConfigDecorator
-	observers        []ObserverFunc
-	tenantLoader     TenantLoader
-	enableObserver   bool
-	enableTenant     bool
+	baseApp           Application
+	logger            Logger
+	configProvider    ConfigProvider
+	modules           []Module
+	configDecorators  []ConfigDecorator
+	observers         []ObserverFunc
+	tenantLoader      TenantLoader
+	enableObserver    bool
+	enableTenant      bool
+	configLoadedHooks []func(Application) error // Hooks to run after config loading
 }
 
 // ObserverFunc is a functional observer that can be registered with the application
@@ -29,9 +30,10 @@ type ObserverFunc func(ctx context.Context, event cloudevents.Event) error
 // This is the main entry point for the new builder API.
 func NewApplication(opts ...Option) (Application, error) {
 	builder := &ApplicationBuilder{
-		modules:          make([]Module, 0),
-		configDecorators: make([]ConfigDecorator, 0),
-		observers:        make([]ObserverFunc, 0),
+		modules:           make([]Module, 0),
+		configDecorators:  make([]ConfigDecorator, 0),
+		observers:         make([]ObserverFunc, 0),
+		configLoadedHooks: make([]func(Application) error, 0),
 	}
 
 	// Apply all options
@@ -100,6 +102,11 @@ func (b *ApplicationBuilder) Build() (Application, error) {
 		app.RegisterModule(module)
 	}
 
+	// Register config loaded hooks
+	for _, hook := range b.configLoadedHooks {
+		app.OnConfigLoaded(hook)
+	}
+
 	return app, nil
 }
 
@@ -157,6 +164,32 @@ func WithTenantAware(loader TenantLoader) Option {
 	return func(b *ApplicationBuilder) error {
 		b.enableTenant = true
 		b.tenantLoader = loader
+		return nil
+	}
+}
+
+// WithOnConfigLoaded registers hooks to run after config loading but before module initialization.
+// This is useful for reconfiguring dependencies (logger, metrics, tracing) based on loaded config.
+// Multiple hooks can be registered and will be executed in registration order.
+//
+// Example:
+//
+//	app, err := modular.NewApplication(
+//	    modular.WithLogger(defaultLogger),
+//	    modular.WithConfigProvider(configProvider),
+//	    modular.WithOnConfigLoaded(func(app modular.Application) error {
+//	        config := app.ConfigProvider().GetConfig().(*AppConfig)
+//	        if config.LogFormat == "json" {
+//	            newLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+//	            app.SetLogger(newLogger)
+//	        }
+//	        return nil
+//	    }),
+//	    modular.WithModules(modules...),
+//	)
+func WithOnConfigLoaded(hooks ...func(Application) error) Option {
+	return func(b *ApplicationBuilder) error {
+		b.configLoadedHooks = append(b.configLoadedHooks, hooks...)
 		return nil
 	}
 }

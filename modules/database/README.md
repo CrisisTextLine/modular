@@ -136,6 +136,8 @@ database:
 - `region`: AWS region where the RDS instance is located (required)
 - `db_user`: Database username configured for IAM authentication (required)
 - `token_refresh_interval`: How often to refresh the IAM token in seconds (default: 600 seconds / 10 minutes)
+- `connection_timeout`: Timeout for database connection tests in seconds (default: 5 seconds)
+- `connection_close_grace_period`: Grace period to wait before closing old connections after token refresh, allowing in-flight queries to complete (default: 5 seconds)
 
 #### Prerequisites for AWS IAM Authentication
 
@@ -187,6 +189,40 @@ database:
 4. The original DSN is modified to use this token as the password.
 5. A background goroutine refreshes the token at the specified interval (default: 10 minutes).
 6. Tokens are automatically refreshed before they expire (RDS IAM tokens are valid for 15 minutes).
+
+#### Connection Pool Lifecycle During Token Refresh
+
+When IAM tokens are refreshed, the database module implements a graceful connection pool transition to prevent authentication failures:
+
+1. **Token Refresh Trigger**: When the token refresh interval elapses, a new IAM token is generated.
+2. **New Connection Pool**: A new database connection pool is created using the refreshed token.
+3. **Connection Validation**: The new connection is tested with a ping to ensure it's working before switching.
+4. **Atomic Swap**: The old connection pool is atomically replaced with the new one. New queries immediately use the fresh token.
+5. **Grace Period**: The old connection pool remains open for a configurable grace period (default: 5 seconds) to allow in-flight queries to complete.
+6. **Old Pool Closure**: After the grace period, the old connection pool is closed and its resources are released.
+
+This approach prevents "PAM authentication failed" errors that could occur if connections using expired tokens are still in the pool. The grace period ensures that queries that were already executing when the token refreshed can complete successfully.
+
+**Configuration Example with Connection Pool Lifecycle:**
+```yaml
+database:
+  connections:
+    postgres_rds:
+      driver: "postgres"
+      dsn: "postgres://iamuser@mydb.cluster-xyz.us-east-1.rds.amazonaws.com:5432/mydb?sslmode=require"
+      connection_max_lifetime: 480s   # 8 minutes (less than 10 minute token refresh interval)
+      aws_iam_auth:
+        enabled: true
+        region: "us-east-1"
+        db_user: "iamuser"
+        token_refresh_interval: 600            # 10 minutes (600 seconds)
+        connection_close_grace_period: 5s      # 5 seconds grace period for in-flight queries
+```
+
+**Best Practices:**
+- Set `connection_max_lifetime` to be shorter than `token_refresh_interval` to ensure connections are naturally recycled before token expiration.
+- Use the default `connection_close_grace_period` (5 seconds) unless you have long-running queries that need more time to complete.
+- Monitor logs during token refresh to ensure smooth transitions (logs indicate when connections are refreshed and old pools are closed).
 
 #### Dependencies
 

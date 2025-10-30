@@ -323,9 +323,22 @@ jobs:
       - name: Re-announce to Go proxy
         if: steps.ensure.outputs.release_url
         run: |
+          set -euo pipefail
           CURR=$(git tag -l 'v*' | grep -v '/' | sort -V | tail -n1 || true)
           [ -z "$CURR" ] && exit 0
-          GOPROXY=proxy.golang.org go list -m github.com/CrisisTextLine/modular@${CURR}
+          
+          # Extract major version
+          MAJOR_VERSION="${CURR#v}"
+          MAJOR_VERSION="${MAJOR_VERSION%%.*}"
+          
+          # Construct correct module path with version suffix for v2+
+          if [ "$MAJOR_VERSION" -ge 2 ]; then
+            MODULE_NAME="github.com/CrisisTextLine/modular/v${MAJOR_VERSION}"
+          else
+            MODULE_NAME="github.com/CrisisTextLine/modular"
+          fi
+          
+          GOPROXY=proxy.golang.org go list -m ${MODULE_NAME}@${CURR}
 
   ensure-modules:
     needs: detect
@@ -359,7 +372,16 @@ jobs:
             TAG=$(git tag -l "modules/${M}/v*" | sort -V | tail -n1 || true)
             [ -z "$TAG" ] && { echo "Module $M has no tags yet; skipping."; continue; }
             VER=${TAG##*/}
-            MOD_PATH="github.com/CrisisTextLine/modular/modules/${M}"
+            
+            # Extract major version and construct correct module path
+            MAJOR_VERSION="${VER#v}"
+            MAJOR_VERSION="${MAJOR_VERSION%%.*}"
+            if [ "$MAJOR_VERSION" -ge 2 ]; then
+              MOD_PATH="github.com/CrisisTextLine/modular/modules/${M}/v${MAJOR_VERSION}"
+            else
+              MOD_PATH="github.com/CrisisTextLine/modular/modules/${M}"
+            fi
+            
             if gh release view "$TAG" >/dev/null 2>&1; then
               echo "Release exists for $TAG"
               URL=$(gh release view "$TAG" --json url --jq .url || echo '')

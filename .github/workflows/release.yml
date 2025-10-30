@@ -198,13 +198,134 @@ jobs:
           echo "reason=$REASON" >> $GITHUB_OUTPUT
           echo "Next version: $NEXT_VERSION ($REASON)"
 
-      - name: Run tests
+      - name: Check go.mod for major version v2+
         if: steps.detect.outputs.core_changed == 'true'
+        id: check_module_path
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.next_version }}"
+          
+          # Extract major version from VERSION (e.g., v2.0.0 -> 2)
+          MAJOR_VERSION="${VERSION#v}"
+          MAJOR_VERSION="${MAJOR_VERSION%%.*}"
+          
+          echo "Major version: $MAJOR_VERSION"
+          echo "major_version=$MAJOR_VERSION" >> $GITHUB_OUTPUT
+          
+          # Only check go.mod if major version is 2 or greater
+          if [ "$MAJOR_VERSION" -ge 2 ]; then
+            GO_MOD_PATH="go.mod"
+            CURRENT_MODULE_PATH=$(grep "^module " "$GO_MOD_PATH" | awk '{print $2}')
+            echo "Current module path: $CURRENT_MODULE_PATH"
+            echo "current_module_path=$CURRENT_MODULE_PATH" >> $GITHUB_OUTPUT
+            
+            # Check if module path already has version suffix
+            if [[ "$CURRENT_MODULE_PATH" =~ /v[0-9]+$ ]]; then
+              # Extract current major version from module path
+              CURRENT_MAJOR="${CURRENT_MODULE_PATH##*/v}"
+              echo "Current module path has version suffix: v$CURRENT_MAJOR"
+              
+              if [ "$CURRENT_MAJOR" -ne "$MAJOR_VERSION" ]; then
+                echo "ERROR: Module path has /v${CURRENT_MAJOR} but releasing v${MAJOR_VERSION}"
+                echo "Please manually update module path in ${GO_MOD_PATH} to include /v${MAJOR_VERSION}"
+                exit 1
+              fi
+              echo "Module path already correct for v${MAJOR_VERSION}"
+              echo "needs_update=false" >> $GITHUB_OUTPUT
+            else
+              # No version suffix, need to add it
+              echo "Module path needs v${MAJOR_VERSION} suffix"
+              echo "needs_update=true" >> $GITHUB_OUTPUT
+              NEW_MODULE_PATH="${CURRENT_MODULE_PATH}/v${MAJOR_VERSION}"
+              echo "new_module_path=$NEW_MODULE_PATH" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "Major version is $MAJOR_VERSION (< 2), no module path update needed"
+            echo "needs_update=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create PR for module path update
+        if: steps.detect.outputs.core_changed == 'true' && steps.check_module_path.outputs.needs_update == 'true'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.next_version }}"
+          MAJOR_VERSION="${{ steps.check_module_path.outputs.major_version }}"
+          CURRENT_MODULE_PATH="${{ steps.check_module_path.outputs.current_module_path }}"
+          NEW_MODULE_PATH="${{ steps.check_module_path.outputs.new_module_path }}"
+          
+          # Create a new branch for the module path update
+          BRANCH_NAME="chore/update-module-path-v${MAJOR_VERSION}"
+          git checkout -b "$BRANCH_NAME"
+          
+          # Update the module path in go.mod
+          sed -i "s|^module ${CURRENT_MODULE_PATH}|module ${NEW_MODULE_PATH}|" go.mod
+          
+          # Run go mod tidy to ensure consistency
+          go mod tidy
+          
+          # Commit the change
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add go.mod
+          # Add go.sum if it was modified
+          git add go.sum 2>/dev/null || true
+          git commit -m "chore: update module path for v${MAJOR_VERSION}
+
+This updates the module path from:
+  ${CURRENT_MODULE_PATH}
+to:
+  ${NEW_MODULE_PATH}
+
+This is required for releasing version ${VERSION} according to Go module versioning requirements.
+See https://go.dev/blog/v2-go-modules for more information."
+          
+          # Push the branch
+          git push origin "$BRANCH_NAME"
+          
+          # Create the PR
+          gh pr create \
+            --title "chore: update module path for v${MAJOR_VERSION}" \
+            --body "## Module Path Update for ${VERSION}
+
+This PR updates the module path in \`go.mod\` to include the \`/v${MAJOR_VERSION}\` suffix as required by Go module versioning for major versions 2 and above.
+
+### Changes:
+- **Old module path**: \`${CURRENT_MODULE_PATH}\`
+- **New module path**: \`${NEW_MODULE_PATH}\`
+
+### Why This Change Is Needed:
+According to Go module versioning requirements, when releasing a major version v2 or higher, the module path must include a version suffix. This ensures proper dependency resolution and prevents conflicts with v0/v1 versions.
+
+Reference: https://go.dev/blog/v2-go-modules
+
+### Next Steps:
+1. Review and merge this PR
+2. After merging, re-run the release workflow to complete the ${VERSION} release
+
+This PR was automatically created by the release workflow." \
+            --base "${{ github.ref_name }}" \
+            --head "$BRANCH_NAME"
+          
+          echo "✓ Created PR for module path update"
+          echo ""
+          echo "============================================"
+          echo "⚠️  RELEASE PAUSED"
+          echo "============================================"
+          echo ""
+          echo "A PR has been created to update the module path for v${MAJOR_VERSION}."
+          echo "Please merge the PR, then re-run this release workflow to complete the release."
+          echo ""
+          exit 1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run tests
+        if: steps.detect.outputs.core_changed == 'true' && steps.check_module_path.outputs.needs_update != 'true'
         run: |
           go test -v ./...
 
       - name: Generate changelog
-        if: steps.detect.outputs.core_changed == 'true'
+        if: steps.detect.outputs.core_changed == 'true' && steps.check_module_path.outputs.needs_update != 'true'
         run: |
           TAG=${{ steps.version.outputs.next_version }}
           CHANGE_CLASS=${{ steps.version.outputs.change_class }}
@@ -249,7 +370,7 @@ jobs:
           # Changelog consumed directly by release step; no workflow outputs needed.
 
       - name: Create release
-        if: steps.detect.outputs.core_changed == 'true'
+        if: steps.detect.outputs.core_changed == 'true' && steps.check_module_path.outputs.needs_update != 'true'
         id: create_release
         run: |
           set -euo pipefail
@@ -283,12 +404,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Announce to Go proxy
-        if: steps.detect.outputs.core_changed == 'true'
+        if: steps.detect.outputs.core_changed == 'true' && steps.check_module_path.outputs.needs_update != 'true'
         run: |
+          set -euo pipefail
           VERSION=${{ steps.version.outputs.next_version }}
-          MODULE_NAME="github.com/CrisisTextLine/modular"
+          
+          # Extract major version from VERSION
+          MAJOR_VERSION="${VERSION#v}"
+          MAJOR_VERSION="${MAJOR_VERSION%%.*}"
+          
+          # Construct correct module path with version suffix for v2+
+          if [ "$MAJOR_VERSION" -ge 2 ]; then
+            MODULE_NAME="github.com/CrisisTextLine/modular/v${MAJOR_VERSION}"
+          else
+            MODULE_NAME="github.com/CrisisTextLine/modular"
+          fi
+          
+          echo "Announcing ${MODULE_NAME}@${VERSION} to Go proxy..."
           GOPROXY=proxy.golang.org go list -m ${MODULE_NAME}@${VERSION}
-          echo "Announced version ${VERSION} to Go proxy"
+          echo "✓ Announced version ${VERSION} to Go proxy"
 
   bump-modules:
     needs: release

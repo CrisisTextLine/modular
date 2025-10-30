@@ -754,7 +754,8 @@ Each command includes interactive prompts to guide you through the process of cr
 - **[Debugging and Troubleshooting](DOCUMENTATION.md#debugging-and-troubleshooting)** - Diagnostic tools and solutions for common issues
 - **[Available Modules](modules/README.md)** - Complete list of pre-built modules with documentation
 - **[Examples](examples/)** - Working example applications demonstrating various features
- - **[Concurrency & Race Guidelines](CONCURRENCY_GUIDELINES.md)** - Official synchronization patterns, race detector usage, and safe module design
+- **[Concurrency & Race Guidelines](CONCURRENCY_GUIDELINES.md)** - Official synchronization patterns, race detector usage, and safe module design
+- **[Go Module Versioning Guide](GO_MODULE_VERSIONING.md)** - Understanding semantic versioning, v2+ module paths, and the automated release process
 
 ### Having Issues?
 

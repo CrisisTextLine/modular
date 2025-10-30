@@ -36,19 +36,43 @@ Tags:
 
 ## Automated Workflow Behavior
 
-The release workflows automatically handle major version transitions:
+The release workflows automatically handle major version transitions using a two-step process:
 
 ### When Releasing v2.0.0 or Higher
+
+The workflow uses a **two-step PR-based approach** to ensure safe major version transitions:
+
+#### Step 1: Module Path Update (Automated)
 
 1. **Version Determination**: The workflow calculates the next version based on contract changes and user input
 2. **Module Path Validation**: Before creating a release:
    - Checks if releasing v2+ version
    - Validates current module path in `go.mod`
-   - If no version suffix exists, adds `/vN` to the module path
+   - If no version suffix exists, the workflow will:
+     - Create a new branch with the module path update
+     - Update `go.mod` to add the `/vN` suffix
+     - Run `go mod tidy` to ensure consistency
+     - Create a PR with the changes
+     - **Pause the release workflow**
    - If version suffix exists but doesn't match, fails with error
-3. **Auto-Update**: If needed, updates `go.mod` and commits the change
-4. **Release Creation**: Creates the GitHub release with the correct tag
-5. **Go Proxy Announcement**: Announces to Go proxy using the correct module path
+   - If version suffix is already correct, proceeds to Step 2
+
+#### Step 2: Complete the Release (Manual Trigger)
+
+After the module path update PR is merged:
+
+1. **Re-run the Release Workflow**: Trigger the same release workflow again with the same parameters
+2. **Module Path Check**: The workflow detects the module path is now correct
+3. **Release Creation**: Creates the GitHub release with the correct tag
+4. **Go Proxy Announcement**: Announces to Go proxy using the correct module path
+
+### Why Two Steps?
+
+This two-step approach provides several benefits:
+- **Safer Process**: The module path change is reviewed in a separate PR before the release
+- **Cleaner History**: The module path update is a distinct commit that can be traced
+- **Better Practices**: Follows GitFlow and PR review practices
+- **Rollback Safety**: The module path update can be reviewed and adjusted before the release is finalized
 
 ### Example Workflow
 
@@ -58,18 +82,32 @@ The release workflows automatically handle major version transitions:
 module github.com/CrisisTextLine/modular/modules/reverseproxy
 ```
 
-**After Releasing v2.0.0:**
+**Step 1: Trigger v2.0.0 Release**
+
+When you trigger a release for v2.0.0, the workflow:
+1. Detects that next version is v2.0.0
+2. Checks if module path needs updating
+3. Creates a new branch: `chore/reverseproxy-update-module-path-v2`
+4. Updates `go.mod` module path to include `/v2`
+5. Runs `go mod tidy`
+6. Commits the changes
+7. Creates a PR with the title: "chore(reverseproxy): update module path for v2"
+8. **Pauses with message**: "A PR has been created... Please merge the PR, then re-run this release workflow"
+
+**Step 2: Complete the Release**
+
+After merging the PR:
 ```go
-// modules/reverseproxy/go.mod
+// modules/reverseproxy/go.mod (now updated)
 module github.com/CrisisTextLine/modular/modules/reverseproxy/v2
 ```
 
-The workflow:
-1. Detects that next version is v2.0.0
-2. Updates `go.mod` module path to include `/v2`
-3. Commits the change
-4. Creates tag `modules/reverseproxy/v2.0.0`
-5. Announces `github.com/CrisisTextLine/modular/modules/reverseproxy/v2@v2.0.0` to Go proxy
+Re-run the same release workflow, and it will:
+1. Detect module path is already correct for v2
+2. Skip the PR creation
+3. Create tag `modules/reverseproxy/v2.0.0`
+4. Generate release with changelog
+5. Announce `github.com/CrisisTextLine/modular/modules/reverseproxy/v2@v2.0.0` to Go proxy
 
 ## Manual Version Updates
 
@@ -146,7 +184,47 @@ According to semantic versioning:
 
 Our workflows use contract-based detection to suggest appropriate version bumps, but you can override this with manual version input or by selecting a different release type.
 
+## Two-Step Release Process for v2+
+
+When releasing a major version v2 or higher for the first time, follow this process:
+
+### For Core Framework
+
+1. **Trigger the Release Workflow**:
+   - Go to Actions → Release workflow
+   - Select release type "major" or specify version "v2.0.0"
+   - Click "Run workflow"
+
+2. **Wait for PR Creation**:
+   - The workflow will detect the module path needs updating
+   - It will create a PR with the title: "chore: update module path for v2"
+   - The workflow will pause and display: "⚠️ RELEASE PAUSED"
+
+3. **Review and Merge the PR**:
+   - Review the automatically created PR
+   - Ensure tests pass
+   - Merge the PR into your base branch
+
+4. **Complete the Release**:
+   - Go back to Actions → Release workflow
+   - Run the same release workflow again with the same parameters
+   - This time, the workflow will detect the module path is correct
+   - It will complete the release and create the tag
+
+### For Module Releases
+
+The process is identical, just use the Module Release workflow instead:
+
+1. **Trigger Module Release**: Select your module and choose "major" release type
+2. **Wait for PR**: A PR will be created for the module path update
+3. **Merge the PR**: Review and merge the module-specific PR
+4. **Complete Release**: Re-run the module release workflow
+
 ## Troubleshooting
+
+### Error: "RELEASE PAUSED - A PR has been created..."
+
+This is **expected behavior** for first-time v2+ releases. This is not an error; it's the workflow informing you that a PR has been created. Follow the steps above to merge the PR and complete the release.
 
 ### Error: "module contains a go.mod file, so module path must match major version"
 
@@ -154,7 +232,7 @@ This error occurs when:
 1. You're trying to release v2.0.0 or higher
 2. The module path in `go.mod` doesn't include the `/vN` suffix
 
-**Solution**: The workflow should handle this automatically. If you see this error, it means the auto-update step failed. Manually update the module path as described above.
+**Solution**: The workflow creates a PR automatically to fix this. If you see this error during a manual operation, manually update the module path as described in the "Manual Version Updates" section.
 
 ### Error: "Module path has /vX but releasing vY"
 

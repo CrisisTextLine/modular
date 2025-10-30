@@ -1,8 +1,8 @@
-module github.com/CrisisTextLine/modular/modules/reverseproxy
+module github.com/CrisisTextLine/modular/modules/reverseproxy/v2
 
 go 1.25
 
-retract v1.0.0
+// retract (from old module path) v1.0.0
 
 require (
 	github.com/CrisisTextLine/modular v1.11.6

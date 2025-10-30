@@ -680,18 +680,28 @@ func (ctx *ReverseProxyBDDTestContext) aNewBackendIsAddedToTheConfiguration() er
 }
 
 func (ctx *ReverseProxyBDDTestContext) aBackendAddedEventShouldBeEmitted() error {
-	events := ctx.eventObserver.GetEvents()
+	// Retry mechanism to handle timing issues - events may be emitted asynchronously
+	maxAttempts := 10
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		events := ctx.eventObserver.GetEvents()
 
-	// Debug: log all captured events
+		for _, event := range events {
+			if event.Type() == EventTypeBackendAdded {
+				return nil
+			}
+		}
+
+		// If not found and not last attempt, wait a bit and retry
+		if attempt < maxAttempts-1 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	// Final check with debug info
+	events := ctx.eventObserver.GetEvents()
 	eventTypes := make([]string, len(events))
 	for i, event := range events {
 		eventTypes[i] = event.Type()
-	}
-
-	for _, event := range events {
-		if event.Type() == EventTypeBackendAdded {
-			return nil
-		}
 	}
 
 	return fmt.Errorf("no backend added events found. Captured events: %v", eventTypes)

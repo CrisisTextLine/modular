@@ -260,12 +260,11 @@ jobs:
           # Update the module path in go.mod
           sed -i "s|^module ${CURRENT_MODULE_PATH}$|module ${NEW_MODULE_PATH}|" go.mod
 
-          # Update retract directives to use full old module path (if any exist)
-          # This prevents "invalid version" errors when retracted versions belong to the old module path
+          # Comment out retract directives (if any exist)
+          # Retract directives from v0/v1 module path are not valid for v2+ module path
+          # since they refer to versions that don't exist on the new module path
           if grep -q "^retract " go.mod; then
-            # Replace bare version retracts with fully-qualified old module path
-            sed -i "s|^retract \(v[0-9]\)|retract ${CURRENT_MODULE_PATH} \1|g" go.mod
-            sed -i "s|^retract \[\(.*\)\]|retract [\1] // ${CURRENT_MODULE_PATH}|g" go.mod
+            sed -i "s|^retract |// retract (from old module path) |g" go.mod
           fi
 
           # Run go mod tidy to ensure consistency

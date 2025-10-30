@@ -252,60 +252,62 @@ jobs:
           MAJOR_VERSION="${{ steps.check_module_path.outputs.major_version }}"
           CURRENT_MODULE_PATH="${{ steps.check_module_path.outputs.current_module_path }}"
           NEW_MODULE_PATH="${{ steps.check_module_path.outputs.new_module_path }}"
-          
+
           # Create a new branch for the module path update
           BRANCH_NAME="chore/update-module-path-v${MAJOR_VERSION}"
           git checkout -b "$BRANCH_NAME"
-          
+
           # Update the module path in go.mod
           sed -i "s|^module ${CURRENT_MODULE_PATH}|module ${NEW_MODULE_PATH}|" go.mod
-          
+
           # Run go mod tidy to ensure consistency
           go mod tidy
-          
+
           # Commit the change
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add go.mod
           # Add go.sum if it was modified
           git add go.sum 2>/dev/null || true
-          git commit -m "chore: update module path for v${MAJOR_VERSION}
+          git commit -m "$(cat <<'EOF'
+          chore: update module path for v${MAJOR_VERSION}
 
-This updates the module path from:
-  ${CURRENT_MODULE_PATH}
-to:
-  ${NEW_MODULE_PATH}
+          This updates the module path from:
+            ${CURRENT_MODULE_PATH}
+          to:
+            ${NEW_MODULE_PATH}
 
-This is required for releasing version ${VERSION} according to Go module versioning requirements.
-See https://go.dev/blog/v2-go-modules for more information."
-          
+          This is required for releasing version ${VERSION} according to Go module versioning requirements.
+          See https://go.dev/blog/v2-go-modules for more information.
+          EOF
+          )"
+
           # Push the branch
           git push origin "$BRANCH_NAME"
-          
-          # Create the PR
-          gh pr create \
-            --title "chore: update module path for v${MAJOR_VERSION}" \
-            --body "## Module Path Update for ${VERSION}
 
-This PR updates the module path in \`go.mod\` to include the \`/v${MAJOR_VERSION}\` suffix as required by Go module versioning for major versions 2 and above.
+          # Create the PR with heredoc for body
+          gh pr create --title "chore: update module path for v${MAJOR_VERSION}" --body "$(cat <<'EOF'
+          ## Module Path Update for ${VERSION}
 
-### Changes:
-- **Old module path**: \`${CURRENT_MODULE_PATH}\`
-- **New module path**: \`${NEW_MODULE_PATH}\`
+          This PR updates the module path in \`go.mod\` to include the \`/v${MAJOR_VERSION}\` suffix as required by Go module versioning for major versions 2 and above.
 
-### Why This Change Is Needed:
-According to Go module versioning requirements, when releasing a major version v2 or higher, the module path must include a version suffix. This ensures proper dependency resolution and prevents conflicts with v0/v1 versions.
+          ### Changes:
+          - **Old module path**: \`${CURRENT_MODULE_PATH}\`
+          - **New module path**: \`${NEW_MODULE_PATH}\`
 
-Reference: https://go.dev/blog/v2-go-modules
+          ### Why This Change Is Needed:
+          According to Go module versioning requirements, when releasing a major version v2 or higher, the module path must include a version suffix. This ensures proper dependency resolution and prevents conflicts with v0/v1 versions.
 
-### Next Steps:
-1. Review and merge this PR
-2. After merging, re-run the release workflow to complete the ${VERSION} release
+          Reference: https://go.dev/blog/v2-go-modules
 
-This PR was automatically created by the release workflow." \
-            --base "${{ github.ref_name }}" \
-            --head "$BRANCH_NAME"
-          
+          ### Next Steps:
+          1. Review and merge this PR
+          2. After merging, re-run the release workflow to complete the ${VERSION} release
+
+          This PR was automatically created by the release workflow.
+          EOF
+          )" --base "${{ github.ref_name }}" --head "$BRANCH_NAME"
+
           echo "✓ Created PR for module path update"
           echo ""
           echo "============================================"

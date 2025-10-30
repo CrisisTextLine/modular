@@ -274,12 +274,7 @@ jobs:
             | grep -Ev '\.(out|coverage)$' \
             | grep -Ev '^(CONTRIBUTING\.md|MIGRATION_GUIDE\.md|DOCUMENTATION\.md|CLOUDEVENTS\.md|OBSERVER_PATTERN\.md|API_CONTRACT_MANAGEMENT\.md|CONCURRENCY_GUIDELINES\.md|RECOMMENDED_MODULES\.md)$' \
             | tar -czf "$ARCHIVE" -T -
-          gh release create "$RELEASE_TAG" \
-            --title "Modular $RELEASE_TAG" \
-            --notes-file changelog.md \
-            --repo ${{ github.repository }} \
-            "$ARCHIVE" \
-            --latest
+          gh release create "$RELEASE_TAG" --title "Modular $RELEASE_TAG" --notes-file changelog.md --repo ${{ github.repository }} "$ARCHIVE" --latest
           # Capture HTML URL (gh release view returns web URL in .url field)
           RELEASE_URL=$(gh release view "$RELEASE_TAG" --json url --jq .url)
           echo "html_url=$RELEASE_URL" >> $GITHUB_OUTPUT

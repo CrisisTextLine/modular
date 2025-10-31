@@ -12,7 +12,7 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/CrisisTextLine/modular/feeders"
-	"github.com/CrisisTextLine/modular/modules/database"
+	"github.com/CrisisTextLine/modular/modules/database/v2"
 
 	_ "modernc.org/sqlite" // Import pure Go SQLite driver
 )

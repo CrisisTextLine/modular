@@ -7,8 +7,6 @@ github.com/BurntSushi/toml v1.5.0 h1:W5quZX/G/csjUnuI8SUYlsHs9M38FC7znL0lIO+DvMg
 github.com/BurntSushi/toml v1.5.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/CrisisTextLine/modular v1.11.6 h1:ziTO2Vt8T7yyNTXMI39oGZwQeFzJw6HW+ZYyF2wR/rA=
 github.com/CrisisTextLine/modular v1.11.6/go.mod h1:Z5pxBOiK3fkAmmWia+44S9sgkX++sGUNj2KjFp2lU/I=
-github.com/CrisisTextLine/modular/modules/database v1.4.0 h1:n0ejfYa3S4vTEHz1Oq1m92XHse1vz04oAZDjny05XBk=
-github.com/CrisisTextLine/modular/modules/database v1.4.0/go.mod h1:oARF3PRhHJeWuxRFXlWVU5o/wpb9gPVItI5G7kXjzdA=
 github.com/Masterminds/semver/v3 v3.1.1 h1:hLg3sBzpNErnxhQtUy/mmLR2I9foDujNK030IGemrRc=
 github.com/Masterminds/semver/v3 v3.1.1/go.mod h1:VPu/7SZ7ePZ3QOrcuXROw5FAcLl4a0cBrbBpGY/8hQs=
 github.com/aws/aws-sdk-go-v2 v1.38.3 h1:B6cV4oxnMs45fql4yRH+/Po/YU+597zgWqvDpYMturk=

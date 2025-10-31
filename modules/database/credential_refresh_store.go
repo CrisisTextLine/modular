@@ -165,31 +165,21 @@ func extractDatabaseAndOptions(dsn string) (string, map[string]string, error) {
 // determineDriverAndPort determines the correct driver name for go-db-credential-refresh
 // and extracts the port from the endpoint
 func determineDriverAndPort(driverName string, endpoint string) (string, int) {
-	port := 5432 // Default PostgreSQL port
+	// Set default port based on driver
+	defaultPort := 5432
+	driver := "pgx"
+	if driverName == "mysql" {
+		defaultPort = 3306
+		driver = "mysql"
+	}
+	port := defaultPort
 
-	// Extract port from endpoint if present
+	// Override with explicit port if present
 	if colonIdx := strings.LastIndex(endpoint, ":"); colonIdx != -1 {
-		// Try to parse the port - if parsing fails, the default port will be used
-		// This is safe because invalid ports will be caught by the database driver
-		_, _ = fmt.Sscanf(endpoint[colonIdx+1:], "%d", &port)
+		if n, err := fmt.Sscanf(endpoint[colonIdx+1:], "%d", &port); err != nil || n != 1 {
+			port = defaultPort // Restore default if parsing fails
+		}
 	}
 
-	// Map driver names to go-db-credential-refresh driver names
-	// Note: Port defaults are only applied when no port was extracted from the endpoint
-	switch driverName {
-	case "postgres":
-		// Use pgx for postgres driver (better performance and features)
-		// Port default of 5432 is already set above
-		return "pgx", port
-	case "mysql":
-		// Only set MySQL default port if we're still using the PostgreSQL default
-		// This means no port was explicitly provided in the endpoint
-		if port == 5432 {
-			port = 3306 // Default MySQL port
-		}
-		return "mysql", port
-	default:
-		// Default to pgx for unknown drivers
-		return "pgx", port
-	}
+	return driver, port
 }

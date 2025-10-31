@@ -136,10 +136,6 @@ database:
 - `db_user`: Database username configured for IAM authentication (required)
 - `connection_timeout`: Timeout for database connection tests in seconds (default: 5 seconds)
 
-**Note**: The following configuration options are still accepted for backward compatibility but are no longer used with the new automatic credential refresh:
-- `token_refresh_interval`: Token refresh is now handled automatically on-demand
-- `connection_close_grace_period`: Connection pool transitions are now handled by the credential refresh library
-
 #### Prerequisites for AWS IAM Authentication
 
 1. **RDS Instance Configuration**: Your RDS instance must have IAM database authentication enabled.

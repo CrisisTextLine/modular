@@ -46,10 +46,9 @@ func TestConnectionConfigEnvMapping(t *testing.T) {
 				ConnectionMaxLifetime: 3600 * time.Second,
 				ConnectionMaxIdleTime: 300 * time.Second,
 				AWSIAMAuth: &AWSIAMAuthConfig{
-					Enabled:              true,
-					Region:               "us-west-2",
-					DBUser:               "iam_user",
-					TokenRefreshInterval: 600,
+					Enabled: true,
+					Region:  "us-west-2",
+					DBUser:  "iam_user",
 				},
 			},
 		},

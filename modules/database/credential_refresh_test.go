@@ -176,11 +176,10 @@ func TestCreateDBWithCredentialRefresh_IntegrationWithLibrary(t *testing.T) {
 		Driver: "postgres",
 		DSN:    "postgres://testuser:placeholder@mydb.region.rds.amazonaws.com:5432/mydb",
 		AWSIAMAuth: &AWSIAMAuthConfig{
-			Enabled:              true,
-			Region:               "us-east-1",
-			DBUser:               "testuser",
-			TokenRefreshInterval: 600,
-			ConnectionTimeout:    5 * time.Second,
+			Enabled:           true,
+			Region:            "us-east-1",
+			DBUser:            "testuser",
+			ConnectionTimeout: 5 * time.Second,
 		},
 		MaxOpenConnections:    10,
 		MaxIdleConnections:    5,
@@ -211,10 +210,9 @@ func TestDatabaseService_ConnectWithIAM(t *testing.T) {
 		Driver: "postgres",
 		DSN:    "postgres://testuser:placeholder@mydb.region.rds.amazonaws.com:5432/mydb",
 		AWSIAMAuth: &AWSIAMAuthConfig{
-			Enabled:              true,
-			Region:               "us-east-1",
-			DBUser:               "testuser",
-			TokenRefreshInterval: 600,
+			Enabled: true,
+			Region:  "us-east-1",
+			DBUser:  "testuser",
 		},
 	}
 

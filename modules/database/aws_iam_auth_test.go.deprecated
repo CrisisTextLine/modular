@@ -245,7 +245,6 @@ func TestDatabaseServiceWithAWSIAMAuth(t *testing.T) {
 	// Cast to implementation to check internal state
 	impl, ok := service.(*databaseServiceImpl)
 	require.True(t, ok)
-	require.NotNil(t, impl.awsTokenProvider)
 	require.NotNil(t, impl.ctx)
 	require.NotNil(t, impl.cancel)
 
@@ -268,7 +267,6 @@ func TestDatabaseServiceWithoutAWSIAMAuth(t *testing.T) {
 	// Cast to implementation to check internal state
 	impl, ok := service.(*databaseServiceImpl)
 	require.True(t, ok)
-	require.Nil(t, impl.awsTokenProvider)
 	require.NotNil(t, impl.ctx)
 	require.NotNil(t, impl.cancel)
 

@@ -104,13 +104,11 @@ type DatabaseService interface {
 type databaseServiceImpl struct {
 	config           ConnectionConfig
 	db               *sql.DB
-	awsTokenProvider IAMTokenProvider
 	migrationService MigrationService
 	eventEmitter     EventEmitter
 	logger           modular.Logger // Logger service for error reporting
 	ctx              context.Context
 	cancel           context.CancelFunc
-	endpoint         string       // Store endpoint for reconnection
 	connMutex        sync.RWMutex // Protect database connection during recreation
 }
 
@@ -132,67 +130,37 @@ func NewDatabaseService(config ConnectionConfig, logger modular.Logger) (Databas
 		cancel: cancel,
 	}
 
-	// Initialize AWS IAM token provider if enabled
-	if config.AWSIAMAuth != nil && config.AWSIAMAuth.Enabled {
-		tokenProvider, err := NewAWSIAMTokenProvider(config.AWSIAMAuth)
-		if err != nil {
-			cancel()
-			return nil, fmt.Errorf("failed to create AWS IAM token provider: %w", err)
-		}
-		service.awsTokenProvider = tokenProvider
-	}
-
 	return service, nil
 }
 
 func (s *databaseServiceImpl) Connect() error {
-	dsn := s.config.DSN
+	var db *sql.DB
+	var err error
 
-	// If AWS IAM authentication is enabled, get the token and update the DSN
-	if s.awsTokenProvider != nil {
-		var err error
-		dsn, err = s.awsTokenProvider.BuildDSNWithIAMToken(s.ctx, s.config.DSN)
+	// If AWS IAM authentication is enabled, use go-db-credential-refresh for automatic token management
+	if s.config.AWSIAMAuth != nil && s.config.AWSIAMAuth.Enabled {
+		s.logger.Info("Connecting to database with AWS IAM authentication using credential refresh")
+		db, err = createDBWithCredentialRefresh(s.ctx, s.config)
 		if err != nil {
-			return fmt.Errorf("failed to build DSN with IAM token: %w", err)
+			return fmt.Errorf("failed to create database connection with credential refresh: %w", err)
 		}
-
-		// Extract and store endpoint for token refresh callbacks
-		s.endpoint, err = extractEndpointFromDSN(s.config.DSN)
-		if err != nil {
-			return fmt.Errorf("failed to extract endpoint for token refresh: %w", err)
-		}
-
-		// Set up token refresh callback to recreate connections when tokens are refreshed
-		s.awsTokenProvider.SetTokenRefreshCallback(s.onTokenRefresh)
-
-		// Start background token refresh
-		s.awsTokenProvider.StartTokenRefresh(s.ctx, s.endpoint)
 	} else {
-		// Only preprocess when NOT using AWS IAM auth (since AWS IAM auth does its own preprocessing)
-		var err error
+		// Standard connection without IAM authentication
+		dsn := s.config.DSN
+
+		// Preprocess DSN to handle special characters
 		dsn, err = preprocessDSNForParsing(dsn)
 		if err != nil {
 			return fmt.Errorf("failed to preprocess DSN: %w", err)
 		}
-	}
 
-	db, err := sql.Open(s.config.Driver, dsn)
-	if err != nil {
-		return fmt.Errorf("failed to open database connection: %w", err)
-	}
+		db, err = sql.Open(s.config.Driver, dsn)
+		if err != nil {
+			return fmt.Errorf("failed to open database connection: %w", err)
+		}
 
-	// Configure connection pool
-	if s.config.MaxOpenConnections > 0 {
-		db.SetMaxOpenConns(s.config.MaxOpenConnections)
-	}
-	if s.config.MaxIdleConnections > 0 {
-		db.SetMaxIdleConns(s.config.MaxIdleConnections)
-	}
-	if s.config.ConnectionMaxLifetime > 0 {
-		db.SetConnMaxLifetime(s.config.ConnectionMaxLifetime)
-	}
-	if s.config.ConnectionMaxIdleTime > 0 {
-		db.SetConnMaxIdleTime(s.config.ConnectionMaxIdleTime)
+		// Configure connection pool
+		configureConnectionPool(db, s.config)
 	}
 
 	// Test connection with configurable timeout
@@ -222,11 +190,6 @@ func (s *databaseServiceImpl) Connect() error {
 }
 
 func (s *databaseServiceImpl) Close() error {
-	// Stop AWS token refresh if running
-	if s.awsTokenProvider != nil {
-		s.awsTokenProvider.StopTokenRefresh()
-	}
-
 	// Cancel context
 	if s.cancel != nil {
 		s.cancel()
@@ -243,115 +206,6 @@ func (s *databaseServiceImpl) Close() error {
 		s.db = nil
 	}
 	return nil
-}
-
-// onTokenRefresh is called when IAM token is refreshed to recreate database connections
-func (s *databaseServiceImpl) onTokenRefresh(newToken string, endpoint string) {
-	// Recreate database connection with new token
-	s.connMutex.Lock()
-	defer s.connMutex.Unlock()
-
-	if s.db == nil {
-		return // Connection already closed
-	}
-
-	// Save reference to old DB for graceful closure
-	oldDB := s.db
-
-	s.logger.Info("Starting database connection refresh with new IAM token", "endpoint", endpoint)
-
-	// Build new DSN with refreshed token
-	newDSN, err := s.awsTokenProvider.BuildDSNWithIAMToken(s.ctx, s.config.DSN)
-	if err != nil {
-		// Log error but don't crash the application
-		s.logger.Error("Failed to build DSN with refreshed IAM token", "error", err, "endpoint", endpoint)
-		return
-	}
-
-	// Create new database connection
-	newDB, err := sql.Open(s.config.Driver, newDSN)
-	if err != nil {
-		s.logger.Error("Failed to open new database connection with refreshed token", "error", err, "driver", s.config.Driver)
-		return
-	}
-
-	// Configure connection pool with same settings
-	if s.config.MaxOpenConnections > 0 {
-		newDB.SetMaxOpenConns(s.config.MaxOpenConnections)
-	}
-	if s.config.MaxIdleConnections > 0 {
-		newDB.SetMaxIdleConns(s.config.MaxIdleConnections)
-	}
-	if s.config.ConnectionMaxLifetime > 0 {
-		newDB.SetConnMaxLifetime(s.config.ConnectionMaxLifetime)
-	}
-	if s.config.ConnectionMaxIdleTime > 0 {
-		newDB.SetConnMaxIdleTime(s.config.ConnectionMaxIdleTime)
-	}
-
-	// Test new connection with configurable timeout
-	timeout := DefaultConnectionTimeout
-	if s.config.AWSIAMAuth != nil && s.config.AWSIAMAuth.ConnectionTimeout > 0 {
-		timeout = s.config.AWSIAMAuth.ConnectionTimeout
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	if err := newDB.PingContext(ctx); err != nil {
-		s.logger.Error("Failed to ping database with refreshed token", "error", err, "timeout", timeout)
-		newDB.Close()
-		return
-	}
-
-	s.logger.Info("Successfully created new database connection with refreshed token", "endpoint", endpoint)
-
-	// Atomically replace old DB with new one
-	// After this point, new queries will use the new connection pool with fresh token
-	s.db = newDB
-
-	// Reinitialize migration service with new connection
-	if s.eventEmitter != nil {
-		s.migrationService = NewMigrationService(s.db, s.eventEmitter)
-	}
-
-	// Close old connection pool in background with grace period
-	// This allows in-flight queries to complete before closing
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				s.logger.Error("Panic occurred while closing old database connection", "panic", r)
-			}
-		}()
-
-		// Determine grace period for connection closure
-		gracePeriod := 5 * time.Second // Default
-		if s.config.AWSIAMAuth != nil && s.config.AWSIAMAuth.ConnectionCloseGracePeriod > 0 {
-			gracePeriod = s.config.AWSIAMAuth.ConnectionCloseGracePeriod
-		}
-
-		s.logger.Debug("Waiting grace period before closing old database connection",
-			"grace_period", gracePeriod, "endpoint", endpoint)
-
-		// Wait for in-flight queries to complete
-		time.Sleep(gracePeriod)
-
-		// Get connection stats before closing to log connection pool state
-		stats := oldDB.Stats()
-		s.logger.Debug("Old database connection pool stats before closure",
-			"open_connections", stats.OpenConnections,
-			"in_use", stats.InUse,
-			"idle", stats.Idle,
-			"endpoint", endpoint)
-
-		// Close old connection pool
-		if err := oldDB.Close(); err != nil {
-			s.logger.Error("Error closing old database connection after grace period",
-				"error", err, "grace_period", gracePeriod, "endpoint", endpoint)
-		} else {
-			s.logger.Info("Successfully closed old database connection after grace period",
-				"grace_period", gracePeriod, "endpoint", endpoint)
-		}
-	}()
 }
 
 func (s *databaseServiceImpl) DB() *sql.DB {

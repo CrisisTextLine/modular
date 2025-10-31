@@ -163,103 +163,6 @@ func TestCreateDBWithCredentialRefresh_ValidationErrors(t *testing.T) {
 	})
 }
 
-// TestCreateDBWithCredentialRefresh_IntegrationWithLibrary tests integration with go-db-credential-refresh
-// This test validates that we're using the library correctly but doesn't require actual AWS credentials
-func TestCreateDBWithCredentialRefresh_IntegrationWithLibrary(t *testing.T) {
-	// Skip this test in normal runs as it requires AWS credentials
-	// It's here to document the integration pattern
-	t.Skip("Requires AWS credentials and RDS instance")
-
-	ctx := context.Background()
-
-	config := ConnectionConfig{
-		Driver: "postgres",
-		DSN:    "postgres://testuser:placeholder@mydb.region.rds.amazonaws.com:5432/mydb",
-		AWSIAMAuth: &AWSIAMAuthConfig{
-			Enabled:           true,
-			Region:            "us-east-1",
-			DBUser:            "testuser",
-			ConnectionTimeout: 5 * time.Second,
-		},
-		MaxOpenConnections:    10,
-		MaxIdleConnections:    5,
-		ConnectionMaxLifetime: 1 * time.Hour,
-		ConnectionMaxIdleTime: 10 * time.Minute,
-	}
-
-	db, err := createDBWithCredentialRefresh(ctx, config)
-	require.NoError(t, err, "Should create database connection with credential refresh")
-	require.NotNil(t, db, "Database connection should not be nil")
-
-	// Verify connection pool settings were applied
-	stats := db.Stats()
-	assert.Equal(t, 10, stats.MaxOpenConnections)
-
-	// Clean up
-	err = db.Close()
-	assert.NoError(t, err)
-}
-
-// TestDatabaseService_ConnectWithIAM tests the service Connect method with IAM auth
-func TestDatabaseService_ConnectWithIAM(t *testing.T) {
-	// Skip this test in normal runs as it requires AWS credentials
-	// It's here to document the usage pattern
-	t.Skip("Requires AWS credentials and RDS instance")
-
-	config := ConnectionConfig{
-		Driver: "postgres",
-		DSN:    "postgres://testuser:placeholder@mydb.region.rds.amazonaws.com:5432/mydb",
-		AWSIAMAuth: &AWSIAMAuthConfig{
-			Enabled: true,
-			Region:  "us-east-1",
-			DBUser:  "testuser",
-		},
-	}
-
-	service, err := NewDatabaseService(config, &MockLogger{})
-	require.NoError(t, err)
-	require.NotNil(t, service)
-
-	// Test connection
-	err = service.Connect()
-	require.NoError(t, err, "Should connect with IAM authentication")
-
-	// Verify database connection is working
-	db := service.DB()
-	require.NotNil(t, db)
-
-	ctx := context.Background()
-	err = service.Ping(ctx)
-	assert.NoError(t, err, "Should be able to ping database")
-
-	// Clean up
-	err = service.Close()
-	assert.NoError(t, err)
-}
-
-// TestDatabaseService_AutomaticTokenRefresh documents the automatic token refresh behavior
-func TestDatabaseService_AutomaticTokenRefresh(t *testing.T) {
-	t.Skip("Requires AWS credentials and RDS instance for real testing")
-
-	// This test documents that go-db-credential-refresh automatically handles:
-	// 1. Token expiration detection
-	// 2. Automatic token refresh on authentication errors
-	// 3. Connection retry with new credentials
-	//
-	// The library handles this internally through the Connector interface,
-	// so we don't need to manually manage token refresh anymore.
-	//
-	// The old implementation had these issues:
-	// - Errors were exposed to database clients during token refresh
-	// - Manual connection pool recreation was error-prone
-	// - Background goroutines for token refresh could leak
-	//
-	// The new implementation (go-db-credential-refresh) fixes these by:
-	// - Transparently handling token refresh on connection creation
-	// - Detecting authentication errors and retrying with fresh tokens
-	// - Managing token lifecycle internally without exposing errors to clients
-}
-
 // TestDatabaseService_WithoutIAM ensures non-IAM connections still work
 func TestDatabaseService_WithoutIAM(t *testing.T) {
 	config := ConnectionConfig{
@@ -471,11 +374,4 @@ func TestExtractUsernameFromDSN(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-// Benchmark for connection creation with credential refresh
-func BenchmarkCreateDBWithCredentialRefresh(b *testing.B) {
-	b.Skip("Requires AWS credentials")
-	// This benchmark would measure the overhead of using go-db-credential-refresh
-	// vs direct sql.Open, but requires actual AWS infrastructure
 }

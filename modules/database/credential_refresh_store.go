@@ -30,16 +30,26 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
+	// Strip any existing password/token from DSN for backward compatibility
+	// This allows applications that previously passed DSN with token placeholders to continue working
+	cleanDSN := stripPasswordFromDSN(connConfig.DSN)
+
 	// Extract endpoint from DSN
-	endpoint, err := extractEndpointFromDSN(connConfig.DSN)
+	endpoint, err := extractEndpointFromDSN(cleanDSN)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract endpoint from DSN: %w", err)
 	}
 
 	// Extract database name and options from DSN
-	dbName, opts, err := extractDatabaseAndOptions(connConfig.DSN)
+	dbName, opts, err := extractDatabaseAndOptions(cleanDSN)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract database name and options: %w", err)
+	}
+
+	// Extract username from DSN if present, otherwise use config
+	username := extractUsernameFromDSN(cleanDSN)
+	if username == "" {
+		username = connConfig.AWSIAMAuth.DBUser
 	}
 
 	// Determine driver name and port
@@ -50,7 +60,7 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 		Credentials: awsConfig.Credentials,
 		Endpoint:    endpoint,
 		Region:      connConfig.AWSIAMAuth.Region,
-		User:        connConfig.AWSIAMAuth.DBUser,
+		User:        username,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AWS RDS store: %w", err)
@@ -100,6 +110,85 @@ func configureConnectionPool(db *sql.DB, config ConnectionConfig) {
 	if config.ConnectionMaxIdleTime > 0 {
 		db.SetConnMaxIdleTime(config.ConnectionMaxIdleTime)
 	}
+}
+
+// stripPasswordFromDSN removes any password from a DSN for backward compatibility
+// This allows applications that previously passed DSN with token placeholders to continue working
+func stripPasswordFromDSN(dsn string) string {
+	if strings.Contains(dsn, "://") {
+		// URL-style DSN (e.g., postgres://user:password@host:port/database)
+		// Find user info section
+		schemeEnd := strings.Index(dsn, "://")
+		if schemeEnd == -1 {
+			return dsn
+		}
+
+		atIdx := strings.Index(dsn[schemeEnd+3:], "@")
+		if atIdx == -1 {
+			return dsn // No credentials
+		}
+
+		// Extract scheme and credentials section
+		scheme := dsn[:schemeEnd+3]
+		credentials := dsn[schemeEnd+3 : schemeEnd+3+atIdx]
+		remainder := dsn[schemeEnd+3+atIdx:]
+
+		// Check if there's a password (contains colon)
+		colonIdx := strings.Index(credentials, ":")
+		if colonIdx == -1 {
+			return dsn // No password
+		}
+
+		// Rebuild DSN without password
+		username := credentials[:colonIdx]
+		return scheme + username + remainder
+	}
+
+	// Key-value style DSN (e.g., host=localhost port=5432 password=token dbname=mydb)
+	parts := strings.Fields(dsn)
+	var result []string
+	for _, part := range parts {
+		if !strings.HasPrefix(part, "password=") {
+			result = append(result, part)
+		}
+	}
+	return strings.Join(result, " ")
+}
+
+// extractUsernameFromDSN extracts the username from a DSN
+func extractUsernameFromDSN(dsn string) string {
+	if strings.Contains(dsn, "://") {
+		// URL-style DSN
+		schemeEnd := strings.Index(dsn, "://")
+		if schemeEnd == -1 {
+			return ""
+		}
+
+		atIdx := strings.Index(dsn[schemeEnd+3:], "@")
+		if atIdx == -1 {
+			return "" // No credentials
+		}
+
+		credentials := dsn[schemeEnd+3 : schemeEnd+3+atIdx]
+
+		// Check if there's a colon (username:password format)
+		colonIdx := strings.Index(credentials, ":")
+		if colonIdx != -1 {
+			return credentials[:colonIdx]
+		}
+
+		// No colon means just username
+		return credentials
+	}
+
+	// Key-value style DSN
+	parts := strings.Fields(dsn)
+	for _, part := range parts {
+		if strings.HasPrefix(part, "user=") {
+			return strings.TrimPrefix(part, "user=")
+		}
+	}
+	return ""
 }
 
 // extractDatabaseAndOptions extracts the database name and connection options from a DSN

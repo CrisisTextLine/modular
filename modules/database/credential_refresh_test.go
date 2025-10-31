@@ -384,6 +384,95 @@ func TestHelperFunctions_StillWork(t *testing.T) {
 	})
 }
 
+// TestStripPasswordFromDSN tests removing passwords from DSN for backward compatibility
+func TestStripPasswordFromDSN(t *testing.T) {
+	tests := []struct {
+		name     string
+		dsn      string
+		expected string
+	}{
+		{
+			name:     "URL-style DSN with password",
+			dsn:      "postgres://user:password@host:5432/mydb",
+			expected: "postgres://user@host:5432/mydb",
+		},
+		{
+			name:     "URL-style DSN with token",
+			dsn:      "postgres://iamuser:some_token_placeholder@mydb.region.rds.amazonaws.com:5432/mydb",
+			expected: "postgres://iamuser@mydb.region.rds.amazonaws.com:5432/mydb",
+		},
+		{
+			name:     "URL-style DSN without password",
+			dsn:      "postgres://user@host:5432/mydb",
+			expected: "postgres://user@host:5432/mydb",
+		},
+		{
+			name:     "URL-style DSN without credentials",
+			dsn:      "postgres://host:5432/mydb",
+			expected: "postgres://host:5432/mydb",
+		},
+		{
+			name:     "Key-value DSN with password",
+			dsn:      "host=localhost port=5432 user=testuser password=secret dbname=mydb",
+			expected: "host=localhost port=5432 user=testuser dbname=mydb",
+		},
+		{
+			name:     "Key-value DSN without password",
+			dsn:      "host=localhost port=5432 user=testuser dbname=mydb",
+			expected: "host=localhost port=5432 user=testuser dbname=mydb",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripPasswordFromDSN(tt.dsn)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestExtractUsernameFromDSN tests extracting username from DSN
+func TestExtractUsernameFromDSN(t *testing.T) {
+	tests := []struct {
+		name     string
+		dsn      string
+		expected string
+	}{
+		{
+			name:     "URL-style DSN with password",
+			dsn:      "postgres://myuser:password@host:5432/mydb",
+			expected: "myuser",
+		},
+		{
+			name:     "URL-style DSN without password",
+			dsn:      "postgres://myuser@host:5432/mydb",
+			expected: "myuser",
+		},
+		{
+			name:     "URL-style DSN without credentials",
+			dsn:      "postgres://host:5432/mydb",
+			expected: "",
+		},
+		{
+			name:     "Key-value DSN with user",
+			dsn:      "host=localhost port=5432 user=testuser dbname=mydb",
+			expected: "testuser",
+		},
+		{
+			name:     "Key-value DSN without user",
+			dsn:      "host=localhost port=5432 dbname=mydb",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractUsernameFromDSN(tt.dsn)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 // Benchmark for connection creation with credential refresh
 func BenchmarkCreateDBWithCredentialRefresh(b *testing.B) {
 	b.Skip("Requires AWS credentials")

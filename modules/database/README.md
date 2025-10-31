@@ -190,6 +190,7 @@ The database module uses the [go-db-credential-refresh](https://github.com/davep
    - Refreshes the IAM token
    - Retries the connection with the new token
 5. **No Error Exposure**: Token refresh errors are handled internally, ensuring database clients never see token-related failures.
+6. **Backward Compatibility**: For applications that previously passed DSN with password/token placeholders, the module automatically strips any existing passwords from the DSN before processing. This ensures a smooth migration path from the old manual token refresh approach.
 
 This approach eliminates the manual token refresh complexity and ensures connections always use valid credentials without exposing refresh errors to application code.
 
@@ -223,6 +224,24 @@ database:
 - Set `connection_max_lifetime` to be slightly less than 15 minutes (the IAM token lifetime) to allow connections to naturally expire and be recreated with fresh tokens.
 - The library handles authentication errors automatically, so you don't need to worry about manual token refresh intervals.
 - The automatic retry logic ensures that transient authentication failures are handled gracefully without impacting your application.
+
+#### Migrating from Previous Versions
+
+If you're upgrading from a previous version that used manual token refresh, the migration is straightforward:
+
+**Configuration Changes:**
+- Remove `token_refresh_interval` from your configuration (no longer used)
+- Remove `connection_close_grace_period` from your configuration (no longer used)
+
+**DSN Format:**
+The module now supports both approaches for backward compatibility:
+- **Old approach** (still supported): `postgres://iamuser:token_placeholder@host:5432/db`
+- **New approach** (recommended): `postgres://iamuser@host:5432/db`
+
+If your application currently passes a DSN with a password or token placeholder, the module will automatically strip it and handle credentials internally. This means you don't need to change your DSN format immediately, but it's recommended to remove any password/token placeholders as they are no longer needed.
+
+**Code Changes:**
+No code changes are required. The module API remains unchanged and the new implementation is fully backward compatible.
 
 #### Dependencies
 

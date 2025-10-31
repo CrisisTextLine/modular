@@ -81,20 +81,25 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 	db := sql.OpenDB(connector)
 
 	// Configure connection pool
-	if connConfig.MaxOpenConnections > 0 {
-		db.SetMaxOpenConns(connConfig.MaxOpenConnections)
-	}
-	if connConfig.MaxIdleConnections > 0 {
-		db.SetMaxIdleConns(connConfig.MaxIdleConnections)
-	}
-	if connConfig.ConnectionMaxLifetime > 0 {
-		db.SetConnMaxLifetime(connConfig.ConnectionMaxLifetime)
-	}
-	if connConfig.ConnectionMaxIdleTime > 0 {
-		db.SetConnMaxIdleTime(connConfig.ConnectionMaxIdleTime)
-	}
+	configureConnectionPool(db, connConfig)
 
 	return db, nil
+}
+
+// configureConnectionPool applies connection pool settings to a database connection
+func configureConnectionPool(db *sql.DB, config ConnectionConfig) {
+	if config.MaxOpenConnections > 0 {
+		db.SetMaxOpenConns(config.MaxOpenConnections)
+	}
+	if config.MaxIdleConnections > 0 {
+		db.SetMaxIdleConns(config.MaxIdleConnections)
+	}
+	if config.ConnectionMaxLifetime > 0 {
+		db.SetConnMaxLifetime(config.ConnectionMaxLifetime)
+	}
+	if config.ConnectionMaxIdleTime > 0 {
+		db.SetConnMaxIdleTime(config.ConnectionMaxIdleTime)
+	}
 }
 
 // extractDatabaseAndOptions extracts the database name and connection options from a DSN
@@ -164,16 +169,21 @@ func determineDriverAndPort(driverName string, endpoint string) (string, int) {
 
 	// Extract port from endpoint if present
 	if colonIdx := strings.LastIndex(endpoint, ":"); colonIdx != -1 {
-		// Try to parse the port
+		// Try to parse the port - if parsing fails, the default port will be used
+		// This is safe because invalid ports will be caught by the database driver
 		_, _ = fmt.Sscanf(endpoint[colonIdx+1:], "%d", &port)
 	}
 
 	// Map driver names to go-db-credential-refresh driver names
+	// Note: Port defaults are only applied when no port was extracted from the endpoint
 	switch driverName {
 	case "postgres":
 		// Use pgx for postgres driver (better performance and features)
+		// Port default of 5432 is already set above
 		return "pgx", port
 	case "mysql":
+		// Only set MySQL default port if we're still using the PostgreSQL default
+		// This means no port was explicitly provided in the endpoint
 		if port == 5432 {
 			port = 3306 // Default MySQL port
 		}

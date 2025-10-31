@@ -127,17 +127,18 @@ database:
         enabled: true
         region: "us-east-1"                    # AWS region where RDS instance is located
         db_user: "iamuser"                     # Database username for IAM authentication
-        token_refresh_interval: 600            # Token refresh interval in seconds (default: 600)
 ```
 
 #### AWS IAM Auth Configuration Options
 
-- `enabled`: Boolean flag to enable AWS IAM authentication
+- `enabled`: Boolean flag to enable AWS IAM authentication (required)
 - `region`: AWS region where the RDS instance is located (required)
 - `db_user`: Database username configured for IAM authentication (required)
-- `token_refresh_interval`: How often to refresh the IAM token in seconds (default: 600 seconds / 10 minutes)
 - `connection_timeout`: Timeout for database connection tests in seconds (default: 5 seconds)
-- `connection_close_grace_period`: Grace period to wait before closing old connections after token refresh, allowing in-flight queries to complete (default: 5 seconds)
+
+**Note**: The following configuration options are still accepted for backward compatibility but are no longer used with the new automatic credential refresh:
+- `token_refresh_interval`: Token refresh is now handled automatically on-demand
+- `connection_close_grace_period`: Connection pool transitions are now handled by the credential refresh library
 
 #### Prerequisites for AWS IAM Authentication
 
@@ -183,57 +184,59 @@ database:
 
 #### How It Works
 
-1. When the database module starts, it checks if AWS IAM authentication is enabled for each connection.
-2. If enabled, it creates an AWS IAM token provider using the specified region and database user.
-3. The token provider generates an initial IAM authentication token using the AWS SDK.
-4. The original DSN is modified to use this token as the password.
-5. A background goroutine refreshes the token at the specified interval (default: 10 minutes).
-6. Tokens are automatically refreshed before they expire (RDS IAM tokens are valid for 15 minutes).
+The database module uses the [go-db-credential-refresh](https://github.com/davepgreene/go-db-credential-refresh) library to handle AWS IAM token management automatically:
 
-#### Connection Pool Lifecycle During Token Refresh
+1. **Initialization**: When the database module starts with AWS IAM authentication enabled, it creates a credential store that manages IAM tokens.
+2. **Automatic Token Generation**: The credential store generates IAM authentication tokens on-demand using the AWS SDK.
+3. **Transparent Token Refresh**: When a connection is established, the connector automatically fetches a fresh token if needed.
+4. **Authentication Error Detection**: If a database operation fails due to authentication errors, the connector automatically:
+   - Detects the authentication failure
+   - Refreshes the IAM token
+   - Retries the connection with the new token
+5. **No Error Exposure**: Token refresh errors are handled internally, ensuring database clients never see token-related failures.
 
-When IAM tokens are refreshed, the database module implements a graceful connection pool transition to prevent authentication failures:
+This approach eliminates the manual token refresh complexity and ensures connections always use valid credentials without exposing refresh errors to application code.
 
-1. **Token Refresh Trigger**: When the token refresh interval elapses, a new IAM token is generated.
-2. **New Connection Pool**: A new database connection pool is created using the refreshed token.
-3. **Connection Validation**: The new connection is tested with a ping to ensure it's working before switching.
-4. **Atomic Swap**: The old connection pool is atomically replaced with the new one. New queries immediately use the fresh token.
-5. **Grace Period**: The old connection pool remains open for a configurable grace period (default: 5 seconds) to allow in-flight queries to complete.
-6. **Old Pool Closure**: After the grace period, the old connection pool is closed and its resources are released.
+#### Automatic Credential Refresh
 
-This approach prevents "PAM authentication failed" errors that could occur if connections using expired tokens are still in the pool. The grace period ensures that queries that were already executing when the token refreshed can complete successfully.
+The go-db-credential-refresh library provides several key benefits:
 
-**Configuration Example with Connection Pool Lifecycle:**
+1. **On-Demand Token Refresh**: Tokens are refreshed when needed, not on a fixed schedule.
+2. **Authentication Error Recovery**: The connector automatically detects authentication failures and retries with fresh tokens.
+3. **Connection-Level Management**: Each new connection gets a fresh token, eliminating stale credential issues.
+4. **No Background Goroutines**: Unlike manual refresh approaches, there are no background processes to manage.
+5. **Retry Logic**: Built-in retry logic handles transient AWS API failures gracefully.
+
+This design prevents "authentication failed" errors that could occur with manual token management and ensures reliable database connectivity.
+
+**Configuration Example:**
 ```yaml
 database:
   connections:
     postgres_rds:
       driver: "postgres"
       dsn: "postgres://iamuser@mydb.cluster-xyz.us-east-1.rds.amazonaws.com:5432/mydb?sslmode=require"
-      connection_max_lifetime: 480s   # 8 minutes (less than 10 minute token refresh interval)
+      connection_max_lifetime: 840s   # 14 minutes (let tokens expire naturally at 15 minutes)
       aws_iam_auth:
         enabled: true
         region: "us-east-1"
         db_user: "iamuser"
-        token_refresh_interval: 600            # 10 minutes (600 seconds)
-        connection_close_grace_period: 5s      # 5 seconds grace period for in-flight queries
 ```
 
 **Best Practices:**
-- Set `connection_max_lifetime` to be shorter than `token_refresh_interval` to ensure connections are naturally recycled before token expiration.
-- Use the default `connection_close_grace_period` (5 seconds) unless you have long-running queries that need more time to complete.
-- Monitor logs during token refresh to ensure smooth transitions (logs indicate when connections are refreshed and old pools are closed).
+- Set `connection_max_lifetime` to be slightly less than 15 minutes (the IAM token lifetime) to allow connections to naturally expire and be recreated with fresh tokens.
+- The library handles authentication errors automatically, so you don't need to worry about manual token refresh intervals.
+- The automatic retry logic ensures that transient authentication failures are handled gracefully without impacting your application.
 
 #### Dependencies
 
-AWS IAM authentication requires these additional dependencies:
-```bash
-go get github.com/aws/aws-sdk-go-v2/aws
-go get github.com/aws/aws-sdk-go-v2/config
-go get github.com/aws/aws-sdk-go-v2/feature/rds/auth
-```
+AWS IAM authentication uses the following libraries:
+- `github.com/davepgreene/go-db-credential-refresh` - Automatic credential refresh handling
+- `github.com/davepgreene/go-db-credential-refresh/store/awsrds` - AWS RDS IAM token store
+- `github.com/aws/aws-sdk-go-v2/config` - AWS SDK configuration
+- `github.com/aws/aws-sdk-go-v2/feature/rds/auth` - RDS IAM authentication token generation
 
-These are automatically added when you use the database module with AWS IAM authentication enabled.
+These dependencies are automatically included when you use the database module with AWS IAM authentication enabled.
 
 ### Using the Database Service
 

@@ -160,18 +160,7 @@ func (s *databaseServiceImpl) Connect() error {
 		}
 
 		// Configure connection pool
-		if s.config.MaxOpenConnections > 0 {
-			db.SetMaxOpenConns(s.config.MaxOpenConnections)
-		}
-		if s.config.MaxIdleConnections > 0 {
-			db.SetMaxIdleConns(s.config.MaxIdleConnections)
-		}
-		if s.config.ConnectionMaxLifetime > 0 {
-			db.SetConnMaxLifetime(s.config.ConnectionMaxLifetime)
-		}
-		if s.config.ConnectionMaxIdleTime > 0 {
-			db.SetConnMaxIdleTime(s.config.ConnectionMaxIdleTime)
-		}
+		configureConnectionPool(db, s.config)
 	}
 
 	// Test connection with configurable timeout

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/CrisisTextLine/modular"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/davepgreene/go-db-credential-refresh/driver"
 	"github.com/davepgreene/go-db-credential-refresh/store/awsrds"
@@ -17,45 +18,112 @@ var (
 	ErrInvalidDSNFormat     = errors.New("invalid DSN format")
 )
 
-// createDBWithCredentialRefresh creates a database connection using go-db-credential-refresh
-// This automatically handles token refresh and connection recreation on auth errors
-func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionConfig) (*sql.DB, error) {
+// createDBWithCredentialRefresh creates a database connection using go-db-credential-refresh.
+// This automatically handles token refresh and connection recreation on auth errors.
+//
+// AWS IAM Authentication Flow:
+//  1. Any password/token in the DSN is stripped (including placeholders like $TOKEN)
+//  2. Username is extracted from the DSN (e.g., "chimera_app" from postgresql://chimera_app:$TOKEN@host/db)
+//  3. AWS credentials are loaded from the environment/instance profile/etc.
+//  4. RDS IAM auth token is automatically generated using AWS credentials
+//  5. Token is automatically refreshed before expiration
+//  6. Connection is automatically recreated on authentication errors
+//
+// This means you can pass a DSN with a placeholder token like:
+//   postgresql://chimera_app:$TOKEN@shared-chimera-dev-backend.cluster-xyz.us-east-1.rds.amazonaws.com:5432/chimera_backend?sslmode=require
+//
+// And the module will:
+//   - Ignore the "$TOKEN" placeholder
+//   - Use "chimera_app" as the database username for IAM authentication
+//   - Automatically generate and refresh the actual IAM token
+//
+// Configuration Requirements:
+//   - AWSIAMAuth.Enabled must be true
+//   - AWSIAMAuth.Region must be set to the RDS instance region
+//   - AWSIAMAuth.DBUser can optionally override the username from the DSN
+//   - AWS credentials must be available (environment variables, instance profile, etc.)
+func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionConfig, logger modular.Logger) (*sql.DB, error) {
 	if connConfig.AWSIAMAuth == nil || !connConfig.AWSIAMAuth.Enabled {
 		return nil, ErrAWSIAMAuthNotEnabled
 	}
 
+	logger.Info("Starting AWS IAM authentication setup",
+		"region", connConfig.AWSIAMAuth.Region,
+		"driver", connConfig.Driver)
+
+	// Validate configuration
+	if connConfig.AWSIAMAuth.Region == "" {
+		logger.Error("AWS IAM authentication requires a region", "config_region", connConfig.AWSIAMAuth.Region)
+		return nil, fmt.Errorf("AWS IAM auth region is required but not configured")
+	}
+
 	// Load AWS configuration
+	logger.Debug("Loading AWS configuration", "region", connConfig.AWSIAMAuth.Region)
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(connConfig.AWSIAMAuth.Region))
 	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+		logger.Error("Failed to load AWS configuration",
+			"error", err.Error(),
+			"region", connConfig.AWSIAMAuth.Region,
+			"possible_causes", "Missing AWS credentials, invalid region, or network issues")
+		return nil, fmt.Errorf("failed to load AWS config for region %s: %w (check AWS credentials are available)", connConfig.AWSIAMAuth.Region, err)
 	}
+	logger.Debug("AWS configuration loaded successfully")
 
 	// Strip any existing password/token from DSN for backward compatibility
 	// This allows applications that previously passed DSN with token placeholders to continue working
+	logger.Debug("Processing DSN for IAM authentication", "original_dsn_length", len(connConfig.DSN))
 	cleanDSN := stripPasswordFromDSN(connConfig.DSN)
+	logger.Debug("Password stripped from DSN", "cleaned_dsn_length", len(cleanDSN))
 
 	// Extract endpoint from DSN
 	endpoint, err := extractEndpointFromDSN(cleanDSN)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract endpoint from DSN: %w", err)
+		logger.Error("Failed to extract RDS endpoint from DSN",
+			"error", err.Error(),
+			"dsn_format", "Expected format: postgresql://user@host:port/db or postgres://user@host/db",
+			"troubleshooting", "Verify DSN format is correct")
+		return nil, fmt.Errorf("failed to extract endpoint from DSN: %w (check DSN format)", err)
 	}
+	logger.Info("Extracted RDS endpoint", "endpoint", endpoint)
 
 	// Extract database name and options from DSN
 	dbName, opts, err := extractDatabaseAndOptions(cleanDSN)
 	if err != nil {
+		logger.Error("Failed to extract database name from DSN",
+			"error", err.Error(),
+			"dsn_sample", "postgresql://user@host:port/database_name")
 		return nil, fmt.Errorf("failed to extract database name and options: %w", err)
 	}
+	logger.Debug("Extracted database configuration", "database", dbName, "options_count", len(opts))
 
 	// Extract username from DSN if present, otherwise use config
 	username := extractUsernameFromDSN(cleanDSN)
 	if username == "" {
 		username = connConfig.AWSIAMAuth.DBUser
+		logger.Debug("Using username from config", "username", username)
+	} else {
+		logger.Debug("Extracted username from DSN", "username", username)
 	}
+
+	// Validate username is present
+	if username == "" {
+		logger.Error("Database username not found",
+			"dsn_has_username", false,
+			"config_has_db_user", connConfig.AWSIAMAuth.DBUser != "",
+			"troubleshooting", "Either include username in DSN or set aws_iam_auth.db_user in config")
+		return nil, fmt.Errorf("database username is required for IAM auth but not found in DSN or config")
+	}
+	logger.Info("IAM authentication will use database user", "username", username)
 
 	// Determine driver name and port
 	driverName, port := determineDriverAndPort(connConfig.Driver, endpoint)
+	logger.Debug("Determined database driver configuration", "driver", driverName, "port", port)
 
 	// Create AWS RDS store for credential management
+	logger.Info("Creating AWS RDS credential store",
+		"endpoint", endpoint,
+		"region", connConfig.AWSIAMAuth.Region,
+		"username", username)
 	store, err := awsrds.NewStore(&awsrds.Config{
 		Credentials: awsConfig.Credentials,
 		Endpoint:    endpoint,
@@ -63,14 +131,22 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 		User:        username,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create AWS RDS store: %w", err)
+		logger.Error("Failed to create AWS RDS credential store",
+			"error", err.Error(),
+			"endpoint", endpoint,
+			"region", connConfig.AWSIAMAuth.Region,
+			"username", username,
+			"possible_causes", "Invalid AWS credentials, network issues, or incorrect endpoint")
+		return nil, fmt.Errorf("failed to create AWS RDS store for endpoint %s: %w", endpoint, err)
 	}
+	logger.Debug("AWS RDS credential store created successfully")
 
 	// Extract hostname from endpoint (remove port)
 	hostname := endpoint
 	if colonIdx := strings.LastIndex(endpoint, ":"); colonIdx != -1 {
 		hostname = endpoint[:colonIdx]
 	}
+	logger.Debug("Extracted hostname from endpoint", "hostname", hostname, "original_endpoint", endpoint)
 
 	// Create connector configuration
 	cfg := &driver.Config{
@@ -80,18 +156,40 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 		Opts:    opts,
 		Retries: 1, // Retry once on auth failure
 	}
+	logger.Debug("Created database connector configuration",
+		"host", hostname,
+		"port", port,
+		"database", dbName,
+		"retries", cfg.Retries)
 
 	// Create connector with credential refresh
+	logger.Info("Creating database connector with automatic credential refresh")
 	connector, err := driver.NewConnector(store, driverName, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create connector: %w", err)
+		logger.Error("Failed to create database connector",
+			"error", err.Error(),
+			"driver", driverName,
+			"host", hostname,
+			"port", port,
+			"troubleshooting", "Check driver compatibility and configuration")
+		return nil, fmt.Errorf("failed to create connector for %s: %w", driverName, err)
 	}
+	logger.Debug("Database connector created successfully")
 
 	// Open database using the connector
+	logger.Info("Opening database connection with IAM authentication")
 	db := sql.OpenDB(connector)
 
 	// Configure connection pool
+	logger.Debug("Configuring connection pool",
+		"max_open", connConfig.MaxOpenConnections,
+		"max_idle", connConfig.MaxIdleConnections)
 	configureConnectionPool(db, connConfig)
+
+	logger.Info("Database connection with AWS IAM authentication configured successfully",
+		"endpoint", endpoint,
+		"username", username,
+		"database", dbName)
 
 	return db, nil
 }
@@ -112,8 +210,22 @@ func configureConnectionPool(db *sql.DB, config ConnectionConfig) {
 	}
 }
 
-// stripPasswordFromDSN removes any password from a DSN for backward compatibility
-// This allows applications that previously passed DSN with token placeholders to continue working
+// stripPasswordFromDSN removes any password from a DSN for backward compatibility.
+// This allows applications that previously passed DSN with token placeholders to continue working.
+//
+// When AWS IAM authentication is enabled, the password portion of the DSN is ignored and stripped.
+// This is intentional because:
+//   - AWS IAM tokens are automatically generated by the go-db-credential-refresh library
+//   - Any placeholder value (e.g., $TOKEN, TOKEN, or any other string) in the password field will be removed
+//   - The actual IAM token is obtained using AWS credentials and the username extracted from the DSN
+//
+// Example DSNs that will have their passwords stripped:
+//   - postgresql://chimera_app:$TOKEN@host.rds.amazonaws.com:5432/mydb?sslmode=require
+//     becomes: postgresql://chimera_app@host.rds.amazonaws.com:5432/mydb?sslmode=require
+//   - postgres://user:some_placeholder@host:5432/mydb
+//     becomes: postgres://user@host:5432/mydb
+//
+// The username (e.g., "chimera_app") is preserved and used for IAM authentication.
 func stripPasswordFromDSN(dsn string) string {
 	if strings.Contains(dsn, "://") {
 		// URL-style DSN (e.g., postgres://user:password@host:port/database)

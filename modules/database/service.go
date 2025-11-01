@@ -140,8 +140,18 @@ func (s *databaseServiceImpl) Connect() error {
 	// If AWS IAM authentication is enabled, use go-db-credential-refresh for automatic token management
 	if s.config.AWSIAMAuth != nil && s.config.AWSIAMAuth.Enabled {
 		s.logger.Info("Connecting to database with AWS IAM authentication using credential refresh")
-		db, err = createDBWithCredentialRefresh(s.ctx, s.config)
+		db, err = createDBWithCredentialRefresh(s.ctx, s.config, s.logger)
 		if err != nil {
+			s.logger.Error("AWS IAM authentication failed",
+				"error", err.Error(),
+				"troubleshooting_steps", []string{
+					"1. Verify AWS credentials are available (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, or instance profile)",
+					"2. Check IAM policy grants rds-db:connect for the database user",
+					"3. Verify the database user exists and has rds_iam role (PostgreSQL: GRANT rds_iam TO user)",
+					"4. Confirm the RDS endpoint and region are correct",
+					"5. Ensure network connectivity to RDS (security groups, VPC, etc.)",
+					"6. Check CloudTrail logs for IAM authentication attempts",
+				})
 			return fmt.Errorf("failed to create database connection with credential refresh: %w", err)
 		}
 	} else {
@@ -168,14 +178,36 @@ func (s *databaseServiceImpl) Connect() error {
 	if s.config.AWSIAMAuth != nil && s.config.AWSIAMAuth.ConnectionTimeout > 0 {
 		timeout = s.config.AWSIAMAuth.ConnectionTimeout
 	}
+	s.logger.Debug("Testing database connection", "timeout", timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
+			s.logger.Error("Failed to ping database and close connection", "ping_error", err, "close_error", closeErr)
 			return fmt.Errorf("failed to ping database and close connection: %w", err)
+		}
+
+		// Provide detailed diagnostics for ping failures
+		if s.config.AWSIAMAuth != nil && s.config.AWSIAMAuth.Enabled {
+			s.logger.Error("Database ping failed with IAM authentication",
+				"error", err.Error(),
+				"timeout", timeout,
+				"possible_causes", []string{
+					"IAM token generation failed",
+					"Database user doesn't have rds_iam role",
+					"IAM policy doesn't allow rds-db:connect",
+					"Network connectivity issues",
+					"Database is not accepting connections",
+					"SSL/TLS configuration mismatch",
+				})
+		} else {
+			s.logger.Error("Database ping failed",
+				"error", err.Error(),
+				"timeout", timeout)
 		}
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
+	s.logger.Info("Database connection test successful")
 
 	s.connMutex.Lock()
 	s.db = db

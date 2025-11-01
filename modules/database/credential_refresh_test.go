@@ -124,6 +124,7 @@ func TestDetermineDriverAndPort(t *testing.T) {
 // TestCreateDBWithCredentialRefresh_ValidationErrors tests validation errors
 func TestCreateDBWithCredentialRefresh_ValidationErrors(t *testing.T) {
 	ctx := context.Background()
+	mockLogger := &MockLogger{}
 
 	t.Run("IAM auth not enabled", func(t *testing.T) {
 		config := ConnectionConfig{
@@ -131,7 +132,7 @@ func TestCreateDBWithCredentialRefresh_ValidationErrors(t *testing.T) {
 			DSN:    "postgres://user:password@host:5432/mydb",
 		}
 
-		_, err := createDBWithCredentialRefresh(ctx, config)
+		_, err := createDBWithCredentialRefresh(ctx, config, mockLogger)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "AWS IAM auth not enabled")
 	})
@@ -143,7 +144,7 @@ func TestCreateDBWithCredentialRefresh_ValidationErrors(t *testing.T) {
 			AWSIAMAuth: nil,
 		}
 
-		_, err := createDBWithCredentialRefresh(ctx, config)
+		_, err := createDBWithCredentialRefresh(ctx, config, mockLogger)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "AWS IAM auth not enabled")
 	})
@@ -157,7 +158,7 @@ func TestCreateDBWithCredentialRefresh_ValidationErrors(t *testing.T) {
 			},
 		}
 
-		_, err := createDBWithCredentialRefresh(ctx, config)
+		_, err := createDBWithCredentialRefresh(ctx, config, mockLogger)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "AWS IAM auth not enabled")
 	})
@@ -305,6 +306,11 @@ func TestStripPasswordFromDSN(t *testing.T) {
 			expected: "postgres://iamuser@mydb.region.rds.amazonaws.com:5432/mydb",
 		},
 		{
+			name:     "URL-style DSN with $TOKEN placeholder",
+			dsn:      "postgresql://chimera_app:$TOKEN@shared-chimera-dev-backend.cluster-cbysgk6e0u2x.us-east-1.rds.amazonaws.com:5432/chimera_backend?sslmode=require",
+			expected: "postgresql://chimera_app@shared-chimera-dev-backend.cluster-cbysgk6e0u2x.us-east-1.rds.amazonaws.com:5432/chimera_backend?sslmode=require",
+		},
+		{
 			name:     "URL-style DSN without password",
 			dsn:      "postgres://user@host:5432/mydb",
 			expected: "postgres://user@host:5432/mydb",
@@ -329,6 +335,39 @@ func TestStripPasswordFromDSN(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := stripPasswordFromDSN(tt.dsn)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestUsernameExtraction_WithTokenPlaceholder tests that username is correctly extracted
+// even when DSN contains placeholder tokens like $TOKEN
+func TestUsernameExtraction_WithTokenPlaceholder(t *testing.T) {
+	tests := []struct {
+		name     string
+		dsn      string
+		expected string
+	}{
+		{
+			name:     "DSN with $TOKEN placeholder",
+			dsn:      "postgresql://chimera_app:$TOKEN@shared-chimera-dev-backend.cluster-cbysgk6e0u2x.us-east-1.rds.amazonaws.com:5432/chimera_backend?sslmode=require",
+			expected: "chimera_app",
+		},
+		{
+			name:     "DSN with TOKEN placeholder (no $)",
+			dsn:      "postgresql://db_user:TOKEN@myhost.rds.amazonaws.com:5432/mydb",
+			expected: "db_user",
+		},
+		{
+			name:     "DSN with actual token",
+			dsn:      "postgresql://iam_user:some_actual_token_value@myhost.rds.amazonaws.com:5432/mydb",
+			expected: "iam_user",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractUsernameFromDSN(tt.dsn)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

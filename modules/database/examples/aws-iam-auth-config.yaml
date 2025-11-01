@@ -1,0 +1,89 @@
+# Example configuration for AWS IAM Authentication with RDS
+#
+# This example shows how to configure the database module to use AWS IAM authentication
+# with Amazon RDS. The module automatically handles token generation and refresh.
+#
+# Key Features:
+# - No need to manage database passwords
+# - Tokens are automatically rotated (15-minute lifetime)
+# - Uses AWS IAM for access control
+# - Audit trail through AWS CloudTrail
+#
+# Prerequisites:
+# 1. RDS instance must have IAM authentication enabled
+# 2. Database user must be created with IAM authentication:
+#    CREATE USER chimera_app WITH LOGIN;
+#    GRANT rds_iam TO chimera_app;
+# 3. IAM policy must allow rds-db:connect action:
+#    {
+#      "Version": "2012-10-17",
+#      "Statement": [{
+#        "Effect": "Allow",
+#        "Action": ["rds-db:connect"],
+#        "Resource": ["arn:aws:rds-db:us-east-1:123456789012:dbuser:cluster-XXXXX/chimera_app"]
+#      }]
+#    }
+# 4. AWS credentials must be available (environment variables, instance profile, etc.)
+
+database:
+  default: writer
+  connections:
+    # Writer connection with IAM authentication
+    writer:
+      driver: postgres
+      # DSN with $TOKEN placeholder - the placeholder will be automatically stripped
+      # and replaced with a dynamically generated IAM token
+      dsn: "postgresql://chimera_app:$TOKEN@shared-chimera-dev-backend.cluster-cbysgk6e0u2x.us-east-1.rds.amazonaws.com:5432/chimera_backend?sslmode=require"
+      max_open_connections: 25
+      max_idle_connections: 10
+      connection_max_lifetime: 1h
+      connection_max_idle_time: 30m
+      aws_iam_auth:
+        enabled: true
+        region: us-east-1
+        # db_user is optional - if not specified, username is extracted from DSN
+        # db_user: chimera_app
+        connection_timeout: 10s
+
+    # Reader connection with IAM authentication
+    reader:
+      driver: postgres
+      # Alternative format: leave password empty (no placeholder needed)
+      dsn: "postgresql://chimera_app@shared-chimera-dev-backend-ro.cluster-cbysgk6e0u2x.us-east-1.rds.amazonaws.com:5432/chimera_backend?sslmode=require"
+      max_open_connections: 50
+      max_idle_connections: 20
+      connection_max_lifetime: 1h
+      aws_iam_auth:
+        enabled: true
+        region: us-east-1
+        # Explicitly specify the database user (takes precedence over DSN username)
+        db_user: chimera_app
+
+# Environment Variable Configuration Alternative:
+# You can also configure via environment variables:
+#
+# export DB_WRITER_DRIVER=postgres
+# export DB_WRITER_DSN="postgresql://chimera_app:$TOKEN@host.rds.amazonaws.com:5432/mydb?sslmode=require"
+# export DB_WRITER_AWS_IAM_AUTH_ENABLED=true
+# export DB_WRITER_AWS_IAM_AUTH_REGION=us-east-1
+# export DB_WRITER_MAX_OPEN_CONNECTIONS=25
+#
+# export DB_READER_DRIVER=postgres
+# export DB_READER_DSN="postgresql://chimera_app@host-ro.rds.amazonaws.com:5432/mydb?sslmode=require"
+# export DB_READER_AWS_IAM_AUTH_ENABLED=true
+# export DB_READER_AWS_IAM_AUTH_REGION=us-east-1
+# export DB_READER_AWS_IAM_AUTH_DB_USER=chimera_app
+
+# How It Works:
+# 1. The module strips any password from the DSN (including placeholders like $TOKEN)
+# 2. Username is extracted from the DSN or taken from aws_iam_auth.db_user
+# 3. AWS credentials are loaded from the environment/instance profile/etc.
+# 4. An RDS IAM auth token is generated using AWS SDK
+# 5. The token is automatically refreshed before expiration (15-minute lifetime)
+# 6. If authentication fails, the connection is automatically recreated with a new token
+
+# Supported DSN Formats:
+# - With placeholder: postgresql://user:$TOKEN@host:5432/db
+# - With any password: postgresql://user:placeholder@host:5432/db
+# - Without password: postgresql://user@host:5432/db
+# All three formats work identically when IAM auth is enabled - the password is ignored.

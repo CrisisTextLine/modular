@@ -16,6 +16,8 @@ import (
 var (
 	ErrAWSIAMAuthNotEnabled = errors.New("AWS IAM auth not enabled")
 	ErrInvalidDSNFormat     = errors.New("invalid DSN format")
+	ErrMissingIAMRegion     = errors.New("AWS IAM auth region is required but not configured")
+	ErrMissingIAMUsername   = errors.New("database username is required for IAM auth but not found in DSN or config")
 )
 
 // createDBWithCredentialRefresh creates a database connection using go-db-credential-refresh.
@@ -30,7 +32,8 @@ var (
 //  6. Connection is automatically recreated on authentication errors
 //
 // This means you can pass a DSN with a placeholder token like:
-//   postgresql://chimera_app:$TOKEN@shared-chimera-dev-backend.cluster-xyz.us-east-1.rds.amazonaws.com:5432/chimera_backend?sslmode=require
+//
+//	postgresql://chimera_app:$TOKEN@shared-chimera-dev-backend.cluster-xyz.us-east-1.rds.amazonaws.com:5432/chimera_backend?sslmode=require
 //
 // And the module will:
 //   - Ignore the "$TOKEN" placeholder
@@ -54,7 +57,7 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 	// Validate configuration
 	if connConfig.AWSIAMAuth.Region == "" {
 		logger.Error("AWS IAM authentication requires a region", "config_region", connConfig.AWSIAMAuth.Region)
-		return nil, fmt.Errorf("AWS IAM auth region is required but not configured")
+		return nil, ErrMissingIAMRegion
 	}
 
 	// Load AWS configuration
@@ -111,7 +114,7 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 			"dsn_has_username", false,
 			"config_has_db_user", connConfig.AWSIAMAuth.DBUser != "",
 			"troubleshooting", "Either include username in DSN or set aws_iam_auth.db_user in config")
-		return nil, fmt.Errorf("database username is required for IAM auth but not found in DSN or config")
+		return nil, ErrMissingIAMUsername
 	}
 	logger.Info("IAM authentication will use database user", "username", username)
 
@@ -124,7 +127,7 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 		"endpoint", endpoint,
 		"region", connConfig.AWSIAMAuth.Region,
 		"username", username)
-	store, err := awsrds.NewStore(&awsrds.Config{
+	awsStore, err := awsrds.NewStore(&awsrds.Config{
 		Credentials: awsConfig.Credentials,
 		Endpoint:    endpoint,
 		Region:      connConfig.AWSIAMAuth.Region,
@@ -140,6 +143,15 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 		return nil, fmt.Errorf("failed to create AWS RDS store for endpoint %s: %w", endpoint, err)
 	}
 	logger.Debug("AWS RDS credential store created successfully")
+
+	// CRITICAL FIX: Wrap the AWS store with TTL-based caching
+	// The awsrds.Store caches credentials indefinitely, which causes PAM failures
+	// after 15 minutes when tokens expire. Our TTL wrapper ensures credentials
+	// are refreshed before expiration (14 minutes).
+	store := NewTTLStore(awsStore)
+	logger.Info("Wrapped AWS RDS store with TTL-based token refresh",
+		"token_lifetime", EffectiveTokenLifetime,
+		"refresh_before_expiration", TokenRefreshBuffer)
 
 	// Extract hostname from endpoint (remove port)
 	hostname := endpoint

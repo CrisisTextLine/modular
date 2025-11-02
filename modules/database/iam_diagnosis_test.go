@@ -155,40 +155,40 @@ func TestExpectedTokenRotationFlow(t *testing.T) {
 	t.Log("")
 
 	steps := []struct {
-		Time    string
-		Event   string
-		Action  string
-		Result  string
+		Time   string
+		Event  string
+		Action string
+		Result string
 	}{
 		{
-			Time:    "T+0s",
-			Event:   "Initial Connect",
-			Action:  "Store.GetPassword() generates IAM token (valid until T+15min)",
-			Result:  "✓ Connection succeeds with fresh token",
+			Time:   "T+0s",
+			Event:  "Initial Connect",
+			Action: "Store.GetPassword() generates IAM token (valid until T+15min)",
+			Result: "✓ Connection succeeds with fresh token",
 		},
 		{
-			Time:    "T+30s",
-			Event:   "Query Execution",
-			Action:  "Use existing connection from pool",
-			Result:  "✓ Query succeeds (token still valid)",
+			Time:   "T+30s",
+			Event:  "Query Execution",
+			Action: "Use existing connection from pool",
+			Result: "✓ Query succeeds (token still valid)",
 		},
 		{
-			Time:    "T+14min",
-			Event:   "Connection Max Lifetime Reached",
-			Action:  "Connection pool closes old connection",
-			Result:  "✓ Connection marked for closure",
+			Time:   "T+14min",
+			Event:  "Connection Max Lifetime Reached",
+			Action: "Connection pool closes old connection",
+			Result: "✓ Connection marked for closure",
 		},
 		{
-			Time:    "T+14min+5s",
-			Event:   "New Query Arrives",
-			Action:  "Pool creates NEW connection → Store.GetPassword() called",
-			Result:  "✓ Fresh token generated (valid until T+29min)",
+			Time:   "T+14min+5s",
+			Event:  "New Query Arrives",
+			Action: "Pool creates NEW connection → Store.GetPassword() called",
+			Result: "✓ Fresh token generated (valid until T+29min)",
 		},
 		{
-			Time:    "T+14min+10s",
-			Event:   "Query Execution",
-			Action:  "Use new connection with fresh token",
-			Result:  "✓ Query succeeds",
+			Time:   "T+14min+10s",
+			Event:  "Query Execution",
+			Action: "Use new connection with fresh token",
+			Result: "✓ Query succeeds",
 		},
 	}
 
@@ -203,22 +203,22 @@ func TestExpectedTokenRotationFlow(t *testing.T) {
 	t.Log("")
 
 	failureSteps := []struct {
-		Time    string
-		Event   string
-		Action  string
-		Result  string
+		Time   string
+		Event  string
+		Action string
+		Result string
 	}{
 		{
-			Time:    "T+0s",
-			Event:   "Initial Connect",
-			Action:  "Token generated (valid until T+15min)",
-			Result:  "✓ Connection succeeds",
+			Time:   "T+0s",
+			Event:  "Initial Connect",
+			Action: "Token generated (valid until T+15min)",
+			Result: "✓ Connection succeeds",
 		},
 		{
-			Time:    "T+16min",
-			Event:   "Query After Token Expiration",
-			Action:  "Pool creates new connection BUT reuses old token",
-			Result:  "❌ PAM authentication failed",
+			Time:   "T+16min",
+			Event:  "Query After Token Expiration",
+			Action: "Pool creates new connection BUT reuses old token",
+			Result: "❌ PAM authentication failed",
 		},
 	}
 
@@ -456,18 +456,12 @@ func TestErrorMessageAnalysis(t *testing.T) {
 	t.Log("")
 
 	errors := map[string]string{
-		"PAM authentication failed for user":
-			"Token is invalid or expired. Check if new token was generated.",
-		"password authentication failed":
-			"Token rejected by RDS. Verify IAM policy allows rds-db:connect.",
-		"no pg_hba.conf entry for host":
-			"Database not configured for IAM auth. Check RDS parameter group.",
-		"FATAL: database \"X\" does not exist":
-			"Connection succeeded but database not found. Not an IAM issue.",
-		"connection refused":
-			"Network/firewall issue. Not related to IAM auth.",
-		"context deadline exceeded":
-			"Connection timeout. May indicate IAM token generation is slow.",
+		"PAM authentication failed for user":   "Token is invalid or expired. Check if new token was generated.",
+		"password authentication failed":       "Token rejected by RDS. Verify IAM policy allows rds-db:connect.",
+		"no pg_hba.conf entry for host":        "Database not configured for IAM auth. Check RDS parameter group.",
+		"FATAL: database \"X\" does not exist": "Connection succeeded but database not found. Not an IAM issue.",
+		"connection refused":                   "Network/firewall issue. Not related to IAM auth.",
+		"context deadline exceeded":            "Connection timeout. May indicate IAM token generation is slow.",
 	}
 
 	for errMsg, diagnosis := range errors {

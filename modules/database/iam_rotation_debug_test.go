@@ -29,12 +29,12 @@ func TestIAMTokenRotationScenario(t *testing.T) {
 	// MODIFY THESE VALUES to match your RDS instance
 	const (
 		// Token rotation testing - we'll use connection lifetime to force rotation
-		tokenLifetime          = 15 * time.Second // Shortened for testing (normal is 15 minutes)
-		connectionMaxLifetime  = 10 * time.Second // Force connection recreation before token expires
-		connectionMaxIdleTime  = 5 * time.Second  // Close idle connections quickly
-		testDuration           = 45 * time.Second // Run test for 45 seconds to see multiple rotations
-		queryInterval          = 2 * time.Second  // Query every 2 seconds
-		expectedMinRotations   = 2                // We should see at least 2 connection recreations
+		tokenLifetime         = 15 * time.Second // Shortened for testing (normal is 15 minutes)
+		connectionMaxLifetime = 10 * time.Second // Force connection recreation before token expires
+		connectionMaxIdleTime = 5 * time.Second  // Close idle connections quickly
+		testDuration          = 45 * time.Second // Run test for 45 seconds to see multiple rotations
+		queryInterval         = 2 * time.Second  // Query every 2 seconds
+		expectedMinRotations  = 2                // We should see at least 2 connection recreations
 	)
 
 	// Skip if environment variables are not set
@@ -103,12 +103,12 @@ func TestIAMTokenRotationScenario(t *testing.T) {
 
 	// Track metrics
 	var (
-		queryCount        int
-		successCount      int
-		failureCount      int
-		pamFailureCount   int
+		queryCount         int
+		successCount       int
+		failureCount       int
+		pamFailureCount    int
 		connectionRecycles int
-		mu                sync.Mutex
+		mu                 sync.Mutex
 	)
 
 	// Get initial stats

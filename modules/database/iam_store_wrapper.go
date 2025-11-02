@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -81,7 +82,7 @@ func (s *TTLStore) Refresh(ctx context.Context) (driver.Credentials, error) {
 	// Call the wrapped store's Refresh to get fresh credentials
 	creds, err := s.wrapped.Refresh(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to refresh credentials: %w", err)
 	}
 
 	// Cache the credentials with current timestamp

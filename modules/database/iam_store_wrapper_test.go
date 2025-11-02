@@ -205,9 +205,9 @@ func TestTTLStore_RealWorldScenario(t *testing.T) {
 
 	// Simulate queries happening over time
 	queries := []struct {
-		delay        time.Duration
+		delay         time.Duration
 		expectRefresh bool
-		description  string
+		description   string
 	}{
 		{0, true, "Initial connection - should generate first token"},
 		{500 * time.Millisecond, false, "Query within TTL - should use cached token"},

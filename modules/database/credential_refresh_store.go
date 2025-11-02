@@ -124,7 +124,7 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 		"endpoint", endpoint,
 		"region", connConfig.AWSIAMAuth.Region,
 		"username", username)
-	store, err := awsrds.NewStore(&awsrds.Config{
+	awsStore, err := awsrds.NewStore(&awsrds.Config{
 		Credentials: awsConfig.Credentials,
 		Endpoint:    endpoint,
 		Region:      connConfig.AWSIAMAuth.Region,
@@ -140,6 +140,15 @@ func createDBWithCredentialRefresh(ctx context.Context, connConfig ConnectionCon
 		return nil, fmt.Errorf("failed to create AWS RDS store for endpoint %s: %w", endpoint, err)
 	}
 	logger.Debug("AWS RDS credential store created successfully")
+
+	// CRITICAL FIX: Wrap the AWS store with TTL-based caching
+	// The awsrds.Store caches credentials indefinitely, which causes PAM failures
+	// after 15 minutes when tokens expire. Our TTL wrapper ensures credentials
+	// are refreshed before expiration (14 minutes).
+	store := NewTTLStore(awsStore)
+	logger.Info("Wrapped AWS RDS store with TTL-based token refresh",
+		"token_lifetime", EffectiveTokenLifetime,
+		"refresh_before_expiration", TokenRefreshBuffer)
 
 	// Extract hostname from endpoint (remove port)
 	hostname := endpoint

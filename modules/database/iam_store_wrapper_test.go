@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,12 +27,16 @@ func (m *MockCredentials) GetPassword() string {
 
 // MockStore implements driver.Store for testing
 type MockStore struct {
+	mu           sync.Mutex
 	getCalls     int
 	refreshCalls int
 	password     string
 }
 
 func (m *MockStore) Get(ctx context.Context) (driver.Credentials, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.getCalls++
 	return &MockCredentials{
 		username: "testuser",
@@ -40,6 +45,9 @@ func (m *MockStore) Get(ctx context.Context) (driver.Credentials, error) {
 }
 
 func (m *MockStore) Refresh(ctx context.Context) (driver.Credentials, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.refreshCalls++
 	// Generate a new token to simulate AWS behavior
 	m.password = "token-" + time.Now().Format("20060102-150405.000000000")

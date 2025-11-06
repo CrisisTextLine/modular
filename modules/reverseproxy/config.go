@@ -48,6 +48,9 @@ type ReverseProxyConfig struct {
 	// Header management
 	HeaderConfig HeaderConfig `json:"header_config" yaml:"header_config" toml:"header_config"`
 
+	// Response header management
+	ResponseHeaderConfig ResponseHeaderRewritingConfig `json:"response_header_config" yaml:"response_header_config" toml:"response_header_config"`
+
 	// Error handling configuration
 	ErrorHandling ErrorHandlingConfig `json:"error_handling" yaml:"error_handling" toml:"error_handling"`
 }
@@ -143,6 +146,9 @@ type BackendServiceConfig struct {
 	// HeaderRewriting defines header rewriting rules specific to this backend
 	HeaderRewriting HeaderRewritingConfig `json:"header_rewriting" yaml:"header_rewriting" toml:"header_rewriting"`
 
+	// ResponseHeaderRewriting defines response header rewriting rules specific to this backend
+	ResponseHeaderRewriting ResponseHeaderRewritingConfig `json:"response_header_rewriting" yaml:"response_header_rewriting" toml:"response_header_rewriting"`
+
 	// Hostname handling mode for this backend
 	HostnameHandling string `json:"hostname_handling" yaml:"hostname_handling" toml:"hostname_handling" env:"HOSTNAME_HANDLING"`
 
@@ -198,6 +204,9 @@ type EndpointConfig struct {
 	// HeaderRewriting defines header rewriting rules specific to this endpoint
 	HeaderRewriting HeaderRewritingConfig `json:"header_rewriting" yaml:"header_rewriting" toml:"header_rewriting"`
 
+	// ResponseHeaderRewriting defines response header rewriting rules specific to this endpoint
+	ResponseHeaderRewriting ResponseHeaderRewritingConfig `json:"response_header_rewriting" yaml:"response_header_rewriting" toml:"response_header_rewriting"`
+
 	// FeatureFlagID is the ID of the feature flag that controls whether this endpoint is enabled
 	// If specified and the feature flag evaluates to false, this endpoint will be skipped
 	FeatureFlagID string `json:"feature_flag_id" yaml:"feature_flag_id" toml:"feature_flag_id" env:"FEATURE_FLAG_ID"`
@@ -219,6 +228,15 @@ type HeaderRewritingConfig struct {
 	SetHeaders map[string]string `json:"set_headers" yaml:"set_headers" toml:"set_headers"`
 
 	// RemoveHeaders defines headers to remove from the request
+	RemoveHeaders []string `json:"remove_headers" yaml:"remove_headers" toml:"remove_headers"`
+}
+
+// ResponseHeaderRewritingConfig defines configuration for response header rewriting rules.
+type ResponseHeaderRewritingConfig struct {
+	// SetHeaders defines headers to set or override on the response
+	SetHeaders map[string]string `json:"set_headers" yaml:"set_headers" toml:"set_headers"`
+
+	// RemoveHeaders defines headers to remove from the response
 	RemoveHeaders []string `json:"remove_headers" yaml:"remove_headers" toml:"remove_headers"`
 }
 

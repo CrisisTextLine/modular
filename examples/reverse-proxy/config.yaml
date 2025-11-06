@@ -10,6 +10,26 @@ reverseproxy:
   default_backend: "global-default"
   tenant_id_header: "X-Tenant-ID"
   require_tenant_id: false
+  
+  # Global response header configuration (applied to all backends)
+  response_header_config:
+    set_headers:
+      X-Proxy-Version: "1.0"
+      X-Powered-By: "Modular-ReverseProxy"
+  
+  # Per-backend configuration with response header rewriting
+  backend_configs:
+    specific-api:
+      url: "http://localhost:9004"
+      # Override/consolidate CORS headers from backend
+      response_header_rewriting:
+        set_headers:
+          Access-Control-Allow-Origin: "*"
+          Access-Control-Allow-Methods: "GET, POST, PUT, DELETE, OPTIONS"
+          Access-Control-Allow-Headers: "Content-Type, Authorization, X-Tenant-ID"
+          Access-Control-Max-Age: "86400"
+        remove_headers:
+          - "X-Internal-Header"  # Remove internal headers from backend
 
 # ChiMux router configuration
 chimux:

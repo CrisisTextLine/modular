@@ -250,6 +250,86 @@ func (m *APIModule) Init(app modular.Application) error {
 }
 ```
 
+## Route Specificity and Matching
+
+The chimux module uses the [go-chi](https://github.com/go-chi/chi) router, which provides intelligent route matching with proper specificity handling. This means that more specific routes will always be matched before less specific ones, regardless of registration order.
+
+### How Route Matching Works
+
+Chi's router uses a radix tree algorithm that ensures:
+
+1. **Static segments take precedence over parameters**: `/api/users/admin` will be matched before `/api/users/{id}`
+2. **More specific routes are prioritized**: `/api/items/{id}/public` will be matched before `/api/items/{id}`
+3. **Catch-all routes have lowest priority**: `/*` will only match paths that don't match any more specific route
+4. **Registration order is irrelevant**: Routes are matched based on specificity, not the order they were registered
+
+### Public vs Protected Endpoints
+
+A common pattern is to have both protected and public endpoints for the same resource:
+
+```go
+func (m *APIModule) Init(app modular.Application) error {
+    err := app.GetService("chimux.router", &m.router)
+    if err != nil {
+        return err
+    }
+    
+    // Protected endpoint - requires authentication
+    m.router.Get("/api/v1/wishlists/{id}", func(w http.ResponseWriter, r *http.Request) {
+        // Check authorization
+        if r.Header.Get("Authorization") == "" {
+            http.Error(w, "Authorization required", http.StatusUnauthorized)
+            return
+        }
+        
+        id := chi.URLParam(r, "id")
+        // Return protected data
+        w.Header().Set("Content-Type", "application/json")
+        fmt.Fprintf(w, `{"kind":"protected","id":"%s","owner":"..."}`, id)
+    })
+    
+    // Public endpoint - no authentication required
+    // This will be correctly matched for requests to /api/v1/wishlists/{id}/public
+    m.router.Get("/api/v1/wishlists/{id}/public", func(w http.ResponseWriter, r *http.Request) {
+        id := chi.URLParam(r, "id")
+        // Return only public data
+        w.Header().Set("Content-Type", "application/json")
+        fmt.Fprintf(w, `{"kind":"public","id":"%s"}`, id)
+    })
+    
+    return nil
+}
+```
+
+**Important:** The registration order doesn't matter. Whether you register the generic `/api/v1/wishlists/{id}` route before or after the specific `/api/v1/wishlists/{id}/public` route, Chi will always route requests correctly based on specificity.
+
+### Catch-All Routes
+
+Catch-all routes using `/*` are useful for serving single-page applications (SPA) or providing fallback behavior:
+
+```go
+// Register API routes first
+m.router.Get("/api/v1/users", listUsersHandler)
+m.router.Get("/api/v1/users/{id}", getUserHandler)
+m.router.Get("/api/v1/posts", listPostsHandler)
+
+// Register catch-all route for SPA
+m.router.Get("/*", func(w http.ResponseWriter, r *http.Request) {
+    // Serve index.html for client-side routing
+    http.ServeFile(w, r, "static/index.html")
+})
+```
+
+The catch-all route will only match paths that don't match any of the more specific API routes, ensuring your API endpoints remain accessible.
+
+### Best Practices
+
+1. **Use descriptive path segments**: Make routes self-documenting (e.g., `/api/v1/items/{id}/public` is clearer than `/api/v1/public/items/{id}`)
+2. **Group related routes**: Use `Route()` to group related endpoints with shared middleware
+3. **Apply middleware appropriately**: Apply authentication middleware to route groups rather than individual routes
+4. **Test route precedence**: Write tests to verify that specific routes are matched correctly (see `route_specificity_test.go` for examples)
+```
+
 ## License
 
 [MIT License](LICENSE)

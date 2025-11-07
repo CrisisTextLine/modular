@@ -67,6 +67,9 @@ type ReverseProxyModule struct {
 	tenantBackendProxies map[modular.TenantID]map[string]*httputil.ReverseProxy
 	preProxyTransforms   map[string]func(*http.Request)
 
+	// Response header modification callback
+	responseHeaderModifier func(*http.Response, string, modular.TenantID) error
+
 	// Metrics collection
 	metrics       *MetricsCollector
 	enableMetrics bool
@@ -1543,6 +1546,15 @@ func (m *ReverseProxyModule) SetHttpClient(client *http.Client) {
 	}
 }
 
+// SetResponseHeaderModifier sets a custom function to modify response headers dynamically.
+// The function receives the response, backend ID, and tenant ID, allowing for dynamic
+// header manipulation based on backend, tenant, or response content.
+//
+// Example use case: Dynamically consolidate CORS headers from multiple backends.
+func (m *ReverseProxyModule) SetResponseHeaderModifier(modifier func(*http.Response, string, modular.TenantID) error) {
+	m.responseHeaderModifier = modifier
+}
+
 // createReverseProxyForBackend creates a reverse proxy for a specific backend with per-backend configuration.
 func (m *ReverseProxyModule) createReverseProxyForBackend(ctx context.Context, target *url.URL, backendID string, endpoint string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
@@ -1699,6 +1711,54 @@ func (m *ReverseProxyModule) createReverseProxyForBackend(ctx context.Context, t
 			http.Error(w, message, statusCode)
 		}
 
+	}
+
+	// Set up ModifyResponse to handle response header rewriting
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if resp == nil {
+			return nil
+		}
+
+		// Extract tenant ID from the original request if available
+		var tenantIDStr string
+		var hasTenant bool
+		if resp.Request != nil && m.config != nil {
+			tenantIDStr, hasTenant = TenantIDFromRequest(m.config.TenantIDHeader, resp.Request)
+		}
+
+		// Get the appropriate configuration (tenant-specific or global)
+		var config *ReverseProxyConfig
+		if m.config != nil && hasTenant && m.tenants != nil {
+			tenantID := modular.TenantID(tenantIDStr)
+			if tenantCfg, ok := m.tenants[tenantID]; ok && tenantCfg != nil {
+				config = tenantCfg
+			} else {
+				config = m.config
+			}
+		} else {
+			config = m.config
+		}
+
+		// Apply configured response header rewriting
+		m.applyResponseHeaderRewritingForBackend(resp, config, backendID, endpoint)
+
+		// Apply custom response header modifier if set
+		if m.responseHeaderModifier != nil {
+			tenantID := modular.TenantID("")
+			if hasTenant {
+				tenantID = modular.TenantID(tenantIDStr)
+			}
+			if err := m.responseHeaderModifier(resp, backendID, tenantID); err != nil {
+				if m.app != nil && m.app.Logger() != nil {
+					// Sanitize tenantID before logging to prevent log forging via newlines
+					safeTenantID := strings.ReplaceAll(strings.ReplaceAll(string(tenantID), "\n", ""), "\r", "")
+					m.app.Logger().Error("Response header modifier error", "backend", backendID, "tenant", safeTenantID, "error", err.Error())
+				}
+				return err
+			}
+		}
+
+		return nil
 	}
 
 	return proxy
@@ -2103,6 +2163,53 @@ func (m *ReverseProxyModule) applySpecificHeaderRewriting(req *http.Request, con
 	if config.RemoveHeaders != nil {
 		for _, headerName := range config.RemoveHeaders {
 			req.Header.Del(headerName)
+		}
+	}
+}
+
+// applyResponseHeaderRewritingForBackend applies response header rewriting rules for a specific backend and endpoint
+func (m *ReverseProxyModule) applyResponseHeaderRewritingForBackend(resp *http.Response, config *ReverseProxyConfig, backendID string, endpoint string) {
+	if config == nil || resp == nil {
+		return
+	}
+
+	// Apply global response header configuration first
+	m.applySpecificResponseHeaderRewriting(resp, &config.ResponseHeaderConfig)
+
+	// Check if we have backend-specific configuration
+	if config.BackendConfigs != nil && backendID != "" {
+		if backendConfig, exists := config.BackendConfigs[backendID]; exists {
+			// Apply backend-specific response header rewriting
+			m.applySpecificResponseHeaderRewriting(resp, &backendConfig.ResponseHeaderRewriting)
+
+			// Then check for endpoint-specific configuration
+			if endpoint != "" && backendConfig.Endpoints != nil {
+				if endpointConfig, exists := backendConfig.Endpoints[endpoint]; exists {
+					// Apply endpoint-specific response header rewriting (this overrides backend-specific)
+					m.applySpecificResponseHeaderRewriting(resp, &endpointConfig.ResponseHeaderRewriting)
+				}
+			}
+		}
+	}
+}
+
+// applySpecificResponseHeaderRewriting applies response header rewriting rules from a specific ResponseHeaderRewritingConfig
+func (m *ReverseProxyModule) applySpecificResponseHeaderRewriting(resp *http.Response, config *ResponseHeaderRewritingConfig) {
+	if config == nil || resp == nil {
+		return
+	}
+
+	// Apply custom header setting
+	if config.SetHeaders != nil {
+		for headerName, headerValue := range config.SetHeaders {
+			resp.Header.Set(headerName, headerValue)
+		}
+	}
+
+	// Apply header removal
+	if config.RemoveHeaders != nil {
+		for _, headerName := range config.RemoveHeaders {
+			resp.Header.Del(headerName)
 		}
 	}
 }

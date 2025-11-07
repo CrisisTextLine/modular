@@ -73,7 +73,29 @@ func main() {
 
 	// Register the modules in dependency order
 	app.RegisterModule(chimux.NewChiMuxModule())
-	app.RegisterModule(reverseproxy.NewModule())
+	
+	// Create reverse proxy module and configure dynamic response header modification
+	proxyModule := reverseproxy.NewModule()
+	
+	// Set a custom response header modifier to demonstrate dynamic CORS header consolidation
+	proxyModule.SetResponseHeaderModifier(func(resp *http.Response, backendID string, tenantID modular.TenantID) error {
+		// Add custom headers based on backend and tenant
+		resp.Header.Set("X-Backend-Served-By", backendID)
+		if tenantID != "" {
+			resp.Header.Set("X-Tenant-Served", string(tenantID))
+		}
+		
+		// Example: Dynamically set Cache-Control based on status code
+		if resp.StatusCode == http.StatusOK {
+			resp.Header.Set("Cache-Control", "public, max-age=300")
+		} else {
+			resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		}
+		
+		return nil
+	})
+	
+	app.RegisterModule(proxyModule)
 	app.RegisterModule(httpserver.NewHTTPServerModule())
 
 	// Run application with lifecycle management
@@ -127,13 +149,17 @@ func startMockBackends() {
 		}
 	}()
 
-	// Specific API backend (port 9004)
+	// Specific API backend (port 9004) - simulates a backend with CORS headers
 	go func() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			// Backend sets its own CORS headers (which will be overridden by proxy)
+			w.Header().Set("Access-Control-Allow-Origin", "http://old-domain.com")
+			w.Header().Set("Access-Control-Allow-Methods", "GET")
+			w.Header().Set("X-Internal-Header", "internal-value")
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"backend":"specific-api","path":"%s","method":"%s"}`, r.URL.Path, r.Method)
+			fmt.Fprintf(w, `{"backend":"specific-api","path":"%s","method":"%s","note":"backend CORS headers will be overridden"}`, r.URL.Path, r.Method)
 		})
 		fmt.Println("Starting specific-api backend on :9004")
 		if err := http.ListenAndServe(":9004", mux); err != nil { //nolint:gosec

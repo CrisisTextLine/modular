@@ -5,6 +5,8 @@ This example demonstrates how to create a reverse proxy server using the modular
 ## What it demonstrates
 
 - **Tenant-Specific Default Backends**: Different tenants can have different default backend services
+- **Response Header Rewriting**: Override and consolidate response headers (e.g., CORS headers)
+- **Dynamic Response Modification**: Custom callback functions to modify response headers dynamically
 - **Reverse Proxy Configuration**: Setting up backend services and routing rules
 - **ChiMux Integration**: Using the Chi router with CORS middleware
 - **HTTP Server Module**: Configuring and running an HTTP server
@@ -15,6 +17,9 @@ This example demonstrates how to create a reverse proxy server using the modular
 ## Features
 
 - **Tenant-Aware Routing**: Route requests to different backends based on tenant ID
+- **Response Header Rewriting**: Configure response headers per backend, per endpoint, or globally
+- **CORS Header Consolidation**: Override backend CORS headers with proxy-level CORS configuration
+- **Dynamic Response Headers**: Custom callback function to modify response headers based on backend, tenant, or response content
 - HTTP reverse proxy with configurable backend services
 - Chi router with CORS middleware
 - Configurable CORS policies (origins, methods, headers, credentials)
@@ -63,6 +68,27 @@ Or run the comprehensive test script:
 ./test-tenant-routing.sh
 ```
 
+## Testing Response Header Rewriting
+
+Test the response header rewriting and CORS consolidation:
+
+```bash
+# Test specific-api backend with CORS header consolidation
+curl -v http://localhost:8080/api/test
+
+# The response will show:
+# - Access-Control-Allow-Origin: * (overridden from backend's "http://old-domain.com")
+# - Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS (overridden from backend's "GET")
+# - X-Internal-Header: (removed by proxy)
+# - X-Proxy-Version: 1.0 (added by global config)
+# - X-Backend-Served-By: specific-api (added by dynamic modifier)
+# - Cache-Control: public, max-age=300 (added by dynamic modifier)
+
+# Test with tenant ID to see dynamic tenant header
+curl -v -H "X-Tenant-ID: tenant1" http://localhost:8080/api/test
+# Will include: X-Tenant-Served: tenant1
+```
+
 ## Configuration
 
 The reverse proxy is configured through `config.yaml`:
@@ -78,6 +104,26 @@ reverseproxy:
   default_backend: "global-default"
   tenant_id_header: "X-Tenant-ID"
   require_tenant_id: false
+  
+  # Global response header configuration (applied to all backends)
+  response_header_config:
+    set_headers:
+      X-Proxy-Version: "1.0"
+      X-Powered-By: "Modular-ReverseProxy"
+  
+  # Per-backend configuration with response header rewriting
+  backend_configs:
+    specific-api:
+      url: "http://localhost:9004"
+      # Override/consolidate CORS headers from backend
+      response_header_rewriting:
+        set_headers:
+          Access-Control-Allow-Origin: "*"
+          Access-Control-Allow-Methods: "GET, POST, PUT, DELETE, OPTIONS"
+          Access-Control-Allow-Headers: "Content-Type, Authorization, X-Tenant-ID"
+          Access-Control-Max-Age: "86400"
+        remove_headers:
+          - "X-Internal-Header"  # Remove internal headers from backend
 ```
 
 ### ChiMux Configuration
@@ -135,6 +181,9 @@ httpserver:
 
 This example is perfect for:
 - **Multi-tenant API gateways**: Different tenants can have different backend services
+- **CORS header consolidation**: Override inconsistent or incorrect CORS headers from backends
+- **Security header management**: Add security headers like CSP, HSTS, X-Frame-Options at the proxy level
+- **Header-based routing policies**: Dynamically modify headers based on tenant, backend, or response content
 - **Tenant isolation**: Route tenant traffic to dedicated backend services
 - **Migration scenarios**: Gradually move tenants to new backend services
 - **A/B testing**: Route different tenant groups to different service versions

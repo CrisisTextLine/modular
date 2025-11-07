@@ -13,6 +13,7 @@ require (
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
+	github.com/CrisisTextLine/modular/modules/database/v2 v2.2.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.38.3 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.31.0 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.10 // indirect

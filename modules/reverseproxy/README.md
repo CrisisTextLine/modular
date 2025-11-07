@@ -15,7 +15,9 @@ The Reverse Proxy module functions as a versatile API gateway that can route req
 * **Per-Endpoint Configuration**: Override backend configuration for specific endpoints within a backend
 * **Feature Flag Support**: Control backend and route behavior using feature flags with optional alternatives
 * **Hostname Handling**: Control how the Host header is handled (preserve original, use backend, or use custom)
-* **Header Rewriting**: Add, modify, or remove headers before forwarding requests
+* **Request Header Rewriting**: Add, modify, or remove headers before forwarding requests
+* **Response Header Rewriting**: Add, modify, or remove response headers from backends (per-backend, per-endpoint, or globally)
+* **Dynamic Response Header Modification**: Custom callback function to modify response headers based on backend, tenant, or response content
 * **Path Rewriting**: Transform request paths before forwarding to backends
 * **Response Aggregation**: Combine responses from multiple backends using various strategies
 * **Custom Response Transformers**: Create custom functions to transform and merge backend responses
@@ -158,7 +160,7 @@ reverseproxy:
             replacement: "/internal/users"
             strip_query_params: true
 
-      # Header management
+      # Request header management
       header_rewriting:
         hostname_handling: "use_custom"
         custom_hostname: "api-internal.example.com"
@@ -166,6 +168,15 @@ reverseproxy:
           X-API-Version: "2.0"
           X-Service-Name: "api-v2"
         remove_headers: ["X-Legacy-Header"]
+
+      # Response header management (new feature)
+      response_header_rewriting:
+        set_headers:
+          Access-Control-Allow-Origin: "*"
+          Access-Control-Allow-Methods: "GET, POST, PUT, DELETE, OPTIONS"
+          Access-Control-Allow-Headers: "Content-Type, Authorization"
+          X-Backend-Version: "2.0"
+        remove_headers: ["X-Internal-Header", "X-Debug-Info"]
 
       # Health check configuration
       health_check:
@@ -342,16 +353,18 @@ reverseproxy:
 
 The module supports several advanced features:
 
-1. **Custom Response Transformers**: Create custom functions to transform responses from multiple backends
-2. **Custom Endpoint Mappings**: Define detailed mappings between frontend endpoints and backend services
-3. **Tenant-Specific Routing**: Route requests to different backend URLs based on tenant ID
-4. **Health Checking**: Continuous monitoring of backend service availability with configurable endpoints and intervals
-5. **Circuit Breaker**: Automatic failure detection and recovery to prevent cascading failures
-6. **Response Caching**: Performance optimization with TTL-based caching of responses
-7. **Feature Flags**: Control backend and route behavior dynamically using feature flag evaluation
-8. **Debug Endpoints**: Comprehensive debugging and monitoring endpoints
-9. **Connection Pooling**: Advanced connection pool management with configurable limits
-10. **Queue Management**: Request queueing with configurable sizes and timeouts
+1. **Response Header Rewriting**: Modify, add, or remove response headers from backends (globally, per-backend, or per-endpoint)
+2. **Dynamic Response Modification**: Custom callback functions to modify response headers based on backend, tenant, or response content
+3. **Custom Response Transformers**: Create custom functions to transform responses from multiple backends
+4. **Custom Endpoint Mappings**: Define detailed mappings between frontend endpoints and backend services
+5. **Tenant-Specific Routing**: Route requests to different backend URLs based on tenant ID
+6. **Health Checking**: Continuous monitoring of backend service availability with configurable endpoints and intervals
+7. **Circuit Breaker**: Automatic failure detection and recovery to prevent cascading failures
+8. **Response Caching**: Performance optimization with TTL-based caching of responses
+9. **Feature Flags**: Control backend and route behavior dynamically using feature flag evaluation
+10. **Debug Endpoints**: Comprehensive debugging and monitoring endpoints
+11. **Connection Pooling**: Advanced connection pool management with configurable limits
+12. **Queue Management**: Request queueing with configurable sizes and timeouts
 11. **Error Handling**: Comprehensive error handling with custom pages and retry logic
 
 ### Debug Endpoints
@@ -387,6 +400,153 @@ When `require_auth` is enabled, include the auth token in the request:
 ```bash
 curl -H "Authorization: Bearer your-debug-token" http://localhost:8080/debug/info
 ```
+
+### Response Header Rewriting
+
+The reverse proxy module supports comprehensive response header rewriting at multiple levels: global, per-backend, and per-endpoint. This is particularly useful for consolidating CORS headers, adding security headers, or removing internal headers from backend responses.
+
+#### Configuration Levels
+
+Response headers are applied in the following order (later levels override earlier ones):
+1. **Global Configuration**: Applied to all responses
+2. **Backend Configuration**: Applied to responses from a specific backend
+3. **Endpoint Configuration**: Applied to responses from a specific endpoint within a backend
+
+#### Basic Usage
+
+**Global Response Headers** (applied to all backends):
+```yaml
+reverseproxy:
+  response_header_config:
+    set_headers:
+      X-Proxy-Version: "1.0"
+      X-Powered-By: "Modular-ReverseProxy"
+    remove_headers:
+      - "X-Internal-Debug"
+```
+
+**Per-Backend Response Headers**:
+```yaml
+reverseproxy:
+  backend_configs:
+    legacy-api:
+      url: "http://legacy.example.com"
+      response_header_rewriting:
+        set_headers:
+          Access-Control-Allow-Origin: "*"
+          Access-Control-Allow-Methods: "GET, POST, PUT, DELETE, OPTIONS"
+          Access-Control-Allow-Headers: "Content-Type, Authorization"
+          Access-Control-Max-Age: "86400"
+        remove_headers:
+          - "X-Internal-Header"
+          - "X-Debug-Info"
+```
+
+**Per-Endpoint Response Headers** (highest priority):
+```yaml
+reverseproxy:
+  backend_configs:
+    api:
+      url: "http://api.example.com"
+      response_header_rewriting:
+        set_headers:
+          Cache-Control: "public, max-age=300"
+      endpoints:
+        /api/sensitive:
+          pattern: "/api/sensitive"
+          response_header_rewriting:
+            set_headers:
+              Cache-Control: "no-cache, no-store, must-revalidate"
+              X-Content-Type-Options: "nosniff"
+```
+
+#### CORS Header Consolidation Use Case
+
+A common use case is to consolidate or override CORS headers from multiple backends:
+
+```yaml
+reverseproxy:
+  backend_configs:
+    # Legacy backend with inconsistent CORS headers
+    legacy-api:
+      url: "http://legacy.example.com"
+      response_header_rewriting:
+        set_headers:
+          # Override backend CORS headers with consistent values
+          Access-Control-Allow-Origin: "*"
+          Access-Control-Allow-Methods: "GET, POST, PUT, DELETE, OPTIONS"
+          Access-Control-Allow-Headers: "Content-Type, Authorization, X-Tenant-ID"
+          Access-Control-Max-Age: "86400"
+          Access-Control-Allow-Credentials: "true"
+```
+
+#### Dynamic Response Header Modification
+
+For more complex scenarios, you can use a custom callback function to modify response headers dynamically based on backend, tenant, or response content:
+
+```go
+proxyModule := reverseproxy.NewModule()
+
+// Set a custom response header modifier
+proxyModule.SetResponseHeaderModifier(func(resp *http.Response, backendID string, tenantID modular.TenantID) error {
+    // Add backend information
+    resp.Header.Set("X-Backend-ID", backendID)
+    
+    // Add tenant information if available
+    if tenantID != "" {
+        resp.Header.Set("X-Tenant-ID", string(tenantID))
+    }
+    
+    // Dynamically set caching based on status code
+    if resp.StatusCode == http.StatusOK {
+        resp.Header.Set("Cache-Control", "public, max-age=300")
+    } else {
+        resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+    }
+    
+    // Consolidate duplicate CORS headers
+    if len(resp.Header.Values("Access-Control-Allow-Origin")) > 1 {
+        resp.Header.Del("Access-Control-Allow-Origin")
+        resp.Header.Set("Access-Control-Allow-Origin", "*")
+    }
+    
+    return nil
+})
+```
+
+#### Tenant-Specific Response Headers
+
+Response headers can also be configured per-tenant by registering tenant-specific configurations:
+
+```go
+tenantService.RegisterTenant("tenant1", map[string]modular.ConfigProvider{
+    "reverseproxy": modular.NewStdConfigProvider(&reverseproxy.ReverseProxyConfig{
+        BackendConfigs: map[string]BackendServiceConfig{
+            "api": {
+                URL: "http://api.example.com",
+                ResponseHeaderRewriting: ResponseHeaderRewritingConfig{
+                    SetHeaders: map[string]string{
+                        "X-Tenant": "tenant1",
+                        "Access-Control-Allow-Origin": "https://tenant1.example.com",
+                    },
+                },
+            },
+        },
+    }),
+})
+```
+
+#### Use Cases
+
+Response header rewriting is particularly useful for:
+
+1. **CORS Header Consolidation**: Override inconsistent or incorrect CORS headers from backends
+2. **Security Headers**: Add headers like `X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security`
+3. **Cache Control**: Add or modify cache control headers based on backend or response status
+4. **Header Sanitization**: Remove internal or debug headers before responses reach clients
+5. **Multi-Tenant Headers**: Add tenant-specific headers to responses
+6. **API Versioning**: Add version information headers to responses
+7. **Compliance**: Ensure all responses meet security and compliance requirements
 
 ### Connection Pool Management
 

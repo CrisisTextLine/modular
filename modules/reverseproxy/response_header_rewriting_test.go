@@ -269,9 +269,7 @@ func TestDynamicResponseHeaderModifier(t *testing.T) {
 		}
 
 		// Create a mock app with a logger to capture error logs
-		mockApp := &MockApplication{
-			logger: &MockLogger{},
-		}
+		mockApp := NewMockApplication()
 		module.app = mockApp
 
 		// Set a custom response header modifier that returns an error

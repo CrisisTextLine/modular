@@ -365,7 +365,7 @@ The module supports several advanced features:
 10. **Debug Endpoints**: Comprehensive debugging and monitoring endpoints
 11. **Connection Pooling**: Advanced connection pool management with configurable limits
 12. **Queue Management**: Request queueing with configurable sizes and timeouts
-11. **Error Handling**: Comprehensive error handling with custom pages and retry logic
+13. **Error Handling**: Comprehensive error handling with custom pages and retry logic
 
 ### Debug Endpoints
 

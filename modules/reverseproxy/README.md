@@ -38,6 +38,7 @@ go get github.com/CrisisTextLine/modular/modules/reverseproxy@v1.0.0
 
 ## Documentation
 
+- **[Configuration Guide](CONFIGURATION.md)** - Comprehensive configuration reference for all features including routing, caching, feature flags, health checks, and tenant overrides
 - **[Feature Flag Migration Guide](FEATURE_FLAG_MIGRATION_GUIDE.md)** - Migration guide for the new feature flag aggregator pattern
 - **[Path Rewriting Guide](PATH_REWRITING_GUIDE.md)** - Detailed guide for configuring path transformations
 - **[Per-Backend Configuration Guide](PER_BACKEND_CONFIGURATION_GUIDE.md)** - Advanced per-backend configuration options

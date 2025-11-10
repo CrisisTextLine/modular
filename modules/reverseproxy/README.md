@@ -895,7 +895,7 @@ health_check:
 For detailed documentation and examples, see:
 - [PATH_REWRITING_GUIDE.md](PATH_REWRITING_GUIDE.md) - Complete guide to path rewriting and header rewriting
 - [PER_BACKEND_CONFIGURATION_GUIDE.md](PER_BACKEND_CONFIGURATION_GUIDE.md) - Per-backend and per-endpoint configuration
-- [DOCUMENTATION.md](DOCUMENTATION.md) - General module documentation
+- [CONFIGURATION.md](CONFIGURATION.md) - Comprehensive configuration reference
 
 ## License
 

@@ -216,7 +216,7 @@ jobs:
 
       - name: golangci-lint
         id: lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: modules/${{ matrix.module }}

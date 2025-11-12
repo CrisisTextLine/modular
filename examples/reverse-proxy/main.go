@@ -77,10 +77,10 @@ func main() {
 
 	// Register the modules in dependency order
 	app.RegisterModule(chimux.NewChiMuxModule())
-	
+
 	// Create reverse proxy module with composite route strategies and response transformers
 	proxyModule := reverseproxy.NewModule()
-	
+
 	// Set a custom response header modifier to demonstrate dynamic CORS header consolidation
 	proxyModule.SetResponseHeaderModifier(func(resp *http.Response, backendID string, tenantID modular.TenantID) error {
 		// Add custom headers based on backend and tenant
@@ -88,14 +88,14 @@ func main() {
 		if tenantID != "" {
 			resp.Header.Set("X-Tenant-Served", string(tenantID))
 		}
-		
+
 		// Example: Dynamically set Cache-Control based on status code
 		if resp.StatusCode == http.StatusOK {
 			resp.Header.Set("Cache-Control", "public, max-age=300")
 		} else {
 			resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		}
-		
+
 		return nil
 	})
 
@@ -143,7 +143,7 @@ func main() {
 		// Create the response
 		body, err := json.Marshal(enriched)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to marshal enriched response: %w", err)
 		}
 
 		resp := &http.Response{
@@ -155,7 +155,7 @@ func main() {
 
 		return resp, nil
 	})
-	
+
 	app.RegisterModule(proxyModule)
 	app.RegisterModule(httpserver.NewHTTPServerModule())
 
@@ -231,7 +231,7 @@ func startMockBackends() {
 	// ========================================
 	// Backends for demonstrating FIRST-SUCCESS strategy
 	// ========================================
-	
+
 	// Primary backend (port 9005) - Sometimes fails to demonstrate fallback
 	go func() {
 		requestCount := 0
@@ -271,7 +271,7 @@ func startMockBackends() {
 	// ========================================
 	// Backends for demonstrating MERGE strategy
 	// ========================================
-	
+
 	// Users backend (port 9007) - Returns user data
 	go func() {
 		mux := http.NewServeMux()
@@ -317,7 +317,7 @@ func startMockBackends() {
 	// ========================================
 	// Backends for demonstrating SEQUENTIAL strategy
 	// ========================================
-	
+
 	// Auth backend (port 9010) - First in sequence, validates request
 	go func() {
 		mux := http.NewServeMux()

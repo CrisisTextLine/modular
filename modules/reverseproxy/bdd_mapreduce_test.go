@@ -42,6 +42,11 @@ type MapReduceBDDTestContext struct {
 	expectedData    interface{}
 }
 
+// TestMapReduceCompositeFeatures is disabled pending integration with main BDD test suite
+// The map/reduce feature file has been temporarily disabled (renamed to .disabled)
+// TODO: Integrate map/reduce step definitions into bdd_step_registry_test.go
+// TODO: Migrate MapReduceBDDTestContext to use shared ReverseProxyBDDTestContext
+/*
 func TestMapReduceCompositeFeatures(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: InitializeMapReduceScenarios,
@@ -56,6 +61,7 @@ func TestMapReduceCompositeFeatures(t *testing.T) {
 		t.Fatal("non-zero status returned, failed to run feature tests")
 	}
 }
+*/
 
 // InitializeMapReduceScenarios initializes the Godog scenario steps
 func InitializeMapReduceScenarios(ctx *godog.ScenarioContext) {

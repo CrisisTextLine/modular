@@ -205,7 +205,7 @@ func (h *CompositeHandler) executeSequentialMapReduce(ctx context.Context, w htt
 			return
 		}
 		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte(fmt.Sprintf("Failed to query target backend: %v", err)))
+		fmt.Fprintf(w, "Failed to query target backend: %v", err)
 		return
 	}
 	defer targetResp.Body.Close()
@@ -221,7 +221,7 @@ func (h *CompositeHandler) executeSequentialMapReduce(ctx context.Context, w htt
 	mergedResponse, err := mergeResponses(sourceBody, targetBody, config)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(fmt.Sprintf("Failed to merge responses: %v", err)))
+		fmt.Fprintf(w, "Failed to merge responses: %v", err)
 		return
 	}
 
@@ -283,7 +283,7 @@ func (h *CompositeHandler) executeParallelMapReduce(ctx context.Context, w http.
 	mergedResponse, err := mergeParallelResponses(responses, config)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(fmt.Sprintf("Failed to merge responses: %v", err)))
+		fmt.Fprintf(w, "Failed to merge responses: %v", err)
 		return
 	}
 

@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/CrisisTextLine/modular/feeders"
@@ -73,10 +77,10 @@ func main() {
 
 	// Register the modules in dependency order
 	app.RegisterModule(chimux.NewChiMuxModule())
-	
-	// Create reverse proxy module and configure dynamic response header modification
+
+	// Create reverse proxy module with composite route strategies and response transformers
 	proxyModule := reverseproxy.NewModule()
-	
+
 	// Set a custom response header modifier to demonstrate dynamic CORS header consolidation
 	proxyModule.SetResponseHeaderModifier(func(resp *http.Response, backendID string, tenantID modular.TenantID) error {
 		// Add custom headers based on backend and tenant
@@ -84,17 +88,86 @@ func main() {
 		if tenantID != "" {
 			resp.Header.Set("X-Tenant-Served", string(tenantID))
 		}
-		
+
 		// Example: Dynamically set Cache-Control based on status code
 		if resp.StatusCode == http.StatusOK {
 			resp.Header.Set("Cache-Control", "public, max-age=300")
 		} else {
 			resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		}
-		
+
 		return nil
 	})
-	
+
+	// CUSTOM RESPONSE TRANSFORMER EXAMPLE:
+	// This transformer demonstrates how to merge data from one backend into another's response.
+	// In this example, we fetch user profile data from one backend and enrich it with
+	// analytics data from another backend, creating a unified response.
+	proxyModule.SetResponseTransformer("/api/composite/profile-with-analytics", func(responses map[string]*http.Response) (*http.Response, error) {
+		// Read responses from both backends
+		var profileData map[string]interface{}
+		var analyticsData map[string]interface{}
+		var errors []string
+
+		// Parse profile backend response
+		if profileResp, ok := responses["profile-backend"]; ok {
+			body, err := io.ReadAll(profileResp.Body)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("failed to read profile: %v", err))
+			} else if err := json.Unmarshal(body, &profileData); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to parse profile: %v", err))
+			}
+		} else {
+			errors = append(errors, "profile backend response missing")
+		}
+
+		// Parse analytics backend response
+		if analyticsResp, ok := responses["analytics-backend"]; ok {
+			body, err := io.ReadAll(analyticsResp.Body)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("failed to read analytics: %v", err))
+			} else if err := json.Unmarshal(body, &analyticsData); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to parse analytics: %v", err))
+			}
+		} else {
+			errors = append(errors, "analytics backend response missing")
+		}
+
+		// Create enriched response by merging analytics into profile
+		enriched := make(map[string]interface{})
+		if len(errors) > 0 {
+			enriched["errors"] = errors
+		}
+		if profileData != nil {
+			enriched["profile"] = profileData
+		}
+		if analyticsData != nil {
+			// Augment profile with analytics data
+			enriched["analytics"] = analyticsData
+			// Example: Add analytics summary to the top level
+			if views, ok := analyticsData["page_views"].(float64); ok {
+				enriched["total_page_views"] = views
+			}
+		}
+		enriched["enriched"] = true
+		enriched["timestamp"] = time.Now().Format(time.RFC3339)
+
+		// Create the response
+		body, err := json.Marshal(enriched)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal enriched response: %w", err)
+		}
+
+		resp := &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(body)),
+		}
+
+		return resp, nil
+	})
+
 	app.RegisterModule(proxyModule)
 	app.RegisterModule(httpserver.NewHTTPServerModule())
 
@@ -105,7 +178,7 @@ func main() {
 	}
 }
 
-// startMockBackends starts mock backend servers on different ports
+// startMockBackends starts mock backend servers on different ports to demonstrate composite routing strategies
 func startMockBackends() {
 	// Global default backend (port 9001)
 	go func() {
@@ -164,6 +237,170 @@ func startMockBackends() {
 		fmt.Println("Starting specific-api backend on :9004")
 		if err := http.ListenAndServe(":9004", mux); err != nil { //nolint:gosec
 			fmt.Printf("Backend server error on :9004: %v\n", err)
+		}
+	}()
+
+	// ========================================
+	// Backends for demonstrating FIRST-SUCCESS strategy
+	// ========================================
+
+	// Primary backend (port 9005) - Sometimes fails to demonstrate fallback
+	go func() {
+		requestCount := 0
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			// Fail every 3rd request to demonstrate fallback
+			if requestCount%3 == 0 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				fmt.Fprintf(w, `{"error":"primary backend unavailable"}`)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"backend":"primary-backend","status":"success","request_count":%d}`, requestCount)
+		})
+		fmt.Println("Starting primary-backend (first-success demo) on :9005")
+		if err := http.ListenAndServe(":9005", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9005: %v\n", err)
+		}
+	}()
+
+	// Fallback backend (port 9006) - Always succeeds
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"backend":"fallback-backend","status":"success","message":"fallback activated"}`)
+		})
+		fmt.Println("Starting fallback-backend (first-success demo) on :9006")
+		if err := http.ListenAndServe(":9006", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9006: %v\n", err)
+		}
+	}()
+
+	// ========================================
+	// Backends for demonstrating MERGE strategy
+	// ========================================
+
+	// Users backend (port 9007) - Returns user data
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"user_id":123,"username":"john_doe","email":"john@example.com"}`)
+		})
+		fmt.Println("Starting users-backend (merge demo) on :9007")
+		if err := http.ListenAndServe(":9007", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9007: %v\n", err)
+		}
+	}()
+
+	// Orders backend (port 9008) - Returns order data
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"total_orders":42,"recent_orders":[{"id":1,"amount":99.99},{"id":2,"amount":149.99}]}`)
+		})
+		fmt.Println("Starting orders-backend (merge demo) on :9008")
+		if err := http.ListenAndServe(":9008", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9008: %v\n", err)
+		}
+	}()
+
+	// Preferences backend (port 9009) - Returns user preferences
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"theme":"dark","notifications":true,"language":"en"}`)
+		})
+		fmt.Println("Starting preferences-backend (merge demo) on :9009")
+		if err := http.ListenAndServe(":9009", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9009: %v\n", err)
+		}
+	}()
+
+	// ========================================
+	// Backends for demonstrating SEQUENTIAL strategy
+	// ========================================
+
+	// Auth backend (port 9010) - First in sequence, validates request
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"auth":"validated","token":"abc123","step":"1_auth"}`)
+		})
+		fmt.Println("Starting auth-backend (sequential demo) on :9010")
+		if err := http.ListenAndServe(":9010", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9010: %v\n", err)
+		}
+	}()
+
+	// Processing backend (port 9011) - Second in sequence, processes request
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"processing":"complete","job_id":"job-456","step":"2_process"}`)
+		})
+		fmt.Println("Starting processing-backend (sequential demo) on :9011")
+		if err := http.ListenAndServe(":9011", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9011: %v\n", err)
+		}
+	}()
+
+	// Finalization backend (port 9012) - Last in sequence, returns final result
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"status":"completed","result":"success","message":"All steps completed","step":"3_finalize"}`)
+		})
+		fmt.Println("Starting finalization-backend (sequential demo) on :9012")
+		if err := http.ListenAndServe(":9012", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9012: %v\n", err)
+		}
+	}()
+
+	// ========================================
+	// Backends for CUSTOM TRANSFORMER demonstration
+	// ========================================
+
+	// Profile backend (port 9013) - Returns user profile
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"user_id":789,"name":"Alice Smith","bio":"Software Engineer","joined":"2023-01-15"}`)
+		})
+		fmt.Println("Starting profile-backend (transformer demo) on :9013")
+		if err := http.ListenAndServe(":9013", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9013: %v\n", err)
+		}
+	}()
+
+	// Analytics backend (port 9014) - Returns user analytics
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"page_views":1523,"session_duration":"45m","last_login":"2024-01-20T10:30:00Z"}`)
+		})
+		fmt.Println("Starting analytics-backend (transformer demo) on :9014")
+		if err := http.ListenAndServe(":9014", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9014: %v\n", err)
 		}
 	}()
 }

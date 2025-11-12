@@ -483,8 +483,8 @@ func TestResponseHeaderRewritingPriority(t *testing.T) {
 							// Endpoint config
 							ResponseHeaderRewriting: ResponseHeaderRewritingConfig{
 								SetHeaders: map[string]string{
-									"X-Priority-Test":  "endpoint",
-									"X-Endpoint-Only":  "endpoint",
+									"X-Priority-Test": "endpoint",
+									"X-Endpoint-Only": "endpoint",
 								},
 							},
 						},

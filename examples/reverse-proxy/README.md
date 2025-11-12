@@ -1,31 +1,71 @@
 # Reverse Proxy Example
 
-This example demonstrates how to create a reverse proxy server using the modular framework with tenant-specific default backend routing.
+This example demonstrates the advanced composite routing capabilities of the modular framework's reverse proxy module, showcasing **all three composite route response strategies** and **custom response transformers**.
 
 ## What it demonstrates
 
-- **Tenant-Specific Default Backends**: Different tenants can have different default backend services
+### Composite Route Strategies
+
+This example demonstrates **three powerful strategies** for combining responses from multiple backend services:
+
+1. **First-Success Strategy** (`first-success`)
+   - Tries backends sequentially until one succeeds
+   - Returns the first successful response
+   - **Use case**: High-availability setups with primary and fallback backends
+   - **Example**: Try primary server first, fall back to backup if unavailable
+
+2. **Merge Strategy** (`merge`)
+   - Executes all backend requests in parallel
+   - Merges JSON responses from all backends into a single JSON object
+   - **Use case**: Aggregating data from multiple microservices
+   - **Example**: Fetch user data, orders, and preferences simultaneously and combine them
+
+3. **Sequential Strategy** (`sequential`)
+   - Executes requests one at a time in order
+   - Returns the last successful response
+   - **Use case**: Multi-step workflows where later steps may depend on earlier ones completing
+   - **Example**: Auth → Processing → Finalization pipeline
+
+### Custom Response Transformers
+
+Beyond the built-in strategies, this example shows how to create **custom response transformers** that can:
+- Intelligently merge data from multiple backends
+- Augment response data from one backend with data from another
+- Create entirely new response structures
+- Apply business logic during response composition
+
+The example includes a transformer that enriches user profile data with analytics information, demonstrating tight integration between backend responses.
+
+### Additional Features
+
+- **Tenant-Specific Routing**: Different tenants can have different default backend services
 - **Response Header Rewriting**: Override and consolidate response headers (e.g., CORS headers)
 - **Dynamic Response Modification**: Custom callback functions to modify response headers dynamically
-- **Reverse Proxy Configuration**: Setting up backend services and routing rules
-- **ChiMux Integration**: Using the Chi router with CORS middleware
-- **HTTP Server Module**: Configuring and running an HTTP server
-- **Module Composition**: How multiple modules work together seamlessly
-- **CORS Handling**: Cross-origin resource sharing configuration
-- **Graceful Shutdown**: Proper application lifecycle management
+- **Multiple Mock Backends**: 14 self-contained mock servers demonstrating real-world scenarios
 
-## Features
+## Architecture
 
-- **Tenant-Aware Routing**: Route requests to different backends based on tenant ID
-- **Response Header Rewriting**: Configure response headers per backend, per endpoint, or globally
-- **CORS Header Consolidation**: Override backend CORS headers with proxy-level CORS configuration
-- **Dynamic Response Headers**: Custom callback function to modify response headers based on backend, tenant, or response content
-- HTTP reverse proxy with configurable backend services
-- Chi router with CORS middleware
-- Configurable CORS policies (origins, methods, headers, credentials)
-- Multiple backend service support
-- Mock backend servers for testing
-- Graceful shutdown handling
+```
+                                    ┌─────────────────────────┐
+                                    │   Composite Routes       │
+                                    └─────────────────────────┘
+                                              │
+                    ┌─────────────────────────┼─────────────────────────┐
+                    │                         │                         │
+         ┌──────────▼──────────┐   ┌─────────▼────────┐   ┌───────────▼──────────┐
+         │  First-Success      │   │     Merge        │   │    Sequential        │
+         │  Strategy           │   │     Strategy     │   │    Strategy          │
+         └──────────┬──────────┘   └─────────┬────────┘   └───────────┬──────────┘
+                    │                         │                         │
+         Try in order, return     Parallel requests,       Sequential requests,
+         first successful         merge all JSON          return last successful
+                    │                         │                         │
+         ┌──────────▼──────────┐   ┌─────────▼────────┐   ┌───────────▼──────────┐
+         │  Primary Backend    │   │  Users Backend   │   │  Auth Backend        │
+         │  Fallback Backend   │   │  Orders Backend  │   │  Processing Backend  │
+         └─────────────────────┘   │  Prefs Backend   │   │  Final Backend       │
+                                   └──────────────────┘   └──────────────────────┘
+```
 
 ## Running the Example
 
@@ -39,15 +79,125 @@ go build -o reverse-proxy .
 ./reverse-proxy
 ```
 
-The server will start on `localhost:8080` by default, along with 4 mock backend servers:
-- **Global Default Backend** (port 9001): `{"backend":"global-default"}`
-- **Tenant1 Backend** (port 9002): `{"backend":"tenant1-backend"}`
-- **Tenant2 Backend** (port 9003): `{"backend":"tenant2-backend"}`
-- **Specific API Backend** (port 9004): `{"backend":"specific-api"}`
+The server will start on `localhost:8080` and automatically launch **14 mock backend servers** on ports 9001-9014 to demonstrate the various strategies.
+
+## Testing the Composite Route Strategies
+
+### 1. First-Success Strategy
+
+Test the high-availability pattern with automatic fallback:
+
+```bash
+# Make multiple requests to see primary/fallback behavior
+# Primary backend fails every 3rd request, triggering fallback
+curl http://localhost:8080/api/composite/first-success
+curl http://localhost:8080/api/composite/first-success
+curl http://localhost:8080/api/composite/first-success  # This one will use fallback
+curl http://localhost:8080/api/composite/first-success
+```
+
+**Expected behavior**:
+- Most requests: Primary backend response
+- Every 3rd request: Fallback backend response (when primary "fails")
+
+**Response example (primary)**:
+```json
+{"backend":"primary-backend","status":"success","request_count":1}
+```
+
+**Response example (fallback)**:
+```json
+{"backend":"fallback-backend","status":"success","message":"fallback activated"}
+```
+
+### 2. Merge Strategy
+
+Test parallel data aggregation from multiple microservices:
+
+```bash
+# Single request fetches data from 3 backends in parallel
+curl http://localhost:8080/api/composite/merge
+```
+
+**Expected response** (merged JSON from all backends):
+```json
+{
+  "users-backend": {
+    "user_id": 123,
+    "username": "john_doe",
+    "email": "john@example.com"
+  },
+  "orders-backend": {
+    "total_orders": 42,
+    "recent_orders": [
+      {"id": 1, "amount": 99.99},
+      {"id": 2, "amount": 149.99}
+    ]
+  },
+  "preferences-backend": {
+    "theme": "dark",
+    "notifications": true,
+    "language": "en"
+  }
+}
+```
+
+### 3. Sequential Strategy
+
+Test ordered execution of multi-step workflows:
+
+```bash
+# Requests execute in order: auth → processing → finalization
+curl http://localhost:8080/api/composite/sequential
+```
+
+**Expected response** (from the last backend in sequence):
+```json
+{
+  "status": "completed",
+  "result": "success",
+  "message": "All steps completed",
+  "step": "3_finalize"
+}
+```
+
+### 4. Custom Response Transformer
+
+Test intelligent data merging with custom business logic:
+
+```bash
+# Custom transformer enriches profile with analytics
+curl http://localhost:8080/api/composite/profile-with-analytics
+```
+
+**Expected response** (custom merged structure):
+```json
+{
+  "profile": {
+    "user_id": 789,
+    "name": "Alice Smith",
+    "bio": "Software Engineer",
+    "joined": "2023-01-15"
+  },
+  "analytics": {
+    "page_views": 1523,
+    "session_duration": "45m",
+    "last_login": "2024-01-20T10:30:00Z"
+  },
+  "total_page_views": 1523,
+  "enriched": true,
+  "timestamp": "2024-01-20T15:30:45Z"
+}
+```
+
+Notice how the transformer:
+- Keeps both responses organized under `profile` and `analytics` keys
+- Extracts `page_views` to the top level as `total_page_views`
+- Adds metadata like `enriched` flag and `timestamp`
 
 ## Testing Tenant-Specific Routing
 
-You can test the tenant-specific routing using curl commands:
+The example also maintains backward compatibility with tenant-specific routing:
 
 ```bash
 # Test tenant1 routing (goes to tenant1-backend)
@@ -58,9 +208,6 @@ curl -H "X-Tenant-ID: tenant2" http://localhost:8080/test
 
 # Test without tenant header (goes to global-default)
 curl http://localhost:8080/test
-
-# Test with unknown tenant (falls back to global-default)
-curl -H "X-Tenant-ID: unknown" http://localhost:8080/test
 ```
 
 Or run the comprehensive test script:
@@ -68,146 +215,189 @@ Or run the comprehensive test script:
 ./test-tenant-routing.sh
 ```
 
-## Testing Response Header Rewriting
-
-Test the response header rewriting and CORS consolidation:
-
-```bash
-# Test specific-api backend with CORS header consolidation
-curl -v http://localhost:8080/api/test
-
-# The response will show:
-# - Access-Control-Allow-Origin: * (overridden from backend's "http://old-domain.com")
-# - Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS (overridden from backend's "GET")
-# - X-Internal-Header: (removed by proxy)
-# - X-Proxy-Version: 1.0 (added by global config)
-# - X-Backend-Served-By: specific-api (added by dynamic modifier)
-# - Cache-Control: public, max-age=300 (added by dynamic modifier)
-
-# Test with tenant ID to see dynamic tenant header
-curl -v -H "X-Tenant-ID: tenant1" http://localhost:8080/api/test
-# Will include: X-Tenant-Served: tenant1
-```
-
 ## Configuration
 
-The reverse proxy is configured through `config.yaml`:
+The reverse proxy is configured through `config.yaml`. Here's how each strategy is configured:
 
-### Reverse Proxy Configuration
+### First-Success Strategy Configuration
+
 ```yaml
-reverseproxy:
-  backend_services:
-    global-default: "http://localhost:9001"
-    tenant1-backend: "http://localhost:9002"
-    tenant2-backend: "http://localhost:9003"
-    specific-api: "http://localhost:9004"
-  default_backend: "global-default"
-  tenant_id_header: "X-Tenant-ID"
-  require_tenant_id: false
-  
-  # Global response header configuration (applied to all backends)
-  response_header_config:
-    set_headers:
-      X-Proxy-Version: "1.0"
-      X-Powered-By: "Modular-ReverseProxy"
-  
-  # Per-backend configuration with response header rewriting
-  backend_configs:
-    specific-api:
-      url: "http://localhost:9004"
-      # Override/consolidate CORS headers from backend
-      response_header_rewriting:
-        set_headers:
-          Access-Control-Allow-Origin: "*"
-          Access-Control-Allow-Methods: "GET, POST, PUT, DELETE, OPTIONS"
-          Access-Control-Allow-Headers: "Content-Type, Authorization, X-Tenant-ID"
-          Access-Control-Max-Age: "86400"
-        remove_headers:
-          - "X-Internal-Header"  # Remove internal headers from backend
+composite_routes:
+  "/api/composite/first-success":
+    pattern: "/api/composite/first-success"
+    backends:
+      - "primary-backend"      # Tried first
+      - "fallback-backend"     # Tried if primary fails
+    strategy: "first-success"
 ```
 
-### ChiMux Configuration
+### Merge Strategy Configuration
+
 ```yaml
-chimux:
-  basepath: ""
-  allowed_origins: ["*"]
-  allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-  allowed_headers: ["Content-Type", "Authorization"]
-  allow_credentials: false
-  max_age: 300
+composite_routes:
+  "/api/composite/merge":
+    pattern: "/api/composite/merge"
+    backends:
+      - "users-backend"        # All executed in parallel
+      - "orders-backend"
+      - "preferences-backend"
+    strategy: "merge"
 ```
 
-### HTTP Server Configuration
+### Sequential Strategy Configuration
+
 ```yaml
-httpserver:
-  host: "localhost"
-  port: 8080
-  read_timeout: 30
-  write_timeout: 30
-  idle_timeout: 120
+composite_routes:
+  "/api/composite/sequential":
+    pattern: "/api/composite/sequential"
+    backends:
+      - "auth-backend"         # Executed first
+      - "processing-backend"   # Executed second
+      - "finalization-backend" # Executed last (response returned)
+    strategy: "sequential"
 ```
 
-## How Tenant-Specific Routing Works
+### Custom Response Transformer
 
-1. **Tenant Registration**: Tenants are registered programmatically with their specific configurations:
-   ```go
-   tenantService.RegisterTenant("tenant1", map[string]modular.ConfigProvider{
-       "reverseproxy": modular.NewStdConfigProvider(&reverseproxy.ReverseProxyConfig{
-           DefaultBackend: "tenant1-backend",
-           BackendServices: map[string]string{
-               "tenant1-backend": "http://localhost:9002",
-           },
-       }),
-   })
-   ```
+Response transformers are set programmatically in `main.go`:
 
-2. **Request Processing**: When a request comes in:
-   - The reverse proxy checks for the `X-Tenant-ID` header
-   - If found and the tenant exists, it uses the tenant's default backend
-   - If no tenant header or unknown tenant, it falls back to the global default backend
+```go
+proxyModule.SetResponseTransformer("/api/composite/profile-with-analytics", 
+    func(responses map[string]*http.Response) (*http.Response, error) {
+        // Custom logic to merge/transform responses
+        // ...
+        return customResponse, nil
+    })
+```
 
-3. **Backend Selection**:
-   - `tenant1` → `tenant1-backend` (port 9002)
-   - `tenant2` → `tenant2-backend` (port 9003)
-   - No tenant/unknown → `global-default` (port 9001)
+## Implementation Details
+
+### Code Structure
+
+The example consists of:
+
+1. **main.go**: Application setup with:
+   - Module registration and configuration
+   - Custom response transformer implementation
+   - 14 mock backend servers demonstrating various scenarios
+
+2. **config.yaml**: Complete configuration showing:
+   - All backend service definitions
+   - All three composite route strategies
+   - Response header rewriting rules
+
+3. **README.md**: Comprehensive documentation
+
+### Mock Backend Servers
+
+The example includes 14 self-contained mock servers:
+
+| Port | Backend | Purpose |
+|------|---------|---------|
+| 9001 | global-default | Default routing |
+| 9002 | tenant1-backend | Tenant-specific routing |
+| 9003 | tenant2-backend | Tenant-specific routing |
+| 9004 | specific-api | CORS header override demo |
+| 9005 | primary-backend | First-success: primary (occasionally fails) |
+| 9006 | fallback-backend | First-success: backup |
+| 9007 | users-backend | Merge: user data |
+| 9008 | orders-backend | Merge: order data |
+| 9009 | preferences-backend | Merge: preferences |
+| 9010 | auth-backend | Sequential: step 1 (auth) |
+| 9011 | processing-backend | Sequential: step 2 (process) |
+| 9012 | finalization-backend | Sequential: step 3 (finalize) |
+| 9013 | profile-backend | Transformer: profile data |
+| 9014 | analytics-backend | Transformer: analytics data |
+
+## Use Cases
+
+### First-Success Strategy
+
+Perfect for:
+- **High-availability setups**: Primary and backup backend servers
+- **Graceful degradation**: Try expensive operation first, fall back to cached/simpler version
+- **Multi-region deployments**: Try nearest region first, fall back to others
+- **Service migration**: Try new service, fall back to legacy if unavailable
+
+### Merge Strategy
+
+Perfect for:
+- **Microservice aggregation**: Combine data from multiple services (users, orders, inventory)
+- **Dashboard APIs**: Fetch multiple metrics/stats in parallel
+- **Profile enrichment**: User + preferences + settings in one call
+- **Report generation**: Gather data from multiple sources simultaneously
+
+### Sequential Strategy
+
+Perfect for:
+- **Multi-step workflows**: Auth → business logic → finalization
+- **Pipeline processing**: Data validation → transformation → storage
+- **Dependent operations**: Where later steps need earlier steps to complete
+- **State transitions**: Ordered status changes
+
+### Custom Transformers
+
+Perfect for:
+- **Complex data merging**: Business logic for combining responses
+- **Data augmentation**: Enrich response A with calculated fields from response B
+- **Response reshaping**: Create custom structures from backend data
+- **Cross-service enrichment**: Add related data from multiple sources
 
 ## Key Modules Used
 
 1. **ChiMux Module**: Provides HTTP routing with Chi router and CORS middleware
-2. **ReverseProxy Module**: Handles request proxying to backend services with tenant awareness
+2. **ReverseProxy Module**: Handles composite routing with multiple strategies
 3. **HTTPServer Module**: Manages the HTTP server lifecycle
 
-## Use Cases
+## Benefits of Composite Routing
 
-This example is perfect for:
-- **Multi-tenant API gateways**: Different tenants can have different backend services
-- **CORS header consolidation**: Override inconsistent or incorrect CORS headers from backends
-- **Security header management**: Add security headers like CSP, HSTS, X-Frame-Options at the proxy level
-- **Header-based routing policies**: Dynamically modify headers based on tenant, backend, or response content
-- **Tenant isolation**: Route tenant traffic to dedicated backend services
-- **Migration scenarios**: Gradually move tenants to new backend services
-- **A/B testing**: Route different tenant groups to different service versions
-- **Load balancing**: Distribute tenants across different backend clusters
-- **Legacy system modernization**: Proxy requests while maintaining tenant-specific routing
+1. **Reduced Client Complexity**: One API call instead of multiple
+2. **Improved Performance**: Parallel requests reduce total latency
+3. **Better Reliability**: Automatic failover and retries
+4. **Simplified Orchestration**: Server-side composition vs. client-side
+5. **Consistent Error Handling**: Centralized handling of partial failures
+6. **Flexible Integration**: Mix different backend types and protocols
 
-## Architecture
+## Advanced Topics
 
-```
-Client Request → Tenant ID Check → ChiMux Router → ReverseProxy → Tenant-Specific Backend
-                       ↓              ↓
-                 X-Tenant-ID     CORS Middleware
-                    Header            
-                       ↓
-               Tenant Configuration
-                 (if available)
-                       ↓
-              Tenant Default Backend
-                    OR
-               Global Default Backend
-```
+### Circuit Breakers
 
-The request flow:
-1. Extracts tenant ID from `X-Tenant-ID` header
-2. Applies CORS middleware
-3. Determines appropriate backend based on tenant configuration
-4. Proxies request to the selected backend service
+The reverse proxy module includes circuit breaker support for all strategies. When a backend repeatedly fails, the circuit breaker opens and stops sending requests to that backend temporarily, allowing it to recover.
+
+### Response Caching
+
+Responses can be cached based on configurable TTL values, reducing load on backend services.
+
+### Health Checking
+
+Backends can be automatically health-checked, and unhealthy backends are temporarily removed from rotation.
+
+### Feature Flags
+
+Composite routes can be controlled by feature flags, allowing gradual rollout or A/B testing of new aggregation patterns.
+
+## Troubleshooting
+
+### All backends return 502
+
+- Ensure all mock backends started successfully (check console output)
+- Verify no port conflicts (ports 9001-9014 should be available)
+- Check that the proxy server is running on port 8080
+
+### Merge strategy returns partial data
+
+- This is normal if some backends fail
+- The merge strategy combines all successful responses
+- Check individual backend logs for errors
+
+### Sequential strategy returns unexpected backend
+
+- Sequential returns the **last** successful response
+- If early backends fail, you'll get a response from a later backend
+- This is by design for resilience
+
+## Learn More
+
+- [Reverse Proxy Module Documentation](../../modules/reverseproxy/README.md)
+- [Path Rewriting Guide](../../modules/reverseproxy/PATH_REWRITING_GUIDE.md)
+- [Per-Backend Configuration](../../modules/reverseproxy/PER_BACKEND_CONFIGURATION_GUIDE.md)

@@ -5,6 +5,7 @@ package reverseproxy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,29 @@ import (
 
 	"net/http/httptest"
 )
+
+// CompositeStrategy defines how responses from multiple backends are combined.
+type CompositeStrategy string
+
+const (
+	// StrategyFirstSuccess returns the first successful response from backends (in order).
+	// Backends are tried sequentially until one succeeds.
+	StrategyFirstSuccess CompositeStrategy = "first-success"
+
+	// StrategyMerge attempts to merge JSON responses from all backends into a single JSON object.
+	// Requests are executed in parallel and responses are combined.
+	StrategyMerge CompositeStrategy = "merge"
+
+	// StrategySequential executes requests sequentially and returns the last successful response.
+	// This is useful when later backends depend on earlier ones completing.
+	StrategySequential CompositeStrategy = "sequential"
+)
+
+// ResponseTransformer is a function that can transform backend responses.
+// It receives a map of backend responses (keyed by backend ID) and can modify them
+// or create a new combined response. This allows for complex response manipulation
+// like merging specific fields, data augmentation, etc.
+type ResponseTransformer func(responses map[string]*http.Response) (*http.Response, error)
 
 // Backend represents a backend service configuration.
 type Backend struct {
@@ -24,16 +48,17 @@ type Backend struct {
 // CompositeHandler is updated to handle multiple requests and process/merge them
 // into a single response. It now includes circuit breaking and response caching.
 type CompositeHandler struct {
-	backends        []*Backend
-	parallel        bool // Flag to control parallel execution of requests
-	responseTimeout time.Duration
-	circuitBreakers map[string]*CircuitBreaker
-	responseCache   *responseCache
-	eventEmitter    func(eventType string, data map[string]interface{})
+	backends            []*Backend
+	strategy            CompositeStrategy
+	responseTimeout     time.Duration
+	circuitBreakers     map[string]*CircuitBreaker
+	responseCache       *responseCache
+	eventEmitter        func(eventType string, data map[string]interface{})
+	responseTransformer ResponseTransformer
 }
 
-// NewCompositeHandler creates a new composite handler with the given backends.
-func NewCompositeHandler(backends []*Backend, parallel bool, responseTimeout time.Duration) *CompositeHandler {
+// NewCompositeHandler creates a new composite handler with the given backends and strategy.
+func NewCompositeHandler(backends []*Backend, strategy CompositeStrategy, responseTimeout time.Duration) *CompositeHandler {
 	// Initialize circuit breakers for each backend - using default settings
 	// These will be replaced when ConfigureCircuitBreakers is called
 	circuitBreakers := make(map[string]*CircuitBreaker)
@@ -41,9 +66,14 @@ func NewCompositeHandler(backends []*Backend, parallel bool, responseTimeout tim
 		circuitBreakers[b.ID] = nil
 	}
 
+	// Default to first-success if no strategy specified
+	if strategy == "" {
+		strategy = StrategyFirstSuccess
+	}
+
 	return &CompositeHandler{
 		backends:        backends,
-		parallel:        parallel,
+		strategy:        strategy,
 		responseTimeout: responseTimeout,
 		circuitBreakers: circuitBreakers,
 		// No caching by default, can be set via SetResponseCache.
@@ -84,6 +114,11 @@ func (h *CompositeHandler) ConfigureCircuitBreakers(globalConfig CircuitBreakerC
 // SetResponseCache sets a response cache for the handler.
 func (h *CompositeHandler) SetResponseCache(cache *responseCache) {
 	h.responseCache = cache
+}
+
+// SetResponseTransformer sets a custom response transformer function.
+func (h *CompositeHandler) SetResponseTransformer(transformer ResponseTransformer) {
+	h.responseTransformer = transformer
 }
 
 // ServeHTTP handles the request by forwarding it to all backends
@@ -130,11 +165,17 @@ func (h *CompositeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), h.responseTimeout)
 	defer cancel()
 
-	// Use either parallel or sequential execution based on configuration.
-	if h.parallel {
-		h.executeParallel(ctx, recorder, r, bodyBytes)
-	} else {
+	// Execute requests based on strategy
+	switch h.strategy {
+	case StrategyFirstSuccess:
+		h.executeFirstSuccess(ctx, recorder, r, bodyBytes)
+	case StrategyMerge:
+		h.executeMerge(ctx, recorder, r, bodyBytes)
+	case StrategySequential:
 		h.executeSequential(ctx, recorder, r, bodyBytes)
+	default:
+		// Default to first-success for unknown strategies
+		h.executeFirstSuccess(ctx, recorder, r, bodyBytes)
 	}
 
 	// Get the final response from the recorder.
@@ -171,8 +212,54 @@ func (h *CompositeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// executeParallel executes all backend requests in parallel.
-func (h *CompositeHandler) executeParallel(ctx context.Context, w http.ResponseWriter, r *http.Request, bodyBytes []byte) {
+// executeFirstSuccess tries backends sequentially until one succeeds, returning the first successful response.
+func (h *CompositeHandler) executeFirstSuccess(ctx context.Context, w http.ResponseWriter, r *http.Request, bodyBytes []byte) {
+	// Try each backend in order until one succeeds
+	for _, backend := range h.backends {
+		// Check the circuit breaker before making the request.
+		circuitBreaker := h.circuitBreakers[backend.ID]
+		if circuitBreaker != nil && circuitBreaker.IsOpen() {
+			// Circuit is open, skip this backend.
+			continue
+		}
+
+		// Execute the request.
+		resp, err := h.executeBackendRequest(ctx, backend, r, bodyBytes) //nolint:bodyclose // Response body is closed after writing
+		if err != nil {
+			if circuitBreaker != nil {
+				circuitBreaker.RecordFailure()
+			}
+			continue
+		}
+
+		// Check if the response is successful (2xx or 3xx status code)
+		if resp.StatusCode >= 400 {
+			// Response has an error status code, try next backend
+			resp.Body.Close()
+			if circuitBreaker != nil {
+				circuitBreaker.RecordFailure()
+			}
+			continue
+		}
+
+		// Record success in the circuit breaker.
+		if circuitBreaker != nil {
+			circuitBreaker.RecordSuccess()
+		}
+
+		// Found a successful response, write it and return
+		h.writeResponse(resp, w)
+		resp.Body.Close()
+		return
+	}
+
+	// No successful responses
+	w.WriteHeader(http.StatusBadGateway)
+	_, _ = w.Write([]byte("No successful responses from backends"))
+}
+
+// executeMerge executes all backend requests in parallel and merges their responses.
+func (h *CompositeHandler) executeMerge(ctx context.Context, w http.ResponseWriter, r *http.Request, bodyBytes []byte) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	responses := make(map[string]*http.Response)
@@ -212,8 +299,20 @@ func (h *CompositeHandler) executeParallel(ctx context.Context, w http.ResponseW
 	// Wait for all requests to complete.
 	wg.Wait()
 
-	// Merge the responses.
-	h.mergeResponses(responses, w)
+	// If custom transformer is set, use it
+	if h.responseTransformer != nil {
+		transformedResp, err := h.responseTransformer(responses)
+		if err == nil && transformedResp != nil {
+			h.writeResponse(transformedResp, w)
+			transformedResp.Body.Close()
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("Response transformation failed"))
+		}
+	} else {
+		// Default merge behavior: merge JSON responses
+		h.mergeJSONResponses(responses, w)
+	}
 
 	// Close all response bodies to prevent resource leaks
 	for _, resp := range responses {
@@ -223,9 +322,9 @@ func (h *CompositeHandler) executeParallel(ctx context.Context, w http.ResponseW
 	}
 }
 
-// executeSequential executes backend requests one at a time.
+// executeSequential executes backend requests one at a time, returning the last successful response.
 func (h *CompositeHandler) executeSequential(ctx context.Context, w http.ResponseWriter, r *http.Request, bodyBytes []byte) {
-	responses := make(map[string]*http.Response)
+	var lastSuccessfulResp *http.Response
 
 	// Execute each request sequentially.
 	for _, backend := range h.backends {
@@ -237,7 +336,7 @@ func (h *CompositeHandler) executeSequential(ctx context.Context, w http.Respons
 		}
 
 		// Execute the request.
-		resp, err := h.executeBackendRequest(ctx, backend, r, bodyBytes) //nolint:bodyclose // Response body is closed in mergeResponses cleanup
+		resp, err := h.executeBackendRequest(ctx, backend, r, bodyBytes) //nolint:bodyclose // Response body is closed after use
 		if err != nil {
 			if circuitBreaker != nil {
 				circuitBreaker.RecordFailure()
@@ -250,18 +349,22 @@ func (h *CompositeHandler) executeSequential(ctx context.Context, w http.Respons
 			circuitBreaker.RecordSuccess()
 		}
 
-		// Store the response.
-		responses[backend.ID] = resp
+		// Close previous response if any
+		if lastSuccessfulResp != nil && lastSuccessfulResp.Body != nil {
+			lastSuccessfulResp.Body.Close()
+		}
+
+		// Store this as the last successful response
+		lastSuccessfulResp = resp
 	}
 
-	// Merge the responses.
-	h.mergeResponses(responses, w)
-
-	// Close all response bodies to prevent resource leaks
-	for _, resp := range responses {
-		if resp != nil && resp.Body != nil {
-			resp.Body.Close()
-		}
+	// Write the last successful response
+	if lastSuccessfulResp != nil {
+		h.writeResponse(lastSuccessfulResp, w)
+		lastSuccessfulResp.Body.Close()
+	} else {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("No successful responses from backends"))
 	}
 }
 
@@ -300,62 +403,58 @@ func (h *CompositeHandler) executeBackendRequest(ctx context.Context, backend *B
 	return resp, nil
 }
 
-// mergeResponses merges the responses from all backends.
-func (h *CompositeHandler) mergeResponses(responses map[string]*http.Response, w http.ResponseWriter) {
-	// If no responses, return 502 Bad Gateway.
-	if len(responses) == 0 {
-		w.WriteHeader(http.StatusBadGateway)
-		_, err := w.Write([]byte("No successful responses from backends"))
-		if err != nil {
-			// Log error but continue processing
-			return
-		}
-		return
-	}
-
-	// Find the first available response based on the original backend order
-	var baseResp *http.Response
-	for _, backend := range h.backends {
-		if resp, ok := responses[backend.ID]; ok {
-			baseResp = resp
-			break
-		}
-	}
-
-	// If no response found based on backend order, fall back to any response
-	if baseResp == nil {
-		for _, resp := range responses {
-			baseResp = resp
-			break
-		}
-	}
-
-	// Make sure baseResp is not nil before processing
-	if baseResp == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, err := w.Write([]byte("Failed to process backend responses"))
-		if err != nil {
-			// Log error but continue processing
-			return
-		}
-		return
-	}
-
-	// Copy headers from the base response.
-	for k, v := range baseResp.Header {
+// writeResponse writes a single response to the response writer.
+func (h *CompositeHandler) writeResponse(resp *http.Response, w http.ResponseWriter) {
+	// Copy headers from the response
+	for k, v := range resp.Header {
 		for _, val := range v {
 			w.Header().Add(k, val)
 		}
 	}
 
-	// Write the status code from the base response.
-	w.WriteHeader(baseResp.StatusCode)
+	// Write the status code
+	w.WriteHeader(resp.StatusCode)
 
-	// Copy the body from the base response.
-	_, err := io.Copy(w, baseResp.Body)
-	if err != nil {
-		// Log error but continue processing
+	// Copy the body
+	_, _ = io.Copy(w, resp.Body)
+}
+
+// mergeJSONResponses merges JSON responses from all backends into a single JSON object.
+func (h *CompositeHandler) mergeJSONResponses(responses map[string]*http.Response, w http.ResponseWriter) {
+	// If no responses, return 502 Bad Gateway.
+	if len(responses) == 0 {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("No successful responses from backends"))
 		return
+	}
+
+	// Merged JSON object
+	merged := make(map[string]interface{})
+
+	// Parse each response as JSON and add to merged object
+	for backendID, resp := range responses {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			continue
+		}
+
+		var data interface{}
+		if err := json.Unmarshal(body, &data); err != nil {
+			// If not JSON, store as raw string
+			merged[backendID] = string(body)
+		} else {
+			merged[backendID] = data
+		}
+	}
+
+	// Set response headers
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Write merged JSON
+	if err := json.NewEncoder(w).Encode(merged); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("Failed to encode merged response"))
 	}
 }
 
@@ -394,8 +493,14 @@ func (m *ReverseProxyModule) createCompositeHandler(ctx context.Context, routeCo
 		})
 	}
 
+	// Determine the strategy to use
+	strategy := CompositeStrategy(routeConfig.Strategy)
+	if strategy == "" {
+		strategy = StrategyFirstSuccess // default
+	}
+
 	// Create and configure the handler
-	handler := NewCompositeHandler(backends, true, responseTimeout)
+	handler := NewCompositeHandler(backends, strategy, responseTimeout)
 
 	// Set event emitter for circuit breaker events
 	handler.SetEventEmitter(func(eventType string, data map[string]interface{}) {
@@ -422,6 +527,11 @@ func (m *ReverseProxyModule) createCompositeHandler(ctx context.Context, routeCo
 	// Set response cache if available
 	if m.responseCache != nil {
 		handler.SetResponseCache(m.responseCache)
+	}
+
+	// Set response transformer if available for this route
+	if transformer, exists := m.responseTransformers[routeConfig.Pattern]; exists {
+		handler.SetResponseTransformer(transformer)
 	}
 
 	return handler, nil

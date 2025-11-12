@@ -107,25 +107,37 @@ func main() {
 		// Read responses from both backends
 		var profileData map[string]interface{}
 		var analyticsData map[string]interface{}
+		var errors []string
 
 		// Parse profile backend response
 		if profileResp, ok := responses["profile-backend"]; ok {
 			body, err := io.ReadAll(profileResp.Body)
-			if err == nil {
-				json.Unmarshal(body, &profileData) //nolint:errcheck
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("failed to read profile: %v", err))
+			} else if err := json.Unmarshal(body, &profileData); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to parse profile: %v", err))
 			}
+		} else {
+			errors = append(errors, "profile backend response missing")
 		}
 
 		// Parse analytics backend response
 		if analyticsResp, ok := responses["analytics-backend"]; ok {
 			body, err := io.ReadAll(analyticsResp.Body)
-			if err == nil {
-				json.Unmarshal(body, &analyticsData) //nolint:errcheck
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("failed to read analytics: %v", err))
+			} else if err := json.Unmarshal(body, &analyticsData); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to parse analytics: %v", err))
 			}
+		} else {
+			errors = append(errors, "analytics backend response missing")
 		}
 
 		// Create enriched response by merging analytics into profile
 		enriched := make(map[string]interface{})
+		if len(errors) > 0 {
+			enriched["errors"] = errors
+		}
 		if profileData != nil {
 			enriched["profile"] = profileData
 		}

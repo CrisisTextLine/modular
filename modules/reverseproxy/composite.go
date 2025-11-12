@@ -447,15 +447,17 @@ func (h *CompositeHandler) mergeJSONResponses(responses map[string]*http.Respons
 		}
 	}
 
-	// Set response headers
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
 	// Write merged JSON
-	if err := json.NewEncoder(w).Encode(merged); err != nil {
+	encoded, err := json.Marshal(merged)
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("Failed to encode merged response"))
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(encoded)
 }
 
 // createCompositeHandler creates a handler for a composite route configuration.

@@ -28,6 +28,11 @@ reverseproxy:
     # Custom Transformer Backends
     profile-backend: "http://localhost:9013"
     analytics-backend: "http://localhost:9014"
+    
+    # Map/Reduce Strategy Backends
+    conversations-backend: "http://localhost:9015"
+    followups-backend: "http://localhost:9016"
+    participants-backend: "http://localhost:9017"
   
   default_backend: "global-default"
   tenant_id_header: "X-Tenant-ID"
@@ -99,6 +104,50 @@ reverseproxy:
         - "profile-backend"
         - "analytics-backend"
       strategy: "merge"  # Strategy is set, but transformer overrides merge behavior
+    
+    # MAP/REDUCE STRATEGY 1: SEQUENTIAL
+    # Demonstrates the conversation list + follow-ups scenario
+    # Backend A returns conversations, extract IDs, send to Backend B for follow-up data
+    "/api/composite/mapreduce/conversations":
+      pattern: "/api/composite/mapreduce/conversations"
+      backends:
+        - "conversations-backend"
+        - "followups-backend"
+      strategy: "map-reduce"
+      map_reduce:
+        type: "sequential"
+        source_backend: "conversations-backend"
+        target_backend: "followups-backend"
+        mapping:
+          extract_path: "conversations"
+          extract_field: "id"
+          target_request_field: "conversation_ids"
+          target_request_path: "/bulk"
+          target_request_method: "POST"
+          merge_into_field: "followup_info"
+        merge_strategy: "enrich"
+        allow_empty_responses: true
+    
+    # MAP/REDUCE STRATEGY 2: PARALLEL WITH JOIN
+    # Demonstrates parallel requests with ID-based joining
+    # Both backends queried in parallel, results joined by conversation_id
+    "/api/composite/mapreduce/parallel-join":
+      pattern: "/api/composite/mapreduce/parallel-join"
+      backends:
+        - "conversations-backend"
+        - "participants-backend"
+      strategy: "map-reduce"
+      map_reduce:
+        type: "parallel"
+        backends:
+          - "conversations-backend"
+          - "participants-backend"
+        mapping:
+          join_field: "id"
+          merge_into_field: "participant_info"
+        merge_strategy: "join"
+        allow_empty_responses: true
+        filter_on_empty: false
 
 # ChiMux router configuration
 chimux:

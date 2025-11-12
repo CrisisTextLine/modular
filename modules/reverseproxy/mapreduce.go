@@ -122,7 +122,7 @@ func (h *CompositeHandler) executeMapReduce(ctx context.Context, w http.Response
 		h.executeParallelMapReduce(ctx, w, r, bodyBytes, config)
 	default:
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(fmt.Sprintf("Unknown map/reduce type: %s", config.Type)))
+		fmt.Fprintf(w, "Unknown map/reduce type: %s", config.Type)
 	}
 }
 
@@ -132,14 +132,14 @@ func (h *CompositeHandler) executeSequentialMapReduce(ctx context.Context, w htt
 	sourceBackend := h.getBackendByID(config.SourceBackend)
 	if sourceBackend == nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(fmt.Sprintf("Source backend not found: %s", config.SourceBackend)))
+		fmt.Fprintf(w, "Source backend not found: %s", config.SourceBackend)
 		return
 	}
 
 	sourceResp, err := h.executeBackendRequest(ctx, sourceBackend, r, bodyBytes) //nolint:bodyclose // closed later
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte(fmt.Sprintf("Failed to query source backend: %v", err)))
+		fmt.Fprintf(w, "Failed to query source backend: %v", err)
 		return
 	}
 	defer sourceResp.Body.Close()
@@ -147,7 +147,7 @@ func (h *CompositeHandler) executeSequentialMapReduce(ctx context.Context, w htt
 	// Check if source response is successful
 	if sourceResp.StatusCode >= 400 {
 		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte(fmt.Sprintf("Source backend returned error: %d", sourceResp.StatusCode)))
+		fmt.Fprintf(w, "Source backend returned error: %d", sourceResp.StatusCode)
 		return
 	}
 
@@ -162,7 +162,7 @@ func (h *CompositeHandler) executeSequentialMapReduce(ctx context.Context, w htt
 	extractedData, err := extractDataFromResponse(sourceBody, &config.MappingConfig)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(fmt.Sprintf("Failed to extract data: %v", err)))
+		fmt.Fprintf(w, "Failed to extract data: %v", err)
 		return
 	}
 
@@ -187,7 +187,7 @@ func (h *CompositeHandler) executeSequentialMapReduce(ctx context.Context, w htt
 	targetBackend := h.getBackendByID(config.TargetBackend)
 	if targetBackend == nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(fmt.Sprintf("Target backend not found: %s", config.TargetBackend)))
+		fmt.Fprintf(w, "Target backend not found: %s", config.TargetBackend)
 		return
 	}
 
@@ -318,14 +318,14 @@ func extractDataFromResponse(body []byte, mapping *MappingConfig) ([]interface{}
 			if part == "" {
 				continue
 			}
-			
+
 			switch v := current.(type) {
 			case map[string]interface{}:
 				current = v[part]
 			default:
-				return nil, fmt.Errorf("cannot navigate path %s: not an object at %s", mapping.ExtractPath, part)
+				return nil, fmt.Errorf("%w at path %s: %s", ErrInvalidJSONPath, mapping.ExtractPath, part)
 			}
-			
+
 			if current == nil {
 				return []interface{}{}, nil // Path doesn't exist, return empty
 			}
@@ -350,7 +350,7 @@ func extractDataFromResponse(body []byte, mapping *MappingConfig) ([]interface{}
 			extracted = append(extracted, val)
 		}
 	default:
-		return nil, fmt.Errorf("extracted data is not an array or object")
+		return nil, ErrExtractedDataInvalidType
 	}
 
 	return extracted, nil
@@ -453,6 +453,10 @@ func mergeResponses(sourceBody, targetBody []byte, config *MapReduceConfig) ([]b
 			result = sourceMap
 		}
 
+	case MergeStrategyJoin:
+		// Join strategy doesn't apply to sequential, default to nested
+		fallthrough
+
 	default:
 		// Default to nested
 		result = map[string]interface{}{
@@ -461,7 +465,11 @@ func mergeResponses(sourceBody, targetBody []byte, config *MapReduceConfig) ([]b
 		}
 	}
 
-	return json.Marshal(result)
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrMergeResponseFailed, err)
+	}
+	return encoded, nil
 }
 
 // mergeParallelResponses merges responses from parallel backend requests
@@ -472,7 +480,7 @@ func mergeParallelResponses(responses map[string][]byte, config *MapReduceConfig
 
 	// For non-join strategies, use simpler merge
 	result := make(map[string]interface{})
-	
+
 	for backendID, body := range responses {
 		var data interface{}
 		if err := json.Unmarshal(body, &data); err != nil {
@@ -481,7 +489,7 @@ func mergeParallelResponses(responses map[string][]byte, config *MapReduceConfig
 			}
 			return nil, fmt.Errorf("failed to parse response from %s: %w", backendID, err)
 		}
-		
+
 		switch config.MergeStrategy {
 		case MergeStrategyFlat:
 			if dataMap, ok := data.(map[string]interface{}); ok {
@@ -489,24 +497,31 @@ func mergeParallelResponses(responses map[string][]byte, config *MapReduceConfig
 					result[k] = v
 				}
 			}
-		default: // Nested
+		case MergeStrategyNested, MergeStrategyEnrich, MergeStrategyJoin:
+			// For these strategies in parallel mode, treat as nested
+			result[backendID] = data
+		default:
 			result[backendID] = data
 		}
 	}
 
-	return json.Marshal(result)
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrMergeResponseFailed, err)
+	}
+	return encoded, nil
 }
 
 // mergeByJoinField merges responses by joining on a common field
 func mergeByJoinField(responses map[string][]byte, config *MapReduceConfig) ([]byte, error) {
 	joinField := config.MappingConfig.JoinField
 	if joinField == "" {
-		return nil, fmt.Errorf("join field is required for join merge strategy")
+		return nil, ErrJoinFieldRequired
 	}
 
 	// Parse all responses into maps keyed by join field
 	backendData := make(map[string]map[interface{}]interface{})
-	
+
 	for backendID, body := range responses {
 		var data interface{}
 		if err := json.Unmarshal(body, &data); err != nil {
@@ -547,7 +562,7 @@ func mergeByJoinField(responses map[string][]byte, config *MapReduceConfig) ([]b
 				}
 			}
 		}
-		
+
 		backendData[backendID] = items
 	}
 
@@ -576,7 +591,7 @@ func mergeByJoinField(responses map[string][]byte, config *MapReduceConfig) ([]b
 
 		// Create merged item
 		merged := make(map[string]interface{})
-		
+
 		// Add base item fields
 		if baseMap, ok := baseItem.(map[string]interface{}); ok {
 			for k, v := range baseMap {
@@ -589,7 +604,7 @@ func mergeByJoinField(responses map[string][]byte, config *MapReduceConfig) ([]b
 			if backendID == baseBackendID {
 				continue
 			}
-			
+
 			if otherItem, exists := items[joinValue]; exists {
 				if otherMap, ok := otherItem.(map[string]interface{}); ok {
 					mergeIntoField := config.MappingConfig.MergeIntoField
@@ -617,5 +632,9 @@ func mergeByJoinField(responses map[string][]byte, config *MapReduceConfig) ([]b
 		}
 	}
 
-	return json.Marshal(result)
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrMergeResponseFailed, err)
+	}
+	return encoded, nil
 }

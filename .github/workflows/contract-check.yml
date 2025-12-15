@@ -126,7 +126,7 @@ jobs:
           echo "has_changes=$has_changes" >> $GITHUB_OUTPUT
 
       - name: Upload contract artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: api-contracts-${{ github.run_number }}

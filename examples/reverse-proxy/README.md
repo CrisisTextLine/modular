@@ -1,12 +1,33 @@
 # Reverse Proxy Example
 
-This example demonstrates the advanced composite routing capabilities of the modular framework's reverse proxy module, showcasing **all three composite route response strategies** and **custom response transformers**.
+This example demonstrates the advanced composite routing capabilities of the modular framework's reverse proxy module, showcasing **all composite route response strategies** including the new **map/reduce patterns** for intelligent data aggregation, plus **custom response transformers**.
 
 ## What it demonstrates
 
-### Composite Route Strategies
+### 🆕 Map/Reduce Composite Routes
 
-This example demonstrates **three powerful strategies** for combining responses from multiple backend services:
+The example now includes **map/reduce patterns** that enable sophisticated data aggregation:
+
+1. **Sequential Map/Reduce** (`map-reduce` with `type: sequential`)
+   - Query one backend for a list
+   - Extract IDs or fields from the response
+   - Send extracted data to another backend
+   - Merge the enriched data back into the response
+   - **Use case**: Conversation list enriched with follow-up information
+   - **Example**: List conversations → extract IDs → query follow-ups → merge
+
+2. **Parallel Map/Reduce** (`map-reduce` with `type: parallel`)
+   - Query multiple backends in parallel
+   - Join responses based on a common field (like ID)
+   - Filter or merge results intelligently
+   - **Use case**: Unified view across independent microservices
+   - **Example**: Conversations + participants + activity → joined by ID
+
+**See the [Map/Reduce Guide](../../modules/reverseproxy/MAPREDUCE_GUIDE.md) for complete documentation.**
+
+### Traditional Composite Route Strategies
+
+This example also demonstrates **three traditional strategies** for combining responses from multiple backend services:
 
 1. **First-Success Strategy** (`first-success`)
    - Tries backends sequentially until one succeeds
@@ -83,7 +104,95 @@ The server will start on `localhost:8080` and automatically launch **14 mock bac
 
 ## Testing the Composite Route Strategies
 
-### 1. First-Success Strategy
+### Quick Test Script
+
+Test all composite routes (including map/reduce) with one command:
+
+```bash
+./test-mapreduce.sh
+```
+
+### 🆕 Map/Reduce Strategies
+
+#### 1. Sequential Map/Reduce: Conversations with Follow-ups
+
+Test the conversation list enrichment scenario from the requirements:
+
+```bash
+curl http://localhost:8080/api/composite/mapreduce/conversations
+```
+
+**What happens**:
+1. Proxy queries conversations backend → gets list of 5 conversations
+2. Proxy extracts conversation IDs: `["conv1", "conv2", "conv3", "conv4", "conv5"]`
+3. Proxy sends POST to followups backend `/bulk` with extracted IDs
+4. Followups backend returns follow-up info for 3 conversations
+5. Proxy enriches the original response with follow-up data
+
+**Expected response structure**:
+```json
+{
+  "conversations": [
+    {"id": "conv1", "title": "Customer Support Request", "status": "open", ...},
+    {"id": "conv2", "title": "Billing Inquiry", "status": "active", ...},
+    ...
+  ],
+  "followup_info": {
+    "followups": [
+      {"conversation_id": "conv1", "is_followup": true, "parent_id": "conv_original_1", ...},
+      {"conversation_id": "conv3", "is_followup": false},
+      {"conversation_id": "conv4", "is_followup": true, "parent_id": "conv_original_4", ...}
+    ]
+  }
+}
+```
+
+#### 2. Parallel Map/Reduce: Join by ID
+
+Test parallel backend queries with ID-based joining:
+
+```bash
+curl http://localhost:8080/api/composite/mapreduce/parallel-join
+```
+
+**What happens**:
+1. Proxy queries conversations and participants backends in parallel
+2. Proxy receives:
+   - Conversations: 5 items with IDs
+   - Participants: 3 items with matching IDs
+3. Proxy joins by `id` field
+4. Returns unified array with participant info merged into each conversation
+
+**Expected response** (array of joined items):
+```json
+[
+  {
+    "id": "conv1",
+    "title": "Customer Support Request",
+    "status": "open",
+    "participant_info": {
+      "id": "conv1",
+      "participants": ["user123", "agent456"],
+      "participant_count": 2
+    }
+  },
+  {
+    "id": "conv2",
+    "title": "Billing Inquiry",
+    "status": "active",
+    "participant_info": {
+      "id": "conv2",
+      "participants": ["user789"],
+      "participant_count": 1
+    }
+  },
+  ...
+]
+```
+
+### Traditional Composite Strategies
+
+#### 1. First-Success Strategy
 
 Test the high-availability pattern with automatic fallback:
 
@@ -290,7 +399,7 @@ The example consists of:
 
 ### Mock Backend Servers
 
-The example includes 14 self-contained mock servers:
+The example includes 17 self-contained mock servers:
 
 | Port | Backend | Purpose |
 |------|---------|---------|
@@ -308,6 +417,9 @@ The example includes 14 self-contained mock servers:
 | 9012 | finalization-backend | Sequential: step 3 (finalize) |
 | 9013 | profile-backend | Transformer: profile data |
 | 9014 | analytics-backend | Transformer: analytics data |
+| 9015 | conversations-backend | 🆕 Map/reduce: conversation list |
+| 9016 | followups-backend | 🆕 Map/reduce: follow-up data |
+| 9017 | participants-backend | 🆕 Map/reduce: participant info |
 
 ## Use Cases
 

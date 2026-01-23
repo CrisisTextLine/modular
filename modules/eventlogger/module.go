@@ -346,7 +346,7 @@ func (m *EventLoggerModule) emitStartupOperationalEvents(ctx context.Context, sy
 	config := m.config
 	started := m.started
 	m.mutex.RUnlock()
-	
+
 	if logger == nil || config == nil || !started {
 		/* nothing to emit or already stopped */
 		return

@@ -340,16 +340,23 @@ func (m *EventLoggerModule) Start(ctx context.Context) error {
 
 // emitStartupOperationalEvents performs the operational event emission without holding the Start mutex.
 func (m *EventLoggerModule) emitStartupOperationalEvents(ctx context.Context, sync bool, outputsLen, bufferLen int, targetConfigs []OutputTargetConfig) {
-	if m.logger == nil || m.config == nil || !m.started {
+	// Protect field reads with RLock to avoid race with Stop() which writes m.started under Lock
+	m.mutex.RLock()
+	logger := m.logger
+	config := m.config
+	started := m.started
+	m.mutex.RUnlock()
+	
+	if logger == nil || config == nil || !started {
 		/* nothing to emit or already stopped */
 		return
 	}
 	emit := func(baseCtx context.Context) {
 		m.emitOperationalEvent(baseCtx, EventTypeConfigLoaded, map[string]interface{}{
-			"enabled":              m.config.Enabled,
-			"buffer_size":          m.config.BufferSize,
+			"enabled":              config.Enabled,
+			"buffer_size":          config.BufferSize,
 			"output_targets_count": len(targetConfigs),
-			"log_level":            m.config.LogLevel,
+			"log_level":            config.LogLevel,
 		})
 		for i, tc := range targetConfigs {
 			m.emitOperationalEvent(baseCtx, EventTypeOutputRegistered, map[string]interface{}{

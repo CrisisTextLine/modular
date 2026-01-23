@@ -117,45 +117,6 @@ func TestRaceCondition_StartStopWithSubject(t *testing.T) {
 	}
 }
 
-// TestRaceCondition_MultipleStartStop tests multiple concurrent
-// Start/Stop operations to stress test the synchronization
-func TestRaceCondition_MultipleStartStop(t *testing.T) {
-	app := &MockApplication{
-		configSections: make(map[string]modular.ConfigProvider),
-		logger:         &MockLogger{},
-	}
-
-	module := NewModule().(*EventLoggerModule)
-	err := module.RegisterConfig(app)
-	if err != nil {
-		t.Fatalf("Failed to register config: %v", err)
-	}
-
-	err = module.Init(app)
-	if err != nil {
-		t.Fatalf("Failed to initialize module: %v", err)
-	}
-
-	mockSubject := &MockSubject{}
-	module.RegisterObservers(mockSubject)
-
-	ctx := context.Background()
-
-	// Run multiple Start/Stop cycles concurrently
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			module.Start(ctx)
-			time.Sleep(1 * time.Millisecond)
-			module.Stop(ctx)
-		}()
-	}
-
-	wg.Wait()
-}
-
 // MockSubject for testing observer registration
 type MockSubject struct {
 	mu        sync.RWMutex

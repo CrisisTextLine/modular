@@ -10,7 +10,7 @@ require (
 )
 
 require (
-	github.com/BurntSushi/toml v1.5.0 // indirect
+	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.4.0 // indirect
 	github.com/IBM/sarama v1.45.2 // indirect
 	github.com/Microsoft/go-winio v0.5.0 // indirect

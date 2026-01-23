@@ -4,7 +4,7 @@ go 1.25
 
 replace github.com/CrisisTextLine/modular => ../../
 
-require github.com/CrisisTextLine/modular v1.6.0
+require github.com/CrisisTextLine/modular v1.11.9
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect

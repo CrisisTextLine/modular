@@ -2,7 +2,7 @@ module github.com/CrisisTextLine/modular/examples/base-config-example
 
 go 1.25
 
-require github.com/CrisisTextLine/modular v1.6.0
+require github.com/CrisisTextLine/modular v1.11.9
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect

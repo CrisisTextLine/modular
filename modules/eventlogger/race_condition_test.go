@@ -2,6 +2,7 @@ package eventlogger
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -15,13 +16,13 @@ import (
 // This test will fail with -race flag before the fix.
 //
 // The race occurs when:
-// 1. Start() launches emitStartupOperationalEvents in a goroutine (line 336)
-// 2. Stop() is called concurrently and modifies m.started under lock (line 429)
-// 3. emitStartupOperationalEvents reads m.started without lock (line 343)
+// 1. Start() launches emitStartupOperationalEvents in a goroutine
+// 2. Stop() is called concurrently and modifies m.started under write lock
+// 3. emitStartupOperationalEvents reads m.started without synchronization
 func TestRaceCondition_StartStopConcurrency(t *testing.T) {
 	// Run multiple iterations to increase chance of detecting race
 	for i := 0; i < 100; i++ {
-		t.Run("iteration", func(t *testing.T) {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Create mock application
 			app := &MockApplication{
 				configSections: make(map[string]modular.ConfigProvider),
@@ -46,9 +47,14 @@ func TestRaceCondition_StartStopConcurrency(t *testing.T) {
 
 			ctx := context.Background()
 
+			// Channel to signal when Start has begun
+			startedCh := make(chan struct{})
+
 			// Start the module in one goroutine
 			go func() {
 				defer wg.Done()
+				// Signal that Start is about to be called
+				close(startedCh)
 				if err := module.Start(ctx); err != nil {
 					t.Errorf("Start failed: %v", err)
 				}
@@ -58,8 +64,8 @@ func TestRaceCondition_StartStopConcurrency(t *testing.T) {
 			// This creates the race condition with emitStartupOperationalEvents
 			go func() {
 				defer wg.Done()
-				// Small delay to let Start() begin
-				time.Sleep(1 * time.Microsecond)
+				// Wait for Start to begin before calling Stop
+				<-startedCh
 				if err := module.Stop(ctx); err != nil {
 					t.Errorf("Stop failed: %v", err)
 				}
@@ -74,7 +80,7 @@ func TestRaceCondition_StartStopConcurrency(t *testing.T) {
 // when the module has a subject registered (more realistic scenario)
 func TestRaceCondition_StartStopWithSubject(t *testing.T) {
 	for i := 0; i < 50; i++ {
-		t.Run("iteration", func(t *testing.T) {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			app := &MockApplication{
 				configSections: make(map[string]modular.ConfigProvider),
 				logger:         &MockLogger{},
@@ -93,23 +99,35 @@ func TestRaceCondition_StartStopWithSubject(t *testing.T) {
 
 			// Simulate RegisterObservers being called
 			mockSubject := &MockSubject{}
-			module.RegisterObservers(mockSubject)
+			if err := module.RegisterObservers(mockSubject); err != nil {
+				t.Fatalf("Failed to register observers: %v", err)
+			}
 
 			var wg sync.WaitGroup
 			wg.Add(2)
 
 			ctx := context.Background()
 
+			// Channel to signal when Start has begun
+			startedCh := make(chan struct{})
+
 			// Concurrent Start and Stop
 			go func() {
 				defer wg.Done()
-				module.Start(ctx)
+				// Signal that Start is about to be called
+				close(startedCh)
+				if err := module.Start(ctx); err != nil {
+					t.Errorf("Start failed: %v", err)
+				}
 			}()
 
 			go func() {
 				defer wg.Done()
-				time.Sleep(1 * time.Microsecond)
-				module.Stop(ctx)
+				// Wait for Start to begin before calling Stop
+				<-startedCh
+				if err := module.Stop(ctx); err != nil {
+					t.Errorf("Stop failed: %v", err)
+				}
 			}()
 
 			wg.Wait()

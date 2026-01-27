@@ -3,7 +3,7 @@ module logmasker-example
 go 1.25
 
 require (
-	github.com/CrisisTextLine/modular v1.11.10
+	github.com/CrisisTextLine/modular v1.11.11
 	github.com/CrisisTextLine/modular/modules/logmasker v0.0.0
 )
 

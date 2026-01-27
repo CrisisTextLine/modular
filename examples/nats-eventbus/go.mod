@@ -9,7 +9,7 @@ replace github.com/CrisisTextLine/modular => ../../
 replace github.com/CrisisTextLine/modular/modules/eventbus => ../../modules/eventbus
 
 require (
-	github.com/CrisisTextLine/modular v1.11.10
+	github.com/CrisisTextLine/modular v1.11.11
 	github.com/CrisisTextLine/modular/modules/eventbus v1.5.5
 )
 

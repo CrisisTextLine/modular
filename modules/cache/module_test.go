@@ -115,6 +115,33 @@ func (a *mockApp) GetServicesByInterface(interfaceType reflect.Type) []*modular.
 	return []*modular.ServiceRegistryEntry{}
 }
 
+// GetModule returns a module by name (mock implementation)
+func (a *mockApp) GetModule(name string) modular.Module {
+	for _, m := range a.modules {
+		if m.Name() == name {
+			return m
+		}
+	}
+	return nil
+}
+
+// GetAllModules returns all registered modules (mock implementation)
+func (a *mockApp) GetAllModules() map[string]modular.Module {
+	result := make(map[string]modular.Module)
+	for _, m := range a.modules {
+		result[m.Name()] = m
+	}
+	return result
+}
+
+// StartTime returns the application start time (mock implementation)
+func (a *mockApp) StartTime() time.Time {
+	return time.Time{}
+}
+
+// OnConfigLoaded registers a config loaded hook (mock implementation)
+func (a *mockApp) OnConfigLoaded(hook func(app modular.Application) error) {}
+
 type mockConfigProvider struct{}
 
 func (m *mockConfigProvider) GetConfig() interface{} {

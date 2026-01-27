@@ -9,12 +9,12 @@ replace github.com/CrisisTextLine/modular => ../../
 replace github.com/CrisisTextLine/modular/modules/eventbus => ../../modules/eventbus
 
 require (
-	github.com/CrisisTextLine/modular v1.11.6
+	github.com/CrisisTextLine/modular v1.11.9
 	github.com/CrisisTextLine/modular/modules/eventbus v1.5.5
 )
 
 require (
-	github.com/BurntSushi/toml v1.5.0 // indirect
+	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.4.0 // indirect
 	github.com/IBM/sarama v1.45.2 // indirect
 	github.com/Microsoft/go-winio v0.5.0 // indirect

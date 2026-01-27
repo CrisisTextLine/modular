@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/stretchr/testify/assert"
@@ -135,6 +136,24 @@ func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceR
 func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
 	return []*modular.ServiceRegistryEntry{}
 }
+
+// GetModule returns a module by name (mock implementation)
+func (m *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+
+// GetAllModules returns all registered modules (mock implementation)
+func (m *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+
+// StartTime returns the application start time (mock implementation)
+func (m *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+// OnConfigLoaded registers a config loaded hook (mock implementation)
+func (m *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
 
 // MockLogger implements a minimal logger for testing
 type MockLogger struct{}

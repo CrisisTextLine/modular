@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/stretchr/testify/assert"
@@ -74,6 +75,16 @@ func (a *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceR
 func (a *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
 	return []*modular.ServiceRegistryEntry{}
 }
+func (a *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+func (a *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+func (a *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+func (a *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
 
 type MockConfigProvider struct {
 	config interface{}

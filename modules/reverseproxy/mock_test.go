@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/go-chi/chi/v5" // Import chi for router type assertion
@@ -203,6 +204,24 @@ func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*
 	}
 	return entries
 }
+
+// GetModule returns a module by name (mock implementation)
+func (m *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+
+// GetAllModules returns all registered modules (mock implementation)
+func (m *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+
+// StartTime returns the application start time (mock implementation)
+func (m *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+// OnConfigLoaded registers a config loaded hook (mock implementation)
+func (m *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
 
 // NewStdConfigProvider is a simple mock implementation of modular.ConfigProvider
 func NewStdConfigProvider(config interface{}) modular.ConfigProvider {

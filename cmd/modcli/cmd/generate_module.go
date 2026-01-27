@@ -54,6 +54,10 @@ type ModuleOptions struct {
 const mockAppTmpl = `package {{.PackageName}}
 
 import (
+	"context"
+	"reflect"
+	"time"
+
 	"github.com/CrisisTextLine/modular"
 )
 
@@ -173,6 +177,40 @@ func (m *MockApplication) SetVerboseConfig(enabled bool) {
 func (m *MockApplication) IsVerboseConfig() bool {
 	return m.verboseConfig
 }
+
+// Context returns a background context for the mock application
+func (m *MockApplication) Context() context.Context { return context.Background() }
+
+// GetServicesByModule returns all services provided by a specific module (mock implementation)
+func (m *MockApplication) GetServicesByModule(moduleName string) []string { return []string{} }
+
+// GetServiceEntry retrieves detailed information about a registered service (mock implementation)
+func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
+	return nil, false
+}
+
+// GetServicesByInterface returns all services that implement the given interface (mock implementation)
+func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
+	return []*modular.ServiceRegistryEntry{}
+}
+
+// GetModule returns a module by name (mock implementation)
+func (m *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+
+// GetAllModules returns all registered modules (mock implementation)
+func (m *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+
+// StartTime returns the application start time (mock implementation)
+func (m *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+// OnConfigLoaded registers a config loaded hook (mock implementation)
+func (m *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
 
 // NewStdConfigProvider is a simple mock implementation of modular.ConfigProvider
 func NewStdConfigProvider(config interface{}) modular.ConfigProvider {

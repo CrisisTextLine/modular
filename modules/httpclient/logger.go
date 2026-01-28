@@ -12,6 +12,49 @@ import (
 	"github.com/CrisisTextLine/modular"
 )
 
+// sanitizeForFilename replaces unsafe filename characters and ensures no directory traversal or special segments are allowed.
+func sanitizeForFilename(s string) string {
+	// Replace path separators and common unsafe characters with '_'
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	)
+	safe := replacer.Replace(s)
+
+	// Remove any remaining possible ".." sequences (to prevent traversal)
+	safe = strings.ReplaceAll(safe, "..", "_")
+
+	// Optionally remove any non-alphanumeric, non-underscore, non-hyphen, non-dot characters.
+	builder := strings.Builder{}
+	for _, r := range safe {
+		if ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') || r == '_' || r == '-' || r == '.' {
+			builder.WriteRune(r)
+		} else {
+			builder.WriteRune('_')
+		}
+	}
+	safe = builder.String()
+
+	// Limit length to 100 characters to avoid filesystem issues.
+	if len(safe) > 100 {
+		safe = safe[:100]
+	}
+
+	// Don't allow empty filenames.
+	if len(strings.Trim(safe, "_-.")) == 0 {
+		return ""
+	}
+
+	return safe
+}
+
 // FileLogger handles logging HTTP request and response data to files.
 type FileLogger struct {
 	baseDir     string
@@ -68,10 +111,9 @@ func (f *FileLogger) LogResponse(id string, data []byte) error {
 // LogTransactionToFile logs both request and response data to a single file for easier analysis.
 func (f *FileLogger) LogTransactionToFile(id string, reqData, respData []byte, duration time.Duration, url string) error {
 	// Create a filename that's safe for the filesystem
-	safeURL := strings.ReplaceAll(url, "/", "_")
-	safeURL = strings.ReplaceAll(safeURL, ":", "_")
-	if len(safeURL) > 100 {
-		safeURL = safeURL[:100] // Limit length to avoid issues with too-long filenames
+	safeURL := sanitizeForFilename(url)
+	if safeURL == "" {
+		return fmt.Errorf("URL %q: %w", url, ErrUnsafeFilename)
 	}
 
 	txnFile := filepath.Join(f.txnDir, fmt.Sprintf("txn_%s_%s_%d.log", id, safeURL, time.Now().UnixNano()))

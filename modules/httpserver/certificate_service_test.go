@@ -136,6 +136,24 @@ func (m *SimpleMockApplication) GetServicesByInterface(interfaceType reflect.Typ
 	return []*modular.ServiceRegistryEntry{}
 }
 
+// GetModule returns a module by name (mock implementation)
+func (m *SimpleMockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+
+// GetAllModules returns all registered modules (mock implementation)
+func (m *SimpleMockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+
+// StartTime returns the application start time (mock implementation)
+func (m *SimpleMockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+// OnConfigLoaded registers a config loaded hook (mock implementation)
+func (m *SimpleMockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
+
 // SimpleMockLogger implements modular.Logger for certificate service tests
 type SimpleMockLogger struct{}
 

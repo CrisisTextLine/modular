@@ -73,6 +73,9 @@ func (a *mockApp) GetService(name string, target any) error {
 	return nil
 }
 
+// Context returns a background context for compliance
+func (a *mockApp) Context() context.Context { return context.Background() }
+
 // New interface-introspection methods added to Application; provide minimal mock implementations
 func (a *mockApp) GetServicesByModule(moduleName string) []string { return nil }
 func (a *mockApp) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
@@ -81,6 +84,33 @@ func (a *mockApp) GetServiceEntry(serviceName string) (*modular.ServiceRegistryE
 func (a *mockApp) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
 	return nil
 }
+
+// GetModule returns a module by name (mock implementation)
+func (a *mockApp) GetModule(name string) modular.Module {
+	for _, m := range a.modules {
+		if m.Name() == name {
+			return m
+		}
+	}
+	return nil
+}
+
+// GetAllModules returns all registered modules (mock implementation)
+func (a *mockApp) GetAllModules() map[string]modular.Module {
+	result := make(map[string]modular.Module)
+	for _, m := range a.modules {
+		result[m.Name()] = m
+	}
+	return result
+}
+
+// StartTime returns the application start time (mock implementation)
+func (a *mockApp) StartTime() time.Time {
+	return time.Time{}
+}
+
+// OnConfigLoaded registers a config loaded hook (mock implementation)
+func (a *mockApp) OnConfigLoaded(hook func(app modular.Application) error) {}
 
 func (a *mockApp) Init() error {
 	return nil

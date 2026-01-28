@@ -31,7 +31,7 @@ jobs:
       modules: ${{ steps.set-matrix.outputs.modules }}
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - id: set-matrix
@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -64,14 +64,14 @@ jobs:
           export GORACE=halt_on_error=1
           go test -race -v -coverprofile=core-bdd-coverage.txt -covermode=atomic -run 'TestApplicationLifecycle|TestConfigurationManagement|TestBaseConfigBDDFeatures|TestLoggerDecorator' .
       - name: Upload core BDD coverage
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.0 pinned
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular
           files: core-bdd-coverage.txt
           flags: core-bdd
       - name: Persist core BDD coverage artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: core-bdd-coverage
           path: core-bdd-coverage.txt
@@ -87,7 +87,7 @@ jobs:
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
     name: BDD ${{ matrix.module }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -124,7 +124,7 @@ jobs:
           fi
       - name: Upload module BDD coverage
         if: always()
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.0 pinned
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular
@@ -132,7 +132,7 @@ jobs:
           flags: bdd-${{ matrix.module }}
       - name: Persist module BDD coverage artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: bdd-${{ matrix.module }}-coverage
           path: modules/${{ matrix.module }}/bdd-${{ matrix.module }}-coverage.txt
@@ -144,7 +144,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository (for merge script)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Summarize
         run: |
           echo '# BDD Matrix Summary' >> $GITHUB_STEP_SUMMARY
@@ -153,7 +153,7 @@ jobs:
           echo '' >> $GITHUB_STEP_SUMMARY
           echo 'Modules (parallel) overall result: ${{ needs.module-bdd.result }}' >> $GITHUB_STEP_SUMMARY
       - name: Download all coverage artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           path: bdd-coverage
       - name: Merge BDD coverage
@@ -200,7 +200,7 @@ jobs:
           echo "Merged (fallback) into $OUT from ${#FILES[@]} files" >&2
       - name: Upload merged BDD coverage
         if: always()
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.0 pinned
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular
@@ -208,7 +208,7 @@ jobs:
           flags: merged-bdd
       - name: Persist merged BDD coverage artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: merged-bdd-coverage
           path: merged-bdd-coverage.txt

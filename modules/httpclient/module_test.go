@@ -74,27 +74,22 @@ func (m *MockApplication) GetService(name string, target any) error {
 }
 
 // Add other required methods to satisfy the interface
-func (m *MockApplication) Name() string                                        { return "mock-app" }
-func (m *MockApplication) IsInitializing() bool                                { return false }
-func (m *MockApplication) IsStarting() bool                                    { return false }
-func (m *MockApplication) IsStopping() bool                                    { return false }
-func (m *MockApplication) RegisterModule(module modular.Module)                {}
-func (m *MockApplication) GetModuleByName(name string) (modular.Module, error) { return nil, nil }
-func (m *MockApplication) GetAllModules() []modular.Module                     { return nil }
-func (m *MockApplication) Run() error                                          { return nil }
-func (m *MockApplication) Shutdown(ctx context.Context) error                  { return nil }
-func (m *MockApplication) Init() error                                         { return nil }
-func (m *MockApplication) Start() error                                        { return nil }
-func (m *MockApplication) Stop() error                                         { return nil }
+func (m *MockApplication) Name() string                          { return "mock-app" }
+func (m *MockApplication) IsInitializing() bool                  { return false }
+func (m *MockApplication) IsStarting() bool                      { return false }
+func (m *MockApplication) IsStopping() bool                      { return false }
+func (m *MockApplication) RegisterModule(module modular.Module)  {}
+func (m *MockApplication) Run() error                            { return nil }
+func (m *MockApplication) Shutdown(ctx context.Context) error    { return nil }
+func (m *MockApplication) Init() error                           { return nil }
+func (m *MockApplication) Start() error                          { return nil }
+func (m *MockApplication) Stop() error                           { return nil }
 
 // Newly added methods to satisfy updated modular.Application interface
 func (m *MockApplication) Context() context.Context                       { return context.Background() }
 func (m *MockApplication) GetServicesByModule(moduleName string) []string { return []string{} }
 func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
 	return nil, false
-}
-func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
-	return []*modular.ServiceRegistryEntry{}
 }
 
 func (m *MockApplication) IsVerboseConfig() bool {
@@ -104,6 +99,23 @@ func (m *MockApplication) IsVerboseConfig() bool {
 func (m *MockApplication) SetVerboseConfig(verbose bool) {
 	// No-op in mock
 }
+func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
+	return []*modular.ServiceRegistryEntry{}
+}
+
+func (m *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+
+func (m *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+
+func (m *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+func (m *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
 
 // MockLogger implements modular.Logger interface for testing
 type MockLogger struct {

@@ -318,7 +318,7 @@ func (m *MyModule) Constructor() modular.ModuleConstructor {
 }
 ```
 
-See [DOCUMENTATION.md](DOCUMENTATION.md) for more advanced details about service dependencies and interface matching.
+See [Service Dependencies Guide](docs/service-dependencies.md) for more details about service dependencies and interface matching.
 
 ### Logger Management
 
@@ -750,16 +750,29 @@ Each command includes interactive prompts to guide you through the process of cr
 
 ## 📚 Additional Resources
 
-- **[Detailed Documentation](DOCUMENTATION.md)** - Comprehensive guide covering advanced topics, best practices, and in-depth examples
-- **[Debugging and Troubleshooting](DOCUMENTATION.md#debugging-and-troubleshooting)** - Diagnostic tools and solutions for common issues
+### Core Documentation
+
+- **[Documentation Index](docs/index.md)** - Complete documentation organized by topic
+- **[Configuration Guide](docs/configuration.md)** - Configuration system, validation, and feeders
+- **[Base Configuration](docs/base-config.md)** - Multi-environment configuration management
+- **[Multi-Tenancy](docs/multi-tenancy.md)** - Building multi-tenant applications
+- **[Module Lifecycle](docs/module-lifecycle.md)** - Module registration, initialization, and lifecycle
+- **[Service Dependencies](docs/service-dependencies.md)** - Dependency injection and service registry
+- **[Debugging Guide](docs/debugging.md)** - Diagnostic tools and troubleshooting
+- **[Testing Guide](docs/testing.md)** - Testing modules and parallelization
+
+### Specialized Topics
+
 - **[Available Modules](modules/README.md)** - Complete list of pre-built modules with documentation
 - **[Examples](examples/)** - Working example applications demonstrating various features
 - **[Concurrency & Race Guidelines](CONCURRENCY_GUIDELINES.md)** - Official synchronization patterns, race detector usage, and safe module design
 - **[Go Module Versioning Guide](GO_MODULE_VERSIONING.md)** - Understanding semantic versioning, v2+ module paths, and the automated release process
+- **[Observer Pattern](OBSERVER_PATTERN.md)** - Event-driven communication
+- **[CloudEvents Integration](CLOUDEVENTS.md)** - CloudEvents support
 
 ### Having Issues?
 
-If you're experiencing problems with module interfaces (e.g., "Module does not implement Startable"), check out the [debugging section](DOCUMENTATION.md#debugging-and-troubleshooting) which includes diagnostic tools like:
+If you're experiencing problems with module interfaces (e.g., "Module does not implement Startable"), check out the [debugging guide](docs/debugging.md) which includes diagnostic tools like:
 
 ```go
 // Debug module interface implementations

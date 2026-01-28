@@ -8,9 +8,9 @@ func TestAffixedEnvFeederCatalogDebug(t *testing.T) {
 	// Reset global catalog
 	ResetGlobalEnvCatalog()
 
-	// Set environment variables (double underscores per AffixedEnvFeeder pattern)
-	t.Setenv("PROD__HOST__ENV", "prod.example.com")
-	t.Setenv("PROD__PORT__ENV", "3306")
+	// Set environment variables (framework no longer adds underscores)
+	t.Setenv("PROD_HOST_ENV", "prod.example.com")
+	t.Setenv("PROD_PORT_ENV", "3306")
 
 	type DatabaseConfig struct {
 		Host string `env:"HOST"`

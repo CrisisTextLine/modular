@@ -105,24 +105,24 @@ func (m *mockNonFatalErrorEvaluator) Weight() int {
 // Test aggregator priority ordering
 func TestFeatureFlagAggregator_PriorityOrdering(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	
+
 	// Create mock application with service registry
 	app := NewMockTenantApplication()
-	
+
 	// Register mock evaluators with different priorities
 	highPriority := &mockHighPriorityEvaluator{}
 	mediumPriority := &mockMediumPriorityEvaluator{}
-	
+
 	err := app.RegisterService("featureFlagEvaluator.high", highPriority)
 	if err != nil {
 		t.Fatalf("Failed to register high priority evaluator: %v", err)
 	}
-	
+
 	err = app.RegisterService("featureFlagEvaluator.medium", mediumPriority)
 	if err != nil {
 		t.Fatalf("Failed to register medium priority evaluator: %v", err)
 	}
-	
+
 	// Create file evaluator configuration
 	config := &ReverseProxyConfig{
 		FeatureFlags: FeatureFlagsConfig{
@@ -133,16 +133,16 @@ func TestFeatureFlagAggregator_PriorityOrdering(t *testing.T) {
 		},
 	}
 	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(config))
-	
+
 	// Register tenant service
 	tenantService := modular.NewStandardTenantService(logger)
 	err = app.RegisterService("tenantService", tenantService)
 	if err != nil {
 		t.Fatalf("Failed to register tenant service: %v", err)
 	}
-	
+
 	// Create and register file evaluator
-	fileEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	fileEvaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file evaluator: %v", err)
 	}
@@ -150,13 +150,13 @@ func TestFeatureFlagAggregator_PriorityOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to register file evaluator: %v", err)
 	}
-	
+
 	// Create aggregator
 	aggregator := NewFeatureFlagAggregator(app, logger)
-	
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	ctx := context.Background()
-	
+
 	// Test high priority flag - should be handled by high priority evaluator
 	result, err := aggregator.EvaluateFlag(ctx, "high-priority-flag", "", req)
 	if err != nil {
@@ -165,7 +165,7 @@ func TestFeatureFlagAggregator_PriorityOrdering(t *testing.T) {
 	if !result {
 		t.Error("Expected high priority flag to be true")
 	}
-	
+
 	// Test medium priority flag - high priority should abstain, medium should handle
 	result, err = aggregator.EvaluateFlag(ctx, "medium-priority-flag", "", req)
 	if err != nil {
@@ -174,7 +174,7 @@ func TestFeatureFlagAggregator_PriorityOrdering(t *testing.T) {
 	if !result {
 		t.Error("Expected medium priority flag to be true")
 	}
-	
+
 	// Test fallback flag - should fall through to file evaluator
 	result, err = aggregator.EvaluateFlag(ctx, "fallback-flag", "", req)
 	if err != nil {
@@ -188,28 +188,28 @@ func TestFeatureFlagAggregator_PriorityOrdering(t *testing.T) {
 // Test aggregator error handling
 func TestFeatureFlagAggregator_ErrorHandling(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	
+
 	app := NewMockTenantApplication()
-	
+
 	// Register evaluators with different error behaviors
 	fatalEvaluator := &mockFatalErrorEvaluator{}
 	nonFatalEvaluator := &mockNonFatalErrorEvaluator{}
-	
+
 	err := app.RegisterService("featureFlagEvaluator.fatal", fatalEvaluator)
 	if err != nil {
 		t.Fatalf("Failed to register fatal evaluator: %v", err)
 	}
-	
+
 	err = app.RegisterService("featureFlagEvaluator.nonFatal", nonFatalEvaluator)
 	if err != nil {
 		t.Fatalf("Failed to register non-fatal evaluator: %v", err)
 	}
-	
+
 	aggregator := NewFeatureFlagAggregator(app, logger)
-	
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	ctx := context.Background()
-	
+
 	// Test fatal error - should stop evaluation chain
 	_, err = aggregator.EvaluateFlag(ctx, "fatal-flag", "", req)
 	if err == nil {
@@ -218,7 +218,7 @@ func TestFeatureFlagAggregator_ErrorHandling(t *testing.T) {
 	if !errors.Is(err, ErrEvaluatorFatal) {
 		t.Errorf("Expected ErrEvaluatorFatal, got %v", err)
 	}
-	
+
 	// Test non-fatal error - should continue to next evaluator
 	// Since no evaluator handles "error-flag" successfully, should get no decision error
 	_, err = aggregator.EvaluateFlag(ctx, "error-flag", "", req)
@@ -234,13 +234,13 @@ func TestFeatureFlagAggregator_ErrorHandling(t *testing.T) {
 // Test aggregator with no evaluators
 func TestFeatureFlagAggregator_NoEvaluators(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	
+
 	app := NewMockTenantApplication()
 	aggregator := NewFeatureFlagAggregator(app, logger)
-	
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	ctx := context.Background()
-	
+
 	// Should return error when no evaluators are available
 	_, err := aggregator.EvaluateFlag(ctx, "any-flag", "", req)
 	if err == nil {
@@ -251,19 +251,19 @@ func TestFeatureFlagAggregator_NoEvaluators(t *testing.T) {
 // Test default value behavior
 func TestFeatureFlagAggregator_DefaultValue(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	
+
 	app := NewMockTenantApplication()
 	aggregator := NewFeatureFlagAggregator(app, logger)
-	
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	ctx := context.Background()
-	
+
 	// Should return default value when no evaluators provide decision
 	result := aggregator.EvaluateFlagWithDefault(ctx, "any-flag", "", req, true)
 	if !result {
 		t.Error("Expected default value true to be returned")
 	}
-	
+
 	result = aggregator.EvaluateFlagWithDefault(ctx, "any-flag", "", req, false)
 	if result {
 		t.Error("Expected default value false to be returned")
@@ -273,16 +273,16 @@ func TestFeatureFlagAggregator_DefaultValue(t *testing.T) {
 // Test self-ingestion prevention
 func TestFeatureFlagAggregator_PreventSelfIngestion(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	
+
 	app := NewMockTenantApplication()
 	aggregator := NewFeatureFlagAggregator(app, logger)
-	
+
 	// Register the aggregator as a service (simulating what ReverseProxyModule does)
 	err := app.RegisterService("featureFlagEvaluator", aggregator)
 	if err != nil {
 		t.Fatalf("Failed to register aggregator: %v", err)
 	}
-	
+
 	// The aggregator should not discover itself in the evaluators list
 	evaluators := aggregator.discoverEvaluators()
 	for _, eval := range evaluators {

@@ -165,10 +165,25 @@ func runExtractContractWithFlags(cmd *cobra.Command, args []string, outputFile s
 	var apiContract *contract.Contract
 	var err error
 
-	// Check if it's a local directory
-	if strings.HasPrefix(packagePath, ".") || strings.HasPrefix(packagePath, "/") {
+	// Check if it's a local directory or a package import path
+	// A path is considered local if:
+	// 1. Starts with . or / (relative or absolute)
+	// 2. Contains a path separator (e.g., "modules/scheduler")
+	// 3. Exists as a directory in the filesystem
+	isLocalPath := strings.HasPrefix(packagePath, ".") ||
+		strings.HasPrefix(packagePath, "/") ||
+		strings.Contains(packagePath, string(filepath.Separator))
+
+	// Also check if the path exists as a directory
+	if !isLocalPath {
+		if stat, statErr := os.Stat(packagePath); statErr == nil && stat.IsDir() {
+			isLocalPath = true
+		}
+	}
+
+	if isLocalPath {
 		// Resolve relative paths
-		if absPath, err := filepath.Abs(packagePath); err == nil {
+		if absPath, absErr := filepath.Abs(packagePath); absErr == nil {
 			packagePath = absPath
 		}
 		apiContract, err = extractor.ExtractFromDirectory(packagePath)
@@ -410,13 +425,13 @@ func formatDiffAsText(diff *contract.ContractDiff) (string, error) {
 func runGitDiffContractWithFlags(cmd *cobra.Command, args []string, outputFile, outputFormat string, ignorePositions, ignoreComments, verbose bool, baseline, versionPattern string) error {
 	// Import git helper
 	gitHelper := git.NewGitHelper(".")
-	
+
 	if verbose {
 		fmt.Fprintf(os.Stderr, "Using git diff for contract comparison\n")
 	}
 
 	var oldRef, newRef, packagePath string
-	
+
 	// Parse arguments based on how many were provided
 	switch len(args) {
 	case 0:
@@ -496,13 +511,23 @@ func runGitDiffContractWithFlags(cmd *cobra.Command, args []string, outputFile, 
 		}
 
 		var newContract *contract.Contract
-		// Check if it's a local directory
-		if strings.HasPrefix(targetPath, ".") || strings.HasPrefix(targetPath, "/") {
+		// Check if it's a local directory (same logic as extract command)
+		isLocalPath := strings.HasPrefix(targetPath, ".") ||
+			strings.HasPrefix(targetPath, "/") ||
+			strings.Contains(targetPath, string(filepath.Separator))
+
+		if !isLocalPath {
+			if stat, statErr := os.Stat(targetPath); statErr == nil && stat.IsDir() {
+				isLocalPath = true
+			}
+		}
+
+		if isLocalPath {
 			newContract, err = extractor.ExtractFromDirectory(targetPath)
 		} else {
 			newContract, err = extractor.ExtractFromPackage(targetPath)
 		}
-		
+
 		if err != nil {
 			return fmt.Errorf("failed to extract contract from working directory: %w", err)
 		}
@@ -574,7 +599,7 @@ func runListTagsWithFlags(cmd *cobra.Command, args []string, versionPattern stri
 	}
 
 	gitHelper := git.NewGitHelper(packagePath)
-	
+
 	if !gitHelper.IsGitRepository() {
 		return fmt.Errorf("not a git repository: %s", packagePath)
 	}
@@ -608,5 +633,3 @@ func runListTagsWithFlags(cmd *cobra.Command, args []string, versionPattern stri
 
 	return nil
 }
-
-

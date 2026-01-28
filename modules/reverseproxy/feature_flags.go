@@ -54,14 +54,18 @@ type FileBasedFeatureFlagEvaluator struct {
 	app modular.Application
 
 	// tenantAwareConfig provides tenant-aware access to feature flag configuration
+	// Can be nil if no tenant service is available
 	tenantAwareConfig *modular.TenantAwareConfig
+
+	// defaultConfigProvider is used as fallback when tenantAwareConfig is nil
+	defaultConfigProvider modular.ConfigProvider
 
 	// logger for debug and error logging
 	logger *slog.Logger
 }
 
 // NewFileBasedFeatureFlagEvaluator creates a new tenant-aware feature flag evaluator.
-func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logger) (*FileBasedFeatureFlagEvaluator, error) {
+func NewFileBasedFeatureFlagEvaluator(ctx context.Context, app modular.Application, logger *slog.Logger) (*FileBasedFeatureFlagEvaluator, error) {
 	// Validate parameters
 	if app == nil {
 		return nil, ErrApplicationNil
@@ -72,7 +76,7 @@ func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logg
 	// Get tenant service
 	var tenantService modular.TenantService
 	if err := app.GetService("tenantService", &tenantService); err != nil {
-		logger.WarnContext(context.Background(), "TenantService not available, feature flags will use default configuration only", "error", err)
+		logger.WarnContext(ctx, "TenantService not available, feature flags will use default configuration only", "error", err)
 		tenantService = nil
 	}
 
@@ -85,18 +89,30 @@ func NewFileBasedFeatureFlagEvaluator(app modular.Application, logger *slog.Logg
 		defaultConfigProvider = modular.NewStdConfigProvider(&ReverseProxyConfig{})
 	}
 
-	// Create tenant-aware config for feature flags
+	// Create tenant-aware config for feature flags if tenant service is available
 	// This will use the "reverseproxy" section from configurations
-	tenantAwareConfig := modular.NewTenantAwareConfig(
-		defaultConfigProvider,
-		tenantService,
-		"reverseproxy",
-	)
+	var tenantAwareConfig *modular.TenantAwareConfig
+	if tenantService != nil {
+		tenantAwareConfig = modular.NewTenantAwareConfig(
+			defaultConfigProvider,
+			tenantService,
+			"reverseproxy",
+		)
+		// Validate that tenant-aware config was created successfully
+		if tenantAwareConfig == nil {
+			return nil, ErrTenantAwareConfigCreation
+		}
+	} else {
+		// When no tenant service is available, we'll use defaultConfigProvider directly
+		logger.WarnContext(ctx, "No tenant service available, using default config provider only")
+		tenantAwareConfig = nil
+	}
 
 	return &FileBasedFeatureFlagEvaluator{
-		app:               app,
-		tenantAwareConfig: tenantAwareConfig,
-		logger:            logger,
+		app:                   app,
+		tenantAwareConfig:     tenantAwareConfig,
+		defaultConfigProvider: defaultConfigProvider,
+		logger:                logger,
 	}, nil
 }
 
@@ -115,8 +131,44 @@ func (f *FileBasedFeatureFlagEvaluator) EvaluateFlag(ctx context.Context, flagID
 		}
 	}
 
-	// Get tenant-aware configuration
-	config := f.tenantAwareConfig.GetConfigWithContext(ctx).(*ReverseProxyConfig)
+	// Get configuration - use tenant-aware if available, otherwise use default
+	var config *ReverseProxyConfig
+	if f.tenantAwareConfig != nil {
+		// Get tenant-aware configuration
+		rawConfig := f.tenantAwareConfig.GetConfigWithContext(ctx)
+		if rawConfig == nil {
+			f.logger.DebugContext(ctx, "No configuration available from tenant-aware config", "flag", flagID)
+			return false, fmt.Errorf("feature flag %s not found: %w", flagID, ErrFeatureFlagNotFound)
+		}
+
+		var ok bool
+		config, ok = rawConfig.(*ReverseProxyConfig)
+		if !ok {
+			f.logger.DebugContext(ctx, "Configuration is not of expected type", "flag", flagID, "type", fmt.Sprintf("%T", rawConfig))
+			return false, fmt.Errorf("%w: %s", ErrInvalidFeatureFlagConfigType, flagID)
+		}
+	} else {
+		// Fall back to default config provider when no tenant service is available
+		f.logger.DebugContext(ctx, "Using default config provider (no tenant service available)", "flag", flagID)
+		if f.defaultConfigProvider == nil {
+			f.logger.DebugContext(ctx, "No default config provider available", "flag", flagID)
+			return false, fmt.Errorf("%w: %s", ErrNoFeatureFlagConfigProvider, flagID)
+		}
+
+		rawConfig := f.defaultConfigProvider.GetConfig()
+		if rawConfig == nil {
+			f.logger.DebugContext(ctx, "No configuration available from default provider", "flag", flagID)
+			return false, fmt.Errorf("feature flag %s not found: %w", flagID, ErrFeatureFlagNotFound)
+		}
+
+		var ok bool
+		config, ok = rawConfig.(*ReverseProxyConfig)
+		if !ok {
+			f.logger.DebugContext(ctx, "Default configuration is not of expected type", "flag", flagID, "type", fmt.Sprintf("%T", rawConfig))
+			return false, fmt.Errorf("%w: %s", ErrInvalidDefaultFeatureFlagConfig, flagID)
+		}
+	}
+
 	if config == nil {
 		f.logger.DebugContext(ctx, "No feature flag configuration available", "flag", flagID)
 		return false, fmt.Errorf("feature flag %s not found: %w", flagID, ErrFeatureFlagNotFound)
@@ -154,7 +206,7 @@ func (f *FileBasedFeatureFlagEvaluator) EvaluateFlagWithDefault(ctx context.Cont
 	return value
 }
 
-// FeatureFlagAggregator implements FeatureFlagEvaluator by aggregating multiple 
+// FeatureFlagAggregator implements FeatureFlagEvaluator by aggregating multiple
 // evaluators and calling them in priority order (weight-based).
 // It discovers evaluators from the service registry by name prefix pattern.
 type FeatureFlagAggregator struct {
@@ -183,52 +235,52 @@ func NewFeatureFlagAggregator(app modular.Application, logger *slog.Logger) *Fea
 func (a *FeatureFlagAggregator) discoverEvaluators() []weightedEvaluatorInstance {
 	var evaluators []weightedEvaluatorInstance
 	nameCounters := make(map[string]int) // Track name usage for uniqueness
-	
+
 	// Use interface-based discovery to find all FeatureFlagEvaluator services
 	evaluatorType := reflect.TypeOf((*FeatureFlagEvaluator)(nil)).Elem()
 	entries := a.app.GetServicesByInterface(evaluatorType)
-	
+
 	for _, entry := range entries {
 		// Check if it's the same instance as ourselves (prevent self-ingestion)
 		if entry.Service == a {
 			continue
 		}
-		
+
 		// Skip the aggregator itself to prevent recursion
 		if entry.ActualName == "featureFlagEvaluator" {
 			continue
 		}
-		
-		// Skip the internal file evaluator to prevent double evaluation 
+
+		// Skip the internal file evaluator to prevent double evaluation
 		// (it will be included via separate discovery)
 		if entry.ActualName == "featureFlagEvaluator.file" {
 			continue
 		}
-		
+
 		// Already confirmed to be FeatureFlagEvaluator by interface discovery
 		evaluator := entry.Service.(FeatureFlagEvaluator)
-		
+
 		// Generate unique name using enhanced service registry information
 		uniqueName := a.generateUniqueNameWithModuleInfo(entry, nameCounters)
-		
+
 		// Determine weight
 		weight := 100 // default weight
 		if weightedEvaluator, ok := evaluator.(WeightedEvaluator); ok {
 			weight = weightedEvaluator.Weight()
 		}
-		
+
 		evaluators = append(evaluators, weightedEvaluatorInstance{
 			evaluator: evaluator,
 			weight:    weight,
 			name:      uniqueName,
 		})
-		
+
 		a.logger.Debug("Discovered feature flag evaluator",
-			"originalName", entry.OriginalName, "actualName", entry.ActualName, 
+			"originalName", entry.OriginalName, "actualName", entry.ActualName,
 			"uniqueName", uniqueName, "moduleName", entry.ModuleName,
 			"weight", weight, "type", fmt.Sprintf("%T", evaluator))
 	}
-	
+
 	// Also include the file evaluator with weight 1000 (lowest priority)
 	var fileEvaluator FeatureFlagEvaluator
 	if err := a.app.GetService("featureFlagEvaluator.file", &fileEvaluator); err == nil && fileEvaluator != nil {
@@ -240,12 +292,12 @@ func (a *FeatureFlagAggregator) discoverEvaluators() []weightedEvaluatorInstance
 	} else if err != nil {
 		a.logger.Debug("File evaluator not found", "error", err)
 	}
-	
+
 	// Sort by weight (ascending - lower weight = higher priority)
 	sort.Slice(evaluators, func(i, j int) bool {
 		return evaluators[i].weight < evaluators[j].weight
 	})
-	
+
 	return evaluators
 }
 
@@ -259,7 +311,7 @@ func (a *FeatureFlagAggregator) generateUniqueNameWithModuleInfo(entry *modular.
 		nameCounters[originalName] = 1
 		return originalName
 	}
-	
+
 	// Name conflicts exist - use module information for disambiguation
 	if entry.ModuleName != "" {
 		// Try with module name
@@ -269,7 +321,7 @@ func (a *FeatureFlagAggregator) generateUniqueNameWithModuleInfo(entry *modular.
 			return moduleBasedName
 		}
 	}
-	
+
 	// Try with module type name if available
 	if entry.ModuleType != nil {
 		typeName := entry.ModuleType.Elem().Name()
@@ -282,23 +334,23 @@ func (a *FeatureFlagAggregator) generateUniqueNameWithModuleInfo(entry *modular.
 			return typeBasedName
 		}
 	}
-	
+
 	// Final fallback: append incrementing counter
 	counter := nameCounters[originalName]
 	nameCounters[originalName] = counter + 1
 	return fmt.Sprintf("%s.%d", originalName, counter)
 }
 
-// EvaluateFlag implements FeatureFlagEvaluator by calling discovered evaluators 
+// EvaluateFlag implements FeatureFlagEvaluator by calling discovered evaluators
 // in weight order until one returns a decision or all have been tried.
 func (a *FeatureFlagAggregator) EvaluateFlag(ctx context.Context, flagID string, tenantID modular.TenantID, req *http.Request) (bool, error) {
 	evaluators := a.discoverEvaluators()
-	
+
 	if len(evaluators) == 0 {
 		a.logger.Debug("No feature flag evaluators found", "flag", flagID)
-		return false, fmt.Errorf("no feature flag evaluators available for %s", flagID)
+		return false, fmt.Errorf("%w for %s", ErrNoEvaluatorsAvailable, flagID)
 	}
-	
+
 	// Try each evaluator in weight order
 	for _, eval := range evaluators {
 		// Safety check to ensure evaluator is not nil
@@ -306,43 +358,43 @@ func (a *FeatureFlagAggregator) EvaluateFlag(ctx context.Context, flagID string,
 			a.logger.Warn("Skipping nil evaluator", "name", eval.name)
 			continue
 		}
-		
-		a.logger.Debug("Trying feature flag evaluator", 
+
+		a.logger.Debug("Trying feature flag evaluator",
 			"evaluator", eval.name, "weight", eval.weight, "flag", flagID)
-		
+
 		result, err := eval.evaluator.EvaluateFlag(ctx, flagID, tenantID, req)
-		
+
 		// Handle different error conditions
 		if err != nil {
 			if errors.Is(err, ErrNoDecision) {
 				// Evaluator abstains, continue to next
-				a.logger.Debug("Evaluator abstained", 
+				a.logger.Debug("Evaluator abstained",
 					"evaluator", eval.name, "flag", flagID)
 				continue
 			}
-			
+
 			if errors.Is(err, ErrEvaluatorFatal) {
 				// Fatal error, abort evaluation chain
-				a.logger.Error("Evaluator fatal error, aborting evaluation", 
+				a.logger.Error("Evaluator fatal error, aborting evaluation",
 					"evaluator", eval.name, "flag", flagID, "error", err)
-				return false, err
+				return false, fmt.Errorf("fatal error from evaluator %s: %w", eval.name, err)
 			}
-			
+
 			// Non-fatal error, log and continue
-			a.logger.Warn("Evaluator error, continuing to next", 
+			a.logger.Warn("Evaluator error, continuing to next",
 				"evaluator", eval.name, "flag", flagID, "error", err)
 			continue
 		}
-		
+
 		// Got a decision, return it
-		a.logger.Debug("Feature flag evaluated", 
+		a.logger.Debug("Feature flag evaluated",
 			"evaluator", eval.name, "flag", flagID, "result", result)
 		return result, nil
 	}
-	
+
 	// No evaluator provided a decision
 	a.logger.Debug("No evaluator provided decision for flag", "flag", flagID)
-	return false, fmt.Errorf("no evaluator provided decision for flag %s", flagID)
+	return false, fmt.Errorf("%w %s", ErrNoEvaluatorDecision, flagID)
 }
 
 // EvaluateFlagWithDefault implements FeatureFlagEvaluator by calling EvaluateFlag

@@ -20,7 +20,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -40,7 +40,7 @@ jobs:
           go test -race ./... -v
           go test -race -v -coverprofile=coverage.txt -covermode=atomic -json ./... >> report.json
       - name: Upload coverage reports to Codecov (unit)
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.0 pinned
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular
@@ -48,7 +48,7 @@ jobs:
           flags: unit
       - name: Upload unit coverage artifact
         # Make the raw Go coverage profile available for the merge job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: unit-coverage
           path: coverage.txt
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -91,7 +91,7 @@ jobs:
           go test ./... -v -coverprofile=cli-coverage.txt -covermode=atomic -json >> cli-report.json
 
       - name: Upload CLI coverage reports to Codecov
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.0 pinned
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular
@@ -99,7 +99,7 @@ jobs:
           files: cli-coverage.txt
           flags: cli
       - name: Upload CLI coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: cli-coverage
           path: cmd/modcli/cli-coverage.txt
@@ -123,7 +123,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v6
         with:
@@ -131,12 +131,11 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         # See: https://github.com/marketplace/actions/golangci-lint for configuration options
         with:
           # Optional: version of golangci-lint to use in form of v1.2 or v1.2.3 or `latest` to use the latest version
           version: latest
-          only-new-issues: true
           args: -c .golangci.github.yml
 
   merge-coverage:
@@ -147,21 +146,21 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Download unit coverage artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: unit-coverage
           path: cov-artifacts
         continue-on-error: true
       - name: Download cli coverage artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: cli-coverage
           path: cov-artifacts
         continue-on-error: true
       - name: Download merged BDD coverage artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: merged-bdd-coverage
           path: cov-artifacts
@@ -181,7 +180,7 @@ jobs:
           echo "Merged: ${FILES[*]}"
       - name: Upload merged total coverage artifact
         if: success() && hashFiles('total-coverage.txt') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: total-coverage
           path: total-coverage.txt
@@ -190,7 +189,7 @@ jobs:
       - name: Upload merged total coverage
         # Fail the job if Codecov can't find or upload the merged coverage
         if: always()
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.0 pinned
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.0 pinned
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: CrisisTextLine/modular

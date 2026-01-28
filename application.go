@@ -175,6 +175,83 @@ type Application interface {
 	// This enables interface-based service discovery for modules that need to
 	// aggregate services by capability rather than name.
 	GetServicesByInterface(interfaceType reflect.Type) []*ServiceRegistryEntry
+
+	// StartTime returns the time when the application was started.
+	// Returns zero time if the application has not been started yet.
+	// This can be used to calculate application uptime.
+	//
+	// Example:
+	//   uptime := time.Since(app.StartTime())
+	StartTime() time.Time
+
+	// GetModule returns the module with the given name, or nil if not found.
+	// This allows modules to access each other when the service provider
+	// pattern is insufficient or overly complex.
+	//
+	// Use cases include:
+	//   - Direct module method calls not in a common interface
+	//   - Optional module dependencies (check if module exists)
+	//   - Debugging/introspection needs
+	//
+	// Callers must use type assertions to access module-specific methods:
+	//   if jobsMod, ok := app.GetModule("jobs").(*JobsModule); ok {
+	//       status, err := jobsMod.GetHealthStatus(ctx)
+	//   }
+	//
+	// Note: Prefer the service provider pattern for well-defined interfaces.
+	// Use GetModule() for module-specific functionality or optional dependencies.
+	GetModule(name string) Module
+
+	// GetAllModules returns a map of all registered modules by name.
+	// Returns a copy of the module registry to prevent external modification.
+	//
+	// Useful for:
+	//   - Debugging and introspection
+	//   - Administrative interfaces
+	//   - Module discovery at runtime
+	//
+	// Example:
+	//   modules := app.GetAllModules()
+	//   for name, mod := range modules {
+	//       fmt.Printf("Module: %s, Dependencies: %v\n", name, mod.Dependencies())
+	//   }
+	GetAllModules() map[string]Module
+
+	// OnConfigLoaded registers a callback to run after configuration is loaded
+	// but before modules are initialized. This allows reconfiguring dependencies
+	// (such as logger, metrics, tracing) based on loaded configuration values.
+	//
+	// Multiple hooks can be registered and will be executed in registration order.
+	// Hooks are executed during Init() after AppConfigLoader completes but before
+	// any module Init() methods are called.
+	//
+	// This is particularly useful when you need to:
+	//   - Reconfigure logger format/level based on config
+	//   - Initialize metrics collectors with config-driven settings
+	//   - Set up tracing providers based on configuration
+	//   - Modify any application dependency before modules cache references
+	//
+	// Example:
+	//   app.OnConfigLoaded(func(app Application) error {
+	//       config := app.ConfigProvider().GetConfig().(*AppConfig)
+	//
+	//       // Reconfigure logger based on loaded config
+	//       var handler slog.Handler
+	//       if config.LogFormat == "json" {
+	//           handler = slog.NewJSONHandler(os.Stdout, nil)
+	//       } else {
+	//           handler = slog.NewTextHandler(os.Stdout, nil)
+	//       }
+	//
+	//       newLogger := slog.New(handler)
+	//       app.SetLogger(newLogger)
+	//       return nil
+	//   })
+	//
+	// The hook receives the Application instance, allowing full access to
+	// configuration, services, and application state. Hooks should return
+	// an error if reconfiguration fails, which will cause Init() to fail.
+	OnConfigLoaded(hook func(app Application) error)
 }
 
 // TenantApplication extends Application with multi-tenant functionality.
@@ -253,10 +330,12 @@ type StdApplication struct {
 	logger              Logger
 	ctx                 context.Context
 	cancel              context.CancelFunc
-	tenantService       TenantService // Added tenant service reference
-	verboseConfig       bool          // Flag for verbose configuration debugging
-	initialized         bool          // Tracks whether Init has already been successfully executed
-	configFeeders       []Feeder      // Optional per-application feeders (override global ConfigFeeders if non-nil)
+	tenantService       TenantService             // Added tenant service reference
+	verboseConfig       bool                      // Flag for verbose configuration debugging
+	initialized         bool                      // Tracks whether Init has already been successfully executed
+	configFeeders       []Feeder                  // Optional per-application feeders (override global ConfigFeeders if non-nil)
+	startTime           time.Time                 // Tracks when the application was started
+	configLoadedHooks   []func(Application) error // Hooks to run after config loading but before module initialization
 }
 
 // NewStdApplication creates a new application instance with the provided configuration and logger.
@@ -300,7 +379,8 @@ func NewStdApplication(cp ConfigProvider, logger Logger) Application {
 		svcRegistry:         enhancedRegistry.AsServiceRegistry(), // Backwards compatible view
 		moduleRegistry:      make(ModuleRegistry),
 		logger:              logger,
-		configFeeders:       nil, // default to nil to signal use of package-level ConfigFeeders
+		configFeeders:       nil,                                // default to nil to signal use of package-level ConfigFeeders
+		configLoadedHooks:   make([]func(Application) error, 0), // Initialize hooks slice
 	}
 
 	// Register the logger as a service so modules can depend on it
@@ -487,6 +567,21 @@ func (app *StdApplication) InitWithApp(appToPass Application) error {
 		errs = append(errs, fmt.Errorf("failed to load app config: %w", err))
 	}
 
+	// Execute config loaded hooks after configuration is loaded but before modules initialize
+	if len(app.configLoadedHooks) > 0 {
+		if app.logger != nil {
+			app.logger.Debug("Executing config loaded hooks", "count", len(app.configLoadedHooks))
+		}
+		for i, hook := range app.configLoadedHooks {
+			if err := hook(appToPass); err != nil {
+				errs = append(errs, fmt.Errorf("config loaded hook %d failed: %w", i, err))
+			}
+		}
+		if app.logger != nil {
+			app.logger.Debug("Config loaded hooks executed successfully")
+		}
+	}
+
 	// Build dependency graph
 	moduleOrder, err := app.resolveDependencies()
 	if err != nil {
@@ -581,6 +676,9 @@ func (app *StdApplication) initTenantConfigurations() error {
 
 // Start starts the application
 func (app *StdApplication) Start() error {
+	// Record the start time
+	app.startTime = time.Now()
+
 	// Create cancellable context for the application
 	ctx, cancel := context.WithCancel(context.Background())
 	app.ctx = ctx
@@ -1530,4 +1628,33 @@ func (app *StdApplication) GetServicesByInterface(interfaceType reflect.Type) []
 		return app.enhancedSvcRegistry.GetServicesByInterface(interfaceType)
 	}
 	return nil
+}
+
+// StartTime returns the time when the application was started
+func (app *StdApplication) StartTime() time.Time {
+	return app.startTime
+}
+
+// GetModule returns the module with the given name, or nil if not found
+func (app *StdApplication) GetModule(name string) Module {
+	return app.moduleRegistry[name]
+}
+
+// GetAllModules returns a map of all registered modules by name.
+// Returns a copy to prevent external modification of the module registry.
+func (app *StdApplication) GetAllModules() map[string]Module {
+	result := make(map[string]Module, len(app.moduleRegistry))
+	for k, v := range app.moduleRegistry {
+		result[k] = v
+	}
+	return result
+}
+
+// OnConfigLoaded registers a callback to run after config loading but before module initialization.
+// This allows reconfiguring dependencies based on loaded configuration values.
+// Multiple hooks can be registered and will be executed in registration order.
+func (app *StdApplication) OnConfigLoaded(hook func(Application) error) {
+	if hook != nil {
+		app.configLoadedHooks = append(app.configLoadedHooks, hook)
+	}
 }

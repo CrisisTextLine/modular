@@ -53,22 +53,43 @@ type ConnectionConfig struct {
 	AWSIAMAuth *AWSIAMAuthConfig `json:"aws_iam_auth,omitempty" yaml:"aws_iam_auth,omitempty"`
 }
 
-// AWSIAMAuthConfig represents AWS IAM authentication configuration
+// AWSIAMAuthConfig represents AWS IAM authentication configuration.
+//
+// When IAM authentication is enabled, the database module uses AWS RDS IAM authentication
+// to automatically generate and refresh database authentication tokens. This provides several benefits:
+//   - No need to manage database passwords
+//   - Tokens are automatically rotated (15-minute lifetime)
+//   - Uses AWS IAM for access control
+//   - Audit trail through AWS CloudTrail
+//
+// DSN Password Handling:
+// When IAM authentication is enabled, any password in the DSN is ignored and stripped.
+// You can include a placeholder like $TOKEN in the DSN for clarity, but it will be removed:
+//
+//	Example DSN:
+//	  postgresql://chimera_app:$TOKEN@mydb.us-east-1.rds.amazonaws.com:5432/mydb?sslmode=require
+//
+//	The module will:
+//	  1. Strip the "$TOKEN" placeholder from the DSN
+//	  2. Extract the username "chimera_app"
+//	  3. Use AWS credentials to generate an IAM auth token
+//	  4. Automatically refresh the token before it expires
+//
+// Configuration Options:
 type AWSIAMAuthConfig struct {
 	// Enabled indicates whether AWS IAM authentication is enabled
 	Enabled bool `json:"enabled" yaml:"enabled" env:"AWS_IAM_AUTH_ENABLED"`
 
-	// Region specifies the AWS region for the RDS instance
+	// Region specifies the AWS region for the RDS instance (e.g., "us-east-1")
+	// This is required for IAM token generation
 	Region string `json:"region" yaml:"region" env:"AWS_IAM_AUTH_REGION"`
 
-	// DBUser specifies the database username for IAM authentication
+	// DBUser specifies the database username for IAM authentication.
+	// If not specified, the username will be extracted from the DSN.
+	// This field takes precedence over the username in the DSN if both are provided.
 	DBUser string `json:"db_user" yaml:"db_user" env:"AWS_IAM_AUTH_DB_USER"`
 
-	// TokenRefreshInterval specifies how often to refresh the IAM token (in seconds)
-	// Default is 10 minutes (600 seconds), tokens expire after 15 minutes
-	TokenRefreshInterval int `json:"token_refresh_interval" yaml:"token_refresh_interval" env:"AWS_IAM_AUTH_TOKEN_REFRESH" default:"600"`
-
-	// ConnectionTimeout specifies the timeout for database connection tests (in seconds)
+	// ConnectionTimeout specifies the timeout for database connection tests
 	// Default is 5 seconds
 	ConnectionTimeout time.Duration `json:"connection_timeout" yaml:"connection_timeout" env:"AWS_IAM_AUTH_CONNECTION_TIMEOUT" default:"5s"`
 }

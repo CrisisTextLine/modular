@@ -1,10 +1,12 @@
 package logmasker
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -114,6 +116,17 @@ func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceR
 func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
 	return []*modular.ServiceRegistryEntry{}
 }
+func (m *MockApplication) Context() context.Context { return context.Background() }
+func (m *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+func (m *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+func (m *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+func (m *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
 
 // TestMaskableValue implements the MaskableValue interface for testing.
 type TestMaskableValue struct {

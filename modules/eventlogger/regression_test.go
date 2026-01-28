@@ -392,9 +392,3 @@ func TestEventLogger_QueuedEventsProcessedOnStart(t *testing.T) {
 	// Cleanup
 	_ = app.Stop()
 }
-
-// Helper to simulate an external lifecycle event arrival before Start (if needed in future tests).
-func emitDirect(mod *EventLoggerModule, typ string) {
-	evt := modular.NewCloudEvent(typ, "application", nil, nil)
-	_ = mod.OnEvent(context.Background(), evt)
-}

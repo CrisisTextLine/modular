@@ -171,14 +171,18 @@ func TestProxyModule(t *testing.T) {
 	require.NoError(t, err)
 
 	// Register route manually since we're bypassing the normal setup
+	testRouter.mu.Lock()
 	testRouter.routes["/*"] = module.backendRoutes["api1"]["/*"]
+	testRouter.mu.Unlock()
 
 	// Test a request to the api1 backend
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	w := httptest.NewRecorder()
 
 	// Find the route handler for "/*" (the default route)
+	testRouter.mu.RLock()
 	handler, found := testRouter.routes["/*"]
+	testRouter.mu.RUnlock()
 	require.True(t, found, "Default route handler should be registered")
 
 	// Call the handler directly
@@ -258,7 +262,9 @@ func TestTenantAwareRouting(t *testing.T) {
 	require.NoError(t, err)
 
 	// Register route manually since we're bypassing the normal setup
+	testRouter.mu.Lock()
 	testRouter.routes["/*"] = module.backendRoutes["api1"]["/*"]
+	testRouter.mu.Unlock()
 
 	// Test a request to the api1 backend with tenant header
 	req := httptest.NewRequest("GET", "/api/test", nil)
@@ -266,7 +272,9 @@ func TestTenantAwareRouting(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	// Find the route handler for "/*" (the default route)
+	testRouter.mu.RLock()
 	handler, found := testRouter.routes["/*"]
+	testRouter.mu.RUnlock()
 	require.True(t, found, "Default route handler should be registered")
 
 	// Call the handler directly
@@ -317,14 +325,18 @@ func TestCompositeRouteHandlers(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a simple handler to test with
+	testRouter.mu.Lock()
 	testRouter.routes["/api/composite"] = func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"server":"API1","path":"` + r.URL.Path + `"}`))
 	}
+	testRouter.mu.Unlock()
 
 	// Verify composite route was registered
+	testRouter.mu.RLock()
 	handler, found := testRouter.routes["/api/composite"]
+	testRouter.mu.RUnlock()
 	require.True(t, found, "Composite route handler should be registered")
 
 	// Test a request to the composite route
@@ -402,6 +414,7 @@ func TestTenantAwareCompositeRouting(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a simple handler to test with
+	testRouter.mu.Lock()
 	testRouter.routes["/api/composite"] = func(w http.ResponseWriter, r *http.Request) {
 		// Check for tenant header
 		tenantIDStr := r.Header.Get("X-Tenant-ID")
@@ -415,9 +428,12 @@ func TestTenantAwareCompositeRouting(t *testing.T) {
 			_, _ = w.Write([]byte(`{"server":"API1","path":"` + r.URL.Path + `"}`))
 		}
 	}
+	testRouter.mu.Unlock()
 
 	// Verify composite route was registered
+	testRouter.mu.RLock()
 	handler, found := testRouter.routes["/api/composite"]
+	testRouter.mu.RUnlock()
 	require.True(t, found, "Composite route handler should be registered")
 
 	// Test a request to the composite route with tenant header
@@ -515,13 +531,17 @@ func TestCustomTenantHeader(t *testing.T) {
 	require.NoError(t, err)
 
 	// Register route manually since we're bypassing the normal setup
+	testRouter.mu.Lock()
 	testRouter.routes["/*"] = module.backendRoutes["api1"]["/*"]
+	testRouter.mu.Unlock()
 
 	// Test 1: Request without tenant header - should use default backend
 	req1 := httptest.NewRequest("GET", "/api/test", nil)
 	w1 := httptest.NewRecorder()
 
+	testRouter.mu.RLock()
 	handler, found := testRouter.routes["/*"]
+	testRouter.mu.RUnlock()
 	require.True(t, found, "Default route handler should be registered")
 
 	handler(w1, req1)

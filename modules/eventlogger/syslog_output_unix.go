@@ -92,16 +92,27 @@ func (s *SyslogTarget) WriteEvent(entry *LogEntry) error {
 	msg := fmt.Sprintf("[%s] %s: %v", entry.Type, entry.Source, entry.Data)
 	switch entry.Level {
 	case "DEBUG":
-		return s.writer.Debug(msg)
+		if err := s.writer.Debug(msg); err != nil {
+			return fmt.Errorf("failed to write debug to syslog: %w", err)
+		}
 	case "INFO":
-		return s.writer.Info(msg)
+		if err := s.writer.Info(msg); err != nil {
+			return fmt.Errorf("failed to write info to syslog: %w", err)
+		}
 	case "WARN":
-		return s.writer.Warning(msg)
+		if err := s.writer.Warning(msg); err != nil {
+			return fmt.Errorf("failed to write warning to syslog: %w", err)
+		}
 	case "ERROR":
-		return s.writer.Err(msg)
+		if err := s.writer.Err(msg); err != nil {
+			return fmt.Errorf("failed to write error to syslog: %w", err)
+		}
 	default:
-		return s.writer.Info(msg)
+		if err := s.writer.Info(msg); err != nil {
+			return fmt.Errorf("failed to write default level to syslog: %w", err)
+		}
 	}
+	return nil
 }
 
 // Flush flushes syslog output (no-op for syslog).

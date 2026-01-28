@@ -43,10 +43,51 @@ scheduler:
 
 ## Usage
 
-### Accessing the Scheduler Service
+### Service Dependency Management
+
+When your module depends on the scheduler service, you must ensure proper initialization order. There are three approaches:
+
+#### Option 1: Using RequiresServices() with name-based matching (Recommended)
 
 ```go
-// In your module's Init function
+func (m *MyModule) RequiresServices() []modular.ServiceDependency {
+    return []modular.ServiceDependency{
+        {
+            Name:     "scheduler.provider",
+            Required: true,
+        },
+    }
+}
+
+func (m *MyModule) Init(app modular.Application) error {
+    // The scheduler service is now guaranteed to be available
+    var schedulerService *scheduler.SchedulerModule
+    err := app.GetService("scheduler.provider", &schedulerService)
+    if err != nil {
+        return fmt.Errorf("failed to get scheduler service: %w", err)
+    }
+    
+    m.scheduler = schedulerService
+    return nil
+}
+```
+
+This approach:
+- ✅ Automatically establishes initialization order (scheduler before your module)
+- ✅ Works with both Init() and Constructor() patterns
+- ✅ Provides clear service dependency documentation
+
+#### Option 2: Using module Dependencies()
+
+```go
+func (m *MyModule) Name() string {
+    return "my-module"
+}
+
+func (m *MyModule) Dependencies() []string {
+    return []string{"scheduler"}
+}
+
 func (m *MyModule) Init(app modular.Application) error {
     var schedulerService *scheduler.SchedulerModule
     err := app.GetService("scheduler.provider", &schedulerService)
@@ -54,13 +95,12 @@ func (m *MyModule) Init(app modular.Application) error {
         return fmt.Errorf("failed to get scheduler service: %w", err)
     }
     
-    // Now you can use the scheduler service
     m.scheduler = schedulerService
     return nil
 }
 ```
 
-### Using Interface-Based Service Matching
+#### Option 3: Using Interface-Based Service Matching
 
 ```go
 // Define the service dependency
@@ -83,6 +123,8 @@ func (m *MyModule) Constructor() modular.ModuleConstructor {
     }
 }
 ```
+
+> ⚠️ **Important**: If you access the scheduler service during `Init()` using `app.GetService()` without declaring the dependency via `RequiresServices()` or `Dependencies()`, your module may be initialized before the scheduler module, causing a "service not found" error. Always declare service dependencies explicitly to ensure proper initialization order.
 
 ### Scheduling One-Time Jobs
 

@@ -388,7 +388,9 @@ func prepareSectionConfigs(app Application, cfgBuilder *Config) (map[string]conf
 			continue
 		}
 
-		tempSectionCfg, sectionInfo, err := createTempConfig(sectionCfg)
+		// Use deep copy to ensure tenant configs don't share map/slice references
+		// This prevents config pollution when multiple tenants override the same backend IDs
+		tempSectionCfg, sectionInfo, err := createTempConfigDeep(sectionCfg)
 		if err != nil {
 			app.Logger().Warn("Failed to create temp config", "section", sectionKey, "error", err)
 			continue
@@ -449,7 +451,9 @@ func createSectionProvider(app Application, sectionKey string, info configInfo) 
 	}
 
 	// Create a new provider with the properly typed config
-	provider := NewStdConfigProvider(configClone)
+	// Use IsolatedConfigProvider to ensure each tenant gets a deep copy
+	// This prevents config pollution when multiple tenants override the same settings
+	provider := NewIsolatedConfigProvider(configClone)
 	if provider == nil || provider.GetConfig() == nil {
 		return nil, ErrCreatedNilProvider
 	}
@@ -575,7 +579,9 @@ func copyStructToStruct(dstVal, srcVal reflect.Value) error {
 
 		// Copy if types are compatible
 		if srcField.Type().AssignableTo(dstField.Type()) {
-			dstField.Set(srcField)
+			// Use deep copy to prevent shared map/slice references
+			// This fixes the bug where multiple tenants share the same BackendServices map
+			deepCopyValue(dstField, srcField)
 		}
 	}
 	return nil
@@ -585,7 +591,8 @@ func copyStructToStruct(dstVal, srcVal reflect.Value) error {
 func setFieldValue(dstField, srcValue reflect.Value) error {
 	// Direct assignment if types are compatible
 	if srcValue.Type().AssignableTo(dstField.Type()) {
-		dstField.Set(srcValue)
+		// Use deep copy to prevent shared references for maps/slices
+		deepCopyValue(dstField, srcValue)
 		return nil
 	}
 
@@ -603,7 +610,8 @@ func setInterfaceFieldValue(dstField, srcValue reflect.Value) error {
 
 	// Direct assignment of concrete value if possible
 	if concreteValue.Type().AssignableTo(dstField.Type()) {
-		dstField.Set(concreteValue)
+		// Use deep copy to prevent shared references for maps/slices
+		deepCopyValue(dstField, concreteValue)
 		return nil
 	}
 

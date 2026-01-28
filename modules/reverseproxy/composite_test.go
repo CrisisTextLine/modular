@@ -1,6 +1,7 @@
 package reverseproxy
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -168,7 +169,7 @@ func TestTenantAwareCompositeRoutes(t *testing.T) {
 	module.router = mockRouter
 
 	// Setup composite routes
-	err := module.setupCompositeRoutes()
+	err := module.setupCompositeRoutes(context.Background())
 	require.NoError(t, err)
 
 	// Verify route was registered
@@ -275,7 +276,7 @@ func TestTenantAwareCompositeRoutesWithRequiredTenant(t *testing.T) {
 	module.router = mockRouter
 
 	// Setup composite routes
-	err := module.setupCompositeRoutes()
+	err := module.setupCompositeRoutes(context.Background())
 	require.NoError(t, err)
 
 	// Verify route was registered

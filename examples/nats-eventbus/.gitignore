@@ -1,0 +1,11 @@
+# Binary output
+nats-demo
+nats-eventbus
+
+# Logs
+*.log
+app.log
+
+# Go workspace
+go.work
+go.work.sum

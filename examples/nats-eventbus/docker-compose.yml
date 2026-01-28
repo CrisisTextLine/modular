@@ -1,0 +1,25 @@
+services:
+  # NATS server for messaging
+  nats:
+    image: nats:2.10-alpine
+    container_name: nats-eventbus
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP monitoring
+      - "6222:6222"  # Cluster connections
+    command: 
+      - "-js"          # Enable JetStream
+      - "-m"           # Enable HTTP monitoring
+      - "8222"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - nats-network
+
+networks:
+  nats-network:
+    driver: bridge

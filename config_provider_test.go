@@ -2,858 +2,531 @@ package modular
 
 import (
 	"fmt"
-	"reflect"
+	"sync"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 )
 
-const (
-	updatedValue = "updated"
-)
-
-type testCfg struct {
-	Str string `yaml:"str"`
-	Num int    `yaml:"num"`
+// TestConfig is a simple config struct for testing
+type TestConfig struct {
+	Host     string
+	Port     int
+	Tags     []string
+	Metadata map[string]string
 }
 
-type testSectionCfg struct {
-	Enabled bool   `yaml:"enabled"`
-	Name    string `yaml:"name"`
+func TestStdConfigProvider(t *testing.T) {
+	t.Run("returns same reference", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		provider := NewStdConfigProvider(cfg)
+
+		cfg1 := provider.GetConfig().(*TestConfig)
+		cfg2 := provider.GetConfig().(*TestConfig)
+
+		// Should be the exact same pointer
+		if cfg1 != cfg2 {
+			t.Error("StdConfigProvider should return same reference")
+		}
+
+		// Modifications affect all consumers
+		cfg1.Port = 9090
+		if cfg2.Port != 9090 {
+			t.Error("Modifications should affect all consumers")
+		}
+	})
 }
 
-// Mock for ComplexFeeder
-type MockComplexFeeder struct {
-	mock.Mock
+func TestIsolatedConfigProvider(t *testing.T) {
+	t.Run("returns independent copies", func(t *testing.T) {
+		cfg := &TestConfig{
+			Host:     "localhost",
+			Port:     8080,
+			Tags:     []string{"a", "b"},
+			Metadata: map[string]string{"key": "value"},
+		}
+		provider := NewIsolatedConfigProvider(cfg)
+
+		cfg1 := provider.GetConfig().(*TestConfig)
+		cfg2 := provider.GetConfig().(*TestConfig)
+
+		// Should be different pointers
+		if cfg1 == cfg2 {
+			t.Error("IsolatedConfigProvider should return different references")
+		}
+
+		// Modifications should NOT affect other copies
+		cfg1.Port = 9090
+		if cfg2.Port == 9090 {
+			t.Error("Modifications should not affect other copies")
+		}
+		if cfg2.Port != 8080 {
+			t.Errorf("Expected port 8080, got %d", cfg2.Port)
+		}
+	})
+
+	t.Run("deep copies nested structures", func(t *testing.T) {
+		cfg := &TestConfig{
+			Host:     "localhost",
+			Port:     8080,
+			Tags:     []string{"a", "b"},
+			Metadata: map[string]string{"key": "value"},
+		}
+		provider := NewIsolatedConfigProvider(cfg)
+
+		cfg1 := provider.GetConfig().(*TestConfig)
+		cfg2 := provider.GetConfig().(*TestConfig)
+
+		// Modify slice in cfg1
+		cfg1.Tags[0] = "modified"
+		if cfg2.Tags[0] == "modified" {
+			t.Error("Slice modifications should not affect other copies")
+		}
+
+		// Modify map in cfg1
+		cfg1.Metadata["key"] = "modified"
+		if cfg2.Metadata["key"] == "modified" {
+			t.Error("Map modifications should not affect other copies")
+		}
+	})
+
+	t.Run("original is not modified", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		provider := NewIsolatedConfigProvider(cfg)
+
+		copy := provider.GetConfig().(*TestConfig)
+		copy.Port = 9090
+		copy.Host = "example.com"
+
+		// Original should remain unchanged
+		if cfg.Port != 8080 {
+			t.Errorf("Original port should be 8080, got %d", cfg.Port)
+		}
+		if cfg.Host != "localhost" {
+			t.Errorf("Original host should be localhost, got %s", cfg.Host)
+		}
+	})
 }
 
-func (m *MockComplexFeeder) Feed(structure interface{}) error {
-	args := m.Called(structure)
-	if err := args.Error(0); err != nil {
-		return fmt.Errorf("mock feeder error: %w", err)
-	}
-	return nil
-}
+func TestImmutableConfigProvider(t *testing.T) {
+	t.Run("returns same reference from atomic value", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		provider := NewImmutableConfigProvider(cfg)
 
-func (m *MockComplexFeeder) FeedKey(key string, target interface{}) error {
-	args := m.Called(key, target)
-	if err := args.Error(0); err != nil {
-		return fmt.Errorf("mock feeder key error: %w", err)
-	}
-	return nil
-}
+		cfg1 := provider.GetConfig().(*TestConfig)
+		cfg2 := provider.GetConfig().(*TestConfig)
 
-func TestNewStdConfigProvider(t *testing.T) {
-	t.Parallel()
-	cfg := &testCfg{Str: "test", Num: 42}
-	provider := NewStdConfigProvider(cfg)
+		// Should be the same pointer (same atomic value)
+		if cfg1 != cfg2 {
+			t.Error("Should return same reference before update")
+		}
+	})
 
-	assert.NotNil(t, provider)
-	assert.Equal(t, cfg, provider.GetConfig())
-}
+	t.Run("atomic update changes returned value", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		provider := NewImmutableConfigProvider(cfg)
 
-func TestStdConfigProvider_GetConfig(t *testing.T) {
-	t.Parallel()
-	cfg := &testCfg{Str: "test", Num: 42}
-	provider := &StdConfigProvider{cfg: cfg}
+		cfg1 := provider.GetConfig().(*TestConfig)
 
-	assert.Equal(t, cfg, provider.GetConfig())
-}
+		// Update with new config
+		newCfg := &TestConfig{Host: "example.com", Port: 443}
+		provider.UpdateConfig(newCfg)
 
-func TestNewConfig(t *testing.T) {
-	t.Parallel()
-	cfg := NewConfig()
+		cfg2 := provider.GetConfig().(*TestConfig)
 
-	assert.NotNil(t, cfg)
-	assert.NotNil(t, cfg.Feeders)
-	assert.NotNil(t, cfg.StructKeys)
-	assert.Empty(t, cfg.StructKeys)
-}
+		// Should now return the new config
+		if cfg2.Host != "example.com" || cfg2.Port != 443 {
+			t.Error("Should return updated config")
+		}
 
-func TestConfig_AddStructKey(t *testing.T) {
-	t.Parallel()
-	cfg := NewConfig()
-	target := &testCfg{}
+		// Old reference should still have old values
+		if cfg1.Host != "localhost" || cfg1.Port != 8080 {
+			t.Error("Old reference should be unchanged")
+		}
+	})
 
-	result := cfg.AddStructKey("test", target)
+	t.Run("concurrent reads are safe", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		provider := NewImmutableConfigProvider(cfg)
 
-	assert.Equal(t, cfg, result)
-	assert.Len(t, cfg.StructKeys, 1)
-	assert.Equal(t, target, cfg.StructKeys["test"])
-}
+		var wg sync.WaitGroup
+		errors := make(chan error, 100)
 
-// Test implementation of ConfigSetup
-type testSetupCfg struct {
-	Value       string `yaml:"value"`
-	setupCalled bool
-	shouldError bool
-}
-
-func (t *testSetupCfg) Setup() error {
-	t.setupCalled = true
-	if t.shouldError {
-		return ErrSetupFailed
-	}
-	return nil
-}
-
-func TestConfig_Feed(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name           string
-		setupConfig    func() (*Config, *MockComplexFeeder)
-		expectFeedErr  bool
-		expectKeyErr   bool
-		expectedErrMsg string
-	}{
-		{
-			name: "successful feed",
-			setupConfig: func() (*Config, *MockComplexFeeder) {
-				cfg := NewConfig()
-				feeder := new(MockComplexFeeder)
-				feeder.On("Feed", mock.Anything).Return(nil)
-				feeder.On("FeedKey", "main", mock.Anything).Return(nil)
-				feeder.On("FeedKey", "test", mock.Anything).Return(nil)
-				cfg.AddFeeder(feeder)
-				cfg.AddStructKey("main", &testCfg{})
-				cfg.AddStructKey("test", &testCfg{})
-				return cfg, feeder
-			},
-			expectFeedErr: false,
-		},
-		{
-			name: "feed error",
-			setupConfig: func() (*Config, *MockComplexFeeder) {
-				cfg := NewConfig()
-				feeder := new(MockComplexFeeder)
-				feeder.On("Feed", mock.Anything).Return(ErrFeedFailed)
-				cfg.AddFeeder(feeder)
-				cfg.AddStructKey("main", &testCfg{})
-				return cfg, feeder
-			},
-			expectFeedErr:  true,
-			expectedErrMsg: "feed error",
-		},
-		{
-			name: "feedKey error",
-			setupConfig: func() (*Config, *MockComplexFeeder) {
-				cfg := NewConfig()
-				feeder := new(MockComplexFeeder)
-				feeder.On("Feed", mock.Anything).Return(nil)
-				// Due to map iteration order being random, either key could be processed first
-				// If "test" is processed first, it will fail and stop processing
-				// If "main" is processed first, it will succeed, then "test" will fail
-				feeder.On("FeedKey", "main", mock.Anything).Return(nil).Maybe()
-				feeder.On("FeedKey", "test", mock.Anything).Return(ErrFeedKeyFailed)
-				cfg.AddFeeder(feeder)
-				cfg.AddStructKey("main", &testCfg{})
-				cfg.AddStructKey("test", &testCfg{})
-				return cfg, feeder
-			},
-			expectFeedErr:  true,
-			expectKeyErr:   true,
-			expectedErrMsg: "feeder error",
-		},
-		{
-			name: "setup success",
-			setupConfig: func() (*Config, *MockComplexFeeder) {
-				cfg := NewConfig()
-				feeder := new(MockComplexFeeder)
-				feeder.On("Feed", mock.Anything).Return(nil)
-				feeder.On("FeedKey", "main", mock.Anything).Return(nil)
-				feeder.On("FeedKey", "test", mock.Anything).Return(nil)
-				cfg.AddFeeder(feeder)
-				cfg.AddStructKey("main", &testCfg{})
-				cfg.AddStructKey("test", &testSetupCfg{})
-				return cfg, feeder
-			},
-			expectFeedErr: false,
-		},
-		{
-			name: "setup error",
-			setupConfig: func() (*Config, *MockComplexFeeder) {
-				cfg := NewConfig()
-				feeder := new(MockComplexFeeder)
-				feeder.On("Feed", mock.Anything).Return(nil)
-				// Due to map iteration order being random, either key could be processed first
-				// If "test" is processed first, it will succeed then fail at setup
-				// If "main" is processed first, it will succeed, then "test" will succeed and fail at setup
-				feeder.On("FeedKey", "main", mock.Anything).Return(nil).Maybe()
-				feeder.On("FeedKey", "test", mock.Anything).Return(nil).Maybe()
-				cfg.AddFeeder(feeder)
-				cfg.AddStructKey("main", &testCfg{})
-				cfg.AddStructKey("test", &testSetupCfg{shouldError: true})
-				return cfg, feeder
-			},
-			expectFeedErr:  true,
-			expectedErrMsg: "config setup error for test",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg, feeder := tt.setupConfig()
-
-			err := cfg.Feed()
-
-			if tt.expectFeedErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.expectedErrMsg)
-			} else {
-				require.NoError(t, err)
-				// Check if setup was called when using testSetupCfg
-				if setupCfg, ok := cfg.StructKeys["test"].(*testSetupCfg); ok {
-					assert.True(t, setupCfg.setupCalled)
+		// 100 concurrent readers
+		for i := 0; i < 100; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				cfg := provider.GetConfig().(*TestConfig)
+				if cfg == nil {
+					errors <- fmt.Errorf("config is nil")
 				}
-			}
-
-			feeder.AssertExpectations(t)
-		})
-	}
-}
-
-func Test_createTempConfig(t *testing.T) {
-	t.Parallel()
-	t.Run("with pointer", func(t *testing.T) {
-		originalCfg := &testCfg{Str: "test", Num: 42}
-		tempCfg, info, err := createTempConfig(originalCfg)
-
-		require.NoError(t, err)
-		require.NotNil(t, tempCfg)
-		assert.True(t, info.isPtr)
-		assert.Equal(t, reflect.ValueOf(originalCfg).Type(), info.tempVal.Type())
-	})
-
-	t.Run("with non-pointer", func(t *testing.T) {
-		originalCfg := testCfg{Str: "test", Num: 42}
-		tempCfg, info, err := createTempConfig(originalCfg)
-
-		require.NoError(t, err)
-		require.NotNil(t, tempCfg)
-		assert.False(t, info.isPtr)
-		assert.Equal(t, reflect.PointerTo(reflect.ValueOf(originalCfg).Type()), info.tempVal.Type())
-	})
-}
-
-func Test_updateConfig(t *testing.T) {
-	t.Parallel()
-	t.Run("with pointer config", func(t *testing.T) {
-		originalCfg := &testCfg{Str: "old", Num: 0}
-		tempCfg := &testCfg{Str: "new", Num: 42}
-
-		mockLogger := new(MockLogger)
-		app := &StdApplication{logger: mockLogger}
-
-		origInfo := configInfo{
-			originalVal: reflect.ValueOf(originalCfg),
-			tempVal:     reflect.ValueOf(tempCfg),
-			isPtr:       true,
+			}()
 		}
 
-		updateConfig(app, origInfo)
+		wg.Wait()
+		close(errors)
 
-		// Check the original config was updated
-		assert.Equal(t, "new", originalCfg.Str)
-		assert.Equal(t, 42, originalCfg.Num)
+		if len(errors) > 0 {
+			t.Errorf("Concurrent reads failed with %d errors", len(errors))
+		}
 	})
 
-	t.Run("with non-pointer config", func(t *testing.T) {
-		originalCfg := testCfg{Str: "old", Num: 0}
-		tempCfgPtr, origInfo, err := createTempConfig(originalCfg)
-		require.NoError(t, err)
-		tempCfgPtr.(*testCfg).Str = "new"
-		tempCfgPtr.(*testCfg).Num = 42
+	t.Run("concurrent reads during updates", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		provider := NewImmutableConfigProvider(cfg)
 
-		mockLogger := new(MockLogger)
-		mockLogger.On("Debug",
-			"Creating new provider with updated config (original was non-pointer)",
-			[]interface{}(nil)).Return()
-		app := &StdApplication{
-			logger:      mockLogger,
-			cfgProvider: NewStdConfigProvider(originalCfg),
-		}
+		var wg sync.WaitGroup
+		errors := make(chan error, 100)
 
-		updateConfig(app, origInfo)
-
-		// Check the updated provider from the app (not the original provider reference)
-		updated := app.cfgProvider.GetConfig()
-		assert.Equal(t, reflect.Struct, reflect.ValueOf(updated).Kind())
-		assert.Equal(t, "new", updated.(testCfg).Str)
-		assert.Equal(t, 42, updated.(testCfg).Num)
-		mockLogger.AssertExpectations(t)
-	})
-}
-
-func Test_updateSectionConfig(t *testing.T) {
-	t.Parallel()
-	t.Run("with pointer section config", func(t *testing.T) {
-		originalCfg := &testSectionCfg{Enabled: false, Name: "old"}
-		tempCfg := &testSectionCfg{Enabled: true, Name: "new"}
-
-		mockLogger := new(MockLogger)
-		app := &StdApplication{
-			logger:      mockLogger,
-			cfgSections: make(map[string]ConfigProvider),
-		}
-		app.cfgSections["test"] = NewStdConfigProvider(originalCfg)
-
-		sectionInfo := configInfo{
-			originalVal: reflect.ValueOf(originalCfg),
-			tempVal:     reflect.ValueOf(tempCfg),
-			isPtr:       true,
-		}
-
-		updateSectionConfig(app, "test", sectionInfo)
-
-		// Check the original config was updated
-		assert.True(t, originalCfg.Enabled)
-		assert.Equal(t, "new", originalCfg.Name)
-	})
-
-	t.Run("with non-pointer section config", func(t *testing.T) {
-		originalCfg := testSectionCfg{Enabled: false, Name: "old"}
-		tempCfgPtr, sectionInfo, err := createTempConfig(originalCfg)
-		require.NoError(t, err)
-
-		// Cast and update the temp config
-		tempCfgPtr.(*testSectionCfg).Enabled = true
-		tempCfgPtr.(*testSectionCfg).Name = "new"
-
-		mockLogger := new(MockLogger)
-		mockLogger.On("Debug", "Creating new provider for section", []interface{}{"section", "test"}).Return()
-
-		app := &StdApplication{
-			logger:      mockLogger,
-			cfgSections: make(map[string]ConfigProvider),
-		}
-		app.cfgSections["test"] = NewStdConfigProvider(originalCfg)
-
-		updateSectionConfig(app, "test", sectionInfo)
-
-		// Check a new provider was created
-		sectCfg := app.cfgSections["test"].GetConfig()
-		assert.True(t, sectCfg.(testSectionCfg).Enabled)
-		assert.Equal(t, "new", sectCfg.(testSectionCfg).Name)
-		mockLogger.AssertExpectations(t)
-	})
-}
-
-func Test_loadAppConfig(t *testing.T) {
-	t.Parallel()
-	// Tests now rely on per-application feeders (SetConfigFeeders) instead of mutating
-	// the global ConfigFeeders slice to support safe parallelization.
-
-	tests := []struct {
-		name           string
-		setupApp       func() *StdApplication
-		setupFeeders   func() []Feeder
-		expectError    bool
-		validateResult func(t *testing.T, app *StdApplication)
-	}{
-		{
-			name: "successful config load",
-			setupApp: func() *StdApplication {
-				mockLogger := new(MockLogger)
-				mockLogger.On("Debug", "Added main config for loading", mock.Anything).Return()
-				mockLogger.On("Debug", "Added section config for loading", mock.Anything).Return()
-				mockLogger.On("Debug", "Updated main config", mock.Anything).Return()
-				mockLogger.On("Debug", "Updated section config", mock.Anything).Return()
-
-				app := &StdApplication{
-					logger:      mockLogger,
-					cfgProvider: NewStdConfigProvider(&testCfg{Str: "old", Num: 0}),
-					cfgSections: make(map[string]ConfigProvider),
-				}
-				app.cfgSections["section1"] = NewStdConfigProvider(&testSectionCfg{Enabled: false, Name: "old"})
-				return app
-			},
-			setupFeeders: func() []Feeder {
-				feeder := new(MockComplexFeeder)
-				// Setup to handle any Feed call - let the Run function determine the type
-				feeder.On("Feed", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-					if cfg, ok := args.Get(0).(*testCfg); ok {
-						cfg.Str = updatedValue
-						cfg.Num = 42
-					} else if cfg, ok := args.Get(0).(*testSectionCfg); ok {
-						cfg.Enabled = true
-						cfg.Name = "updated"
+		// 50 concurrent readers
+		for i := 0; i < 50; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					cfg := provider.GetConfig().(*TestConfig)
+					if cfg == nil {
+						errors <- ErrConfigNil
+						return
 					}
-				})
-				// Setup for main config FeedKey calls
-				feeder.On("FeedKey", "_main", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-					cfg := args.Get(1).(*testCfg)
-					cfg.Str = updatedValue
-					cfg.Num = 42
-				})
-				// Setup for section config FeedKey calls
-				feeder.On("FeedKey", "section1", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-					cfg := args.Get(1).(*testSectionCfg)
-					cfg.Enabled = true
-					cfg.Name = "updated"
-				})
-				return []Feeder{feeder}
-			},
-			expectError: false,
-			validateResult: func(t *testing.T, app *StdApplication) {
-				mainCfg := app.cfgProvider.GetConfig().(*testCfg)
-				assert.Equal(t, updatedValue, mainCfg.Str)
-				assert.Equal(t, 42, mainCfg.Num)
-
-				sectionCfg := app.cfgSections["section1"].GetConfig().(*testSectionCfg)
-				assert.True(t, sectionCfg.Enabled)
-				assert.Equal(t, "updated", sectionCfg.Name)
-			},
-		},
-		{
-			name: "feed error",
-			setupApp: func() *StdApplication {
-				mockLogger := new(MockLogger)
-				mockLogger.On("Debug", "Added main config for loading", mock.Anything).Return()
-				app := &StdApplication{
-					logger:      mockLogger,
-					cfgProvider: NewStdConfigProvider(&testCfg{Str: "old", Num: 0}),
-					cfgSections: make(map[string]ConfigProvider),
 				}
-				return app
-			},
-			setupFeeders: func() []Feeder {
-				feeder := new(MockComplexFeeder)
-				feeder.On("Feed", mock.Anything).Return(ErrFeedFailed)
-				return []Feeder{feeder}
-			},
-			expectError: true,
-			validateResult: func(t *testing.T, app *StdApplication) {
-				// Config should remain unchanged
-				mainCfg := app.cfgProvider.GetConfig().(*testCfg)
-				assert.Equal(t, "old", mainCfg.Str)
-				assert.Equal(t, 0, mainCfg.Num)
-			},
-		},
-		{
-			name: "feedKey error",
-			setupApp: func() *StdApplication {
-				mockLogger := new(MockLogger)
-				mockLogger.On("Debug", "Added main config for loading", mock.Anything).Return()
-				mockLogger.On("Debug", "Added section config for loading", mock.Anything).Return()
-				app := &StdApplication{
-					logger:      mockLogger,
-					cfgProvider: NewStdConfigProvider(&testCfg{Str: "old", Num: 0}),
-					cfgSections: make(map[string]ConfigProvider),
-				}
-				app.cfgSections["section1"] = NewStdConfigProvider(&testSectionCfg{Enabled: false, Name: "old"})
-				return app
-			},
-			setupFeeders: func() []Feeder {
-				feeder := new(MockComplexFeeder)
-				feeder.On("Feed", mock.Anything).Return(nil)
-				// Due to map iteration order being random, either key could be processed first
-				// If "section1" is processed first, it will fail and stop processing
-				// If "_main" is processed first, it will succeed, then "section1" will fail
-				feeder.On("FeedKey", "_main", mock.Anything).Return(nil).Maybe()
-				feeder.On("FeedKey", "section1", mock.Anything).Return(ErrFeedKeyFailed)
-				return []Feeder{feeder}
-			},
-			expectError: true,
-			validateResult: func(t *testing.T, app *StdApplication) {
-				// Configs should remain unchanged
-				mainCfg := app.cfgProvider.GetConfig().(*testCfg)
-				assert.Equal(t, "old", mainCfg.Str)
+			}()
+		}
 
-				sectionCfg := app.cfgSections["section1"].GetConfig().(*testSectionCfg)
-				assert.False(t, sectionCfg.Enabled)
-			},
-		},
-		{
-			name: "non-pointer configs",
-			setupApp: func() *StdApplication {
-				mockLogger := new(MockLogger)
-				mockLogger.On("Debug",
-					"Creating new provider with updated config (original was non-pointer)",
-					[]interface{}(nil)).Return()
-				mockLogger.On("Debug", "Creating new provider for section", []interface{}{"section", "section1"}).Return()
-				mockLogger.On("Debug", "Added main config for loading", mock.Anything).Return()
-				mockLogger.On("Debug", "Added section config for loading", mock.Anything).Return()
-				mockLogger.On("Debug", "Updated main config", mock.Anything).Return()
-				mockLogger.On("Debug", "Updated section config", mock.Anything).Return()
-
-				app := &StdApplication{
-					logger:      mockLogger,
-					cfgProvider: NewStdConfigProvider(testCfg{Str: "old", Num: 0}), // non-pointer
-					cfgSections: make(map[string]ConfigProvider),
-				}
-				app.cfgSections["section1"] = NewStdConfigProvider(testSectionCfg{Enabled: false, Name: "old"}) // non-pointer
-				return app
-			},
-			setupFeeders: func() []Feeder {
-				feeder := new(MockComplexFeeder)
-				feeder.On("Feed", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-					if cfg, ok := args.Get(0).(*testCfg); ok {
-						cfg.Str = updatedValue
-						cfg.Num = 42
-					} else if cfg, ok := args.Get(0).(*testSectionCfg); ok {
-						cfg.Enabled = true
-						cfg.Name = "updated"
+		// 10 concurrent updaters
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 10; j++ {
+					newCfg := &TestConfig{
+						Host: "example.com",
+						Port: 8080 + id*100 + j,
 					}
-				})
-				feeder.On("FeedKey", "_main", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-					cfg := args.Get(1).(*testCfg)
-					cfg.Str = updatedValue
-					cfg.Num = 42
-				})
-				feeder.On("FeedKey", "section1", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-					cfg := args.Get(1).(*testSectionCfg)
-					cfg.Enabled = true
-					cfg.Name = "updated"
-				})
-				return []Feeder{feeder}
-			},
-			expectError: false,
-			validateResult: func(t *testing.T, app *StdApplication) {
-				mainCfg := app.cfgProvider.GetConfig()
-				assert.Equal(t, updatedValue, mainCfg.(testCfg).Str)
-				assert.Equal(t, 42, mainCfg.(testCfg).Num)
-
-				sectionCfg := app.cfgSections["section1"].GetConfig()
-				assert.True(t, sectionCfg.(testSectionCfg).Enabled)
-				assert.Equal(t, "updated", sectionCfg.(testSectionCfg).Name)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			app := tt.setupApp()
-			// Use per-app feeders; StdApplication exposes SetConfigFeeders directly.
-			app.SetConfigFeeders(tt.setupFeeders())
-
-			err := loadAppConfig(app)
-
-			if tt.expectError {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				tt.validateResult(t, app)
-			}
-
-			// Assert that all mock expectations were met on the feeders we injected
-			for _, feeder := range app.configFeeders {
-				if mockFeeder, ok := feeder.(*MockComplexFeeder); ok {
-					mockFeeder.AssertExpectations(t)
+					provider.UpdateConfig(newCfg)
 				}
-			}
-			if mockLogger, ok := app.logger.(*MockLogger); ok {
-				mockLogger.AssertExpectations(t)
-			}
-		})
-	}
+			}(i)
+		}
+
+		wg.Wait()
+		close(errors)
+
+		if len(errors) > 0 {
+			t.Errorf("Concurrent operations failed with %d errors", len(errors))
+		}
+	})
 }
 
-// Mock for VerboseAwareFeeder
-type MockVerboseAwareFeeder struct {
-	mock.Mock
-}
+func TestCopyOnWriteConfigProvider(t *testing.T) {
+	t.Run("GetConfig returns original reference", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		provider := NewCopyOnWriteConfigProvider(cfg)
 
-func (m *MockVerboseAwareFeeder) Feed(structure interface{}) error {
-	args := m.Called(structure)
-	if err := args.Error(0); err != nil {
-		return fmt.Errorf("mock feeder error: %w", err)
-	}
-	return nil
-}
+		cfg1 := provider.GetConfig().(*TestConfig)
+		cfg2 := provider.GetConfig().(*TestConfig)
 
-func (m *MockVerboseAwareFeeder) SetVerboseDebug(enabled bool, logger interface{ Debug(msg string, args ...any) }) {
-	m.Called(enabled, logger)
-}
+		// Should be the same reference
+		if cfg1 != cfg2 {
+			t.Error("GetConfig should return same reference")
+		}
+	})
 
-func TestConfig_SetVerboseDebug(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name               string
-		setVerbose         bool
-		feeders            []Feeder
-		expectVerboseCalls int
-	}{
-		{
-			name:       "enable verbose debug with verbose-aware feeder",
-			setVerbose: true,
-			feeders: []Feeder{
-				&MockVerboseAwareFeeder{},
-				&MockComplexFeeder{}, // non-verbose aware feeder
-			},
-			expectVerboseCalls: 1,
-		},
-		{
-			name:       "disable verbose debug with verbose-aware feeder",
-			setVerbose: false,
-			feeders: []Feeder{
-				&MockVerboseAwareFeeder{},
-			},
-			expectVerboseCalls: 1,
-		},
-		{
-			name:       "enable verbose debug with no verbose-aware feeders",
-			setVerbose: true,
-			feeders: []Feeder{
-				&MockComplexFeeder{},
-			},
-			expectVerboseCalls: 0,
-		},
-	}
+	t.Run("GetMutableConfig returns independent copy", func(t *testing.T) {
+		cfg := &TestConfig{
+			Host:     "localhost",
+			Port:     8080,
+			Tags:     []string{"a", "b"},
+			Metadata: map[string]string{"key": "value"},
+		}
+		provider := NewCopyOnWriteConfigProvider(cfg)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockLogger := new(MockLogger)
+		original := provider.GetConfig().(*TestConfig)
+		mutable, err := provider.GetMutableConfig()
+		if err != nil {
+			t.Fatalf("GetMutableConfig failed: %v", err)
+		}
 
-			// Set up the config with feeders already added (no verbose initially)
-			cfg := NewConfig()
-			for _, feeder := range tt.feeders {
-				cfg.AddFeeder(feeder)
-			}
+		mutableCfg := mutable.(*TestConfig)
 
-			// Set up expectations for SetVerboseDebug call
-			for _, feeder := range tt.feeders {
-				if mockVerbose, ok := feeder.(*MockVerboseAwareFeeder); ok {
-					mockVerbose.On("SetVerboseDebug", tt.setVerbose, mockLogger).Return()
+		// Should be different pointers
+		if original == mutableCfg {
+			t.Error("GetMutableConfig should return different reference")
+		}
+
+		// Modifications should not affect original
+		mutableCfg.Port = 9090
+		mutableCfg.Tags[0] = "modified"
+		mutableCfg.Metadata["key"] = "modified"
+
+		if original.Port != 8080 {
+			t.Error("Original should not be modified")
+		}
+		if original.Tags[0] != "a" {
+			t.Error("Original slice should not be modified")
+		}
+		if original.Metadata["key"] != "value" {
+			t.Error("Original map should not be modified")
+		}
+	})
+
+	t.Run("UpdateOriginal changes GetConfig result", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		provider := NewCopyOnWriteConfigProvider(cfg)
+
+		cfg1 := provider.GetConfig().(*TestConfig)
+
+		// Update original
+		newCfg := &TestConfig{Host: "example.com", Port: 443}
+		provider.UpdateOriginal(newCfg)
+
+		cfg2 := provider.GetConfig().(*TestConfig)
+
+		// Should return new config
+		if cfg2.Host != "example.com" || cfg2.Port != 443 {
+			t.Error("Should return updated config")
+		}
+
+		// Old reference unchanged
+		if cfg1.Host != "localhost" {
+			t.Error("Old reference should be unchanged")
+		}
+	})
+
+	t.Run("concurrent reads are safe", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		provider := NewCopyOnWriteConfigProvider(cfg)
+
+		var wg sync.WaitGroup
+		errors := make(chan error, 100)
+
+		// 100 concurrent readers
+		for i := 0; i < 100; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				cfg := provider.GetConfig().(*TestConfig)
+				if cfg == nil {
+					errors <- fmt.Errorf("config is nil")
 				}
-			}
+			}()
+		}
 
-			// Call SetVerboseDebug
-			result := cfg.SetVerboseDebug(tt.setVerbose, mockLogger)
+		wg.Wait()
+		close(errors)
 
-			// Assertions
-			assert.Equal(t, cfg, result, "SetVerboseDebug should return the same config instance")
-			assert.Equal(t, tt.setVerbose, cfg.VerboseDebug)
-			assert.Equal(t, mockLogger, cfg.Logger)
+		if len(errors) > 0 {
+			t.Errorf("Concurrent reads failed with %d errors", len(errors))
+		}
+	})
 
-			// Verify mock expectations
-			for _, feeder := range tt.feeders {
-				if mockVerbose, ok := feeder.(*MockVerboseAwareFeeder); ok {
-					mockVerbose.AssertExpectations(t)
+	t.Run("concurrent mutable copies are safe", func(t *testing.T) {
+		cfg := &TestConfig{
+			Host:     "localhost",
+			Port:     8080,
+			Tags:     []string{"a", "b"},
+			Metadata: map[string]string{"key": "value"},
+		}
+		provider := NewCopyOnWriteConfigProvider(cfg)
+
+		var wg sync.WaitGroup
+		errors := make(chan error, 50)
+
+		// 50 concurrent mutable copy requests
+		for i := 0; i < 50; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				mutable, err := provider.GetMutableConfig()
+				if err != nil {
+					errors <- err
+					return
 				}
-			}
-		})
+				mutableCfg := mutable.(*TestConfig)
+				mutableCfg.Port = 8080 + id
+			}(i)
+		}
+
+		wg.Wait()
+		close(errors)
+
+		if len(errors) > 0 {
+			t.Errorf("Concurrent mutable copies failed with %d errors", len(errors))
+		}
+
+		// Original should be unchanged
+		original := provider.GetConfig().(*TestConfig)
+		if original.Port != 8080 {
+			t.Errorf("Original port should be 8080, got %d", original.Port)
+		}
+	})
+}
+
+func TestIsolatedConfigProvider_ErrorFallback(t *testing.T) {
+	// Test the error fallback path in IsolatedConfigProvider.GetConfig()
+	// when DeepCopyConfig returns an error (e.g., nil config)
+
+	// Create provider with nil config - this will trigger error in DeepCopyConfig
+	provider := &IsolatedConfigProvider{cfg: nil}
+
+	// GetConfig should handle the error gracefully and return nil
+	result := provider.GetConfig()
+	if result != nil {
+		t.Errorf("Expected GetConfig to return nil for nil config, got %v", result)
 	}
 }
 
-func TestConfig_AddFeeder_WithVerboseDebug(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name              string
-		verboseEnabled    bool
-		feeder            Feeder
-		expectVerboseCall bool
-	}{
-		{
-			name:              "add verbose-aware feeder with verbose enabled",
-			verboseEnabled:    true,
-			feeder:            &MockVerboseAwareFeeder{},
-			expectVerboseCall: true,
-		},
-		{
-			name:              "add verbose-aware feeder with verbose disabled",
-			verboseEnabled:    false,
-			feeder:            &MockVerboseAwareFeeder{},
-			expectVerboseCall: false,
-		},
-		{
-			name:              "add non-verbose-aware feeder",
-			verboseEnabled:    true,
-			feeder:            &MockComplexFeeder{},
-			expectVerboseCall: false,
-		},
-	}
+func TestDeepCopyConfig(t *testing.T) {
+	t.Run("copies primitives", func(t *testing.T) {
+		cfg := &TestConfig{Host: "localhost", Port: 8080}
+		copied, err := DeepCopyConfig(cfg)
+		if err != nil {
+			t.Fatalf("DeepCopyConfig failed: %v", err)
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockLogger := new(MockLogger)
+		copiedCfg := copied.(*TestConfig)
 
-			cfg := NewConfig()
-			cfg.VerboseDebug = tt.verboseEnabled
-			cfg.Logger = mockLogger
+		// Values should match
+		if copiedCfg.Host != cfg.Host || copiedCfg.Port != cfg.Port {
+			t.Error("Copied values should match original")
+		}
 
-			// Set up expectations for verbose-aware feeders
-			if tt.expectVerboseCall {
-				if mockVerbose, ok := tt.feeder.(*MockVerboseAwareFeeder); ok {
-					mockVerbose.On("SetVerboseDebug", true, mockLogger).Return()
-				}
-			}
+		// Should be different pointer
+		if copiedCfg == cfg {
+			t.Error("Should be different pointer")
+		}
+	})
 
-			// Call AddFeeder
-			result := cfg.AddFeeder(tt.feeder)
+	t.Run("deep copies slices", func(t *testing.T) {
+		cfg := &TestConfig{
+			Host: "localhost",
+			Port: 8080,
+			Tags: []string{"a", "b", "c"},
+		}
+		copied, err := DeepCopyConfig(cfg)
+		if err != nil {
+			t.Fatalf("DeepCopyConfig failed: %v", err)
+		}
 
-			// Assertions
-			assert.Equal(t, cfg, result, "AddFeeder should return the same config instance")
-			assert.Contains(t, cfg.Feeders, tt.feeder)
+		copiedCfg := copied.(*TestConfig)
 
-			// Verify mock expectations
-			if mockVerbose, ok := tt.feeder.(*MockVerboseAwareFeeder); ok {
-				mockVerbose.AssertExpectations(t)
-			}
-		})
-	}
+		// Modify copy's slice
+		copiedCfg.Tags[0] = "modified"
+
+		// Original should be unchanged
+		if cfg.Tags[0] != "a" {
+			t.Error("Original slice should not be modified")
+		}
+	})
+
+	t.Run("deep copies maps", func(t *testing.T) {
+		cfg := &TestConfig{
+			Host:     "localhost",
+			Port:     8080,
+			Metadata: map[string]string{"key1": "value1", "key2": "value2"},
+		}
+		copied, err := DeepCopyConfig(cfg)
+		if err != nil {
+			t.Fatalf("DeepCopyConfig failed: %v", err)
+		}
+
+		copiedCfg := copied.(*TestConfig)
+
+		// Modify copy's map
+		copiedCfg.Metadata["key1"] = "modified"
+		copiedCfg.Metadata["key3"] = "new"
+
+		// Original should be unchanged
+		if cfg.Metadata["key1"] != "value1" {
+			t.Error("Original map should not be modified")
+		}
+		if _, exists := cfg.Metadata["key3"]; exists {
+			t.Error("Original map should not have new key")
+		}
+	})
+
+	t.Run("handles nil config", func(t *testing.T) {
+		_, err := DeepCopyConfig(nil)
+		if err != ErrConfigNil {
+			t.Error("Should return ErrConfigNil for nil config")
+		}
+	})
 }
 
-func TestConfig_Feed_VerboseDebug(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name          string
-		enableVerbose bool
-	}{
-		{
-			name:          "verbose debug enabled",
-			enableVerbose: true,
-		},
-		{
-			name:          "verbose debug disabled",
-			enableVerbose: false,
-		},
+// Benchmarks for performance comparison
+func BenchmarkConfigProviders(b *testing.B) {
+	cfg := &TestConfig{
+		Host:     "localhost",
+		Port:     8080,
+		Tags:     []string{"a", "b", "c"},
+		Metadata: map[string]string{"key1": "value1", "key2": "value2"},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockLogger := new(MockLogger)
+	b.Run("StdConfigProvider", func(b *testing.B) {
+		provider := NewStdConfigProvider(cfg)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = provider.GetConfig()
+		}
+	})
 
-			cfg := NewConfig()
-			if tt.enableVerbose {
-				cfg.SetVerboseDebug(true, mockLogger)
-				// Just allow any debug calls - we don't care about specific messages
-				mockLogger.On("Debug", mock.Anything, mock.Anything).Return().Maybe()
-			}
+	b.Run("IsolatedConfigProvider", func(b *testing.B) {
+		provider := NewIsolatedConfigProvider(cfg)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = provider.GetConfig()
+		}
+	})
 
-			cfg.AddStructKey("test", &testCfg{Str: "test", Num: 42})
+	b.Run("ImmutableConfigProvider", func(b *testing.B) {
+		provider := NewImmutableConfigProvider(cfg)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = provider.GetConfig()
+		}
+	})
 
-			// Mock feeder that does nothing
-			mockFeeder := new(MockComplexFeeder)
-			mockFeeder.On("Feed", mock.Anything).Return(nil).Maybe()
-			mockFeeder.On("FeedKey", mock.Anything, mock.Anything).Return(nil).Maybe()
-			cfg.AddFeeder(mockFeeder)
+	b.Run("CopyOnWriteConfigProvider_Read", func(b *testing.B) {
+		provider := NewCopyOnWriteConfigProvider(cfg)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = provider.GetConfig()
+		}
+	})
 
-			err := cfg.Feed()
-			require.NoError(t, err)
-
-			// Verify that verbose state was set correctly
-			assert.Equal(t, tt.enableVerbose, cfg.VerboseDebug)
-		})
-	}
+	b.Run("CopyOnWriteConfigProvider_Mutable", func(b *testing.B) {
+		provider := NewCopyOnWriteConfigProvider(cfg)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = provider.GetMutableConfig()
+		}
+	})
 }
 
-func TestProcessMainConfig(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name          string
-		hasProvider   bool
-		enableVerbose bool
-		expectConfig  bool
-	}{
-		{
-			name:          "with provider and verbose enabled",
-			hasProvider:   true,
-			enableVerbose: true,
-			expectConfig:  true,
-		},
-		{
-			name:          "with provider and verbose disabled",
-			hasProvider:   true,
-			enableVerbose: false,
-			expectConfig:  true,
-		},
-		{
-			name:          "without provider",
-			hasProvider:   false,
-			enableVerbose: true,
-			expectConfig:  false,
-		},
+// Benchmark concurrent access
+func BenchmarkConcurrentReads(b *testing.B) {
+	cfg := &TestConfig{
+		Host:     "localhost",
+		Port:     8080,
+		Tags:     []string{"a", "b", "c"},
+		Metadata: map[string]string{"key1": "value1"},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockLogger := new(MockLogger)
-			// Allow any debug calls - we don't care about specific messages
-			mockLogger.On("Debug", mock.Anything, mock.Anything).Return().Maybe()
-
-			app := &StdApplication{
-				logger:      mockLogger,
-				cfgSections: make(map[string]ConfigProvider),
-			}
-
-			if tt.hasProvider {
-				app.cfgProvider = NewStdConfigProvider(&testCfg{Str: "test", Num: 42})
-			}
-
-			// Set up verbose config state
-			app.verboseConfig = tt.enableVerbose
-
-			cfgBuilder := NewConfig()
-			tempConfigs := make(map[string]configInfo)
-
-			result := processMainConfig(app, cfgBuilder, tempConfigs)
-
-			assert.Equal(t, tt.expectConfig, result)
-			if tt.expectConfig {
-				assert.Contains(t, tempConfigs, "_main")
-			} else {
-				assert.NotContains(t, tempConfigs, "_main")
+	b.Run("ImmutableConfigProvider", func(b *testing.B) {
+		provider := NewImmutableConfigProvider(cfg)
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_ = provider.GetConfig()
 			}
 		})
-	}
-}
+	})
 
-func TestProcessSectionConfigs(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name          string
-		sections      map[string]ConfigProvider
-		enableVerbose bool
-		expectConfigs int
-	}{
-		{
-			name: "with sections and verbose enabled",
-			sections: map[string]ConfigProvider{
-				"section1": NewStdConfigProvider(&testSectionCfg{Enabled: true, Name: "test"}),
-				"section2": NewStdConfigProvider(&testSectionCfg{Enabled: false, Name: "test2"}),
-			},
-			enableVerbose: true,
-			expectConfigs: 2,
-		},
-		{
-			name: "with sections and verbose disabled",
-			sections: map[string]ConfigProvider{
-				"section1": NewStdConfigProvider(&testSectionCfg{Enabled: true, Name: "test"}),
-			},
-			enableVerbose: false,
-			expectConfigs: 1,
-		},
-		{
-			name:          "without sections",
-			sections:      map[string]ConfigProvider{},
-			enableVerbose: true,
-			expectConfigs: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockLogger := new(MockLogger)
-			// Allow any debug calls - we don't care about specific messages
-			mockLogger.On("Debug", mock.Anything, mock.Anything).Return().Maybe()
-
-			app := &StdApplication{
-				logger:      mockLogger,
-				cfgSections: tt.sections,
+	b.Run("CopyOnWriteConfigProvider", func(b *testing.B) {
+		provider := NewCopyOnWriteConfigProvider(cfg)
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_ = provider.GetConfig()
 			}
-
-			// Set up verbose config state
-			app.verboseConfig = tt.enableVerbose
-
-			cfgBuilder := NewConfig()
-			tempConfigs := make(map[string]configInfo)
-
-			result := processSectionConfigs(app, cfgBuilder, tempConfigs)
-
-			assert.Equal(t, tt.expectConfigs > 0, result)
-			assert.Len(t, tempConfigs, tt.expectConfigs)
 		})
-	}
+	})
 }

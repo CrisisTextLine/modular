@@ -127,15 +127,14 @@ database:
         enabled: true
         region: "us-east-1"                    # AWS region where RDS instance is located
         db_user: "iamuser"                     # Database username for IAM authentication
-        token_refresh_interval: 600            # Token refresh interval in seconds (default: 600)
 ```
 
 #### AWS IAM Auth Configuration Options
 
-- `enabled`: Boolean flag to enable AWS IAM authentication
+- `enabled`: Boolean flag to enable AWS IAM authentication (required)
 - `region`: AWS region where the RDS instance is located (required)
 - `db_user`: Database username configured for IAM authentication (required)
-- `token_refresh_interval`: How often to refresh the IAM token in seconds (default: 600 seconds / 10 minutes)
+- `connection_timeout`: Timeout for database connection tests in seconds (default: 5 seconds)
 
 #### Prerequisites for AWS IAM Authentication
 
@@ -181,23 +180,78 @@ database:
 
 #### How It Works
 
-1. When the database module starts, it checks if AWS IAM authentication is enabled for each connection.
-2. If enabled, it creates an AWS IAM token provider using the specified region and database user.
-3. The token provider generates an initial IAM authentication token using the AWS SDK.
-4. The original DSN is modified to use this token as the password.
-5. A background goroutine refreshes the token at the specified interval (default: 10 minutes).
-6. Tokens are automatically refreshed before they expire (RDS IAM tokens are valid for 15 minutes).
+The database module uses the [go-db-credential-refresh](https://github.com/davepgreene/go-db-credential-refresh) library to handle AWS IAM token management automatically:
+
+1. **Initialization**: When the database module starts with AWS IAM authentication enabled, it creates a credential store that manages IAM tokens.
+2. **Automatic Token Generation**: The credential store generates IAM authentication tokens on-demand using the AWS SDK.
+3. **Transparent Token Refresh**: When a connection is established, the connector automatically fetches a fresh token if needed.
+4. **Authentication Error Detection**: If a database operation fails due to authentication errors, the connector automatically:
+   - Detects the authentication failure
+   - Refreshes the IAM token
+   - Retries the connection with the new token
+5. **No Error Exposure**: Token refresh errors are handled internally, ensuring database clients never see token-related failures.
+6. **Backward Compatibility**: For applications that previously passed DSN with password/token placeholders, the module automatically strips any existing passwords from the DSN before processing. This ensures a smooth migration path from the old manual token refresh approach.
+
+This approach eliminates the manual token refresh complexity and ensures connections always use valid credentials without exposing refresh errors to application code.
+
+#### Automatic Credential Refresh
+
+The go-db-credential-refresh library provides several key benefits:
+
+1. **On-Demand Token Refresh**: Tokens are refreshed when needed, not on a fixed schedule.
+2. **Authentication Error Recovery**: The connector automatically detects authentication failures and retries with fresh tokens.
+3. **Connection-Level Management**: Each new connection gets a fresh token, eliminating stale credential issues.
+4. **No Background Goroutines**: Unlike manual refresh approaches, there are no background processes to manage.
+5. **Retry Logic**: Built-in retry logic handles transient AWS API failures gracefully.
+
+This design prevents "authentication failed" errors that could occur with manual token management and ensures reliable database connectivity.
+
+**Configuration Example:**
+```yaml
+database:
+  connections:
+    postgres_rds:
+      driver: "postgres"
+      dsn: "postgres://iamuser@mydb.cluster-xyz.us-east-1.rds.amazonaws.com:5432/mydb?sslmode=require"
+      connection_max_lifetime: 840s   # 14 minutes (let tokens expire naturally at 15 minutes)
+      aws_iam_auth:
+        enabled: true
+        region: "us-east-1"
+        db_user: "iamuser"
+```
+
+**Best Practices:**
+- Set `connection_max_lifetime` to be slightly less than 15 minutes (the IAM token lifetime) to allow connections to naturally expire and be recreated with fresh tokens.
+- The library handles authentication errors automatically, so you don't need to worry about manual token refresh intervals.
+- The automatic retry logic ensures that transient authentication failures are handled gracefully without impacting your application.
+
+#### Migrating from Previous Versions
+
+If you're upgrading from a previous version that used manual token refresh, the migration is straightforward:
+
+**Configuration Changes:**
+- Remove `token_refresh_interval` from your configuration (no longer used)
+- Remove `connection_close_grace_period` from your configuration (no longer used)
+
+**DSN Format:**
+The module now supports both approaches for backward compatibility:
+- **Old approach** (still supported): `postgres://iamuser:token_placeholder@host:5432/db`
+- **New approach** (recommended): `postgres://iamuser@host:5432/db`
+
+If your application currently passes a DSN with a password or token placeholder, the module will automatically strip it and handle credentials internally. This means you don't need to change your DSN format immediately, but it's recommended to remove any password/token placeholders as they are no longer needed.
+
+**Code Changes:**
+No code changes are required. The module API remains unchanged and the new implementation is fully backward compatible.
 
 #### Dependencies
 
-AWS IAM authentication requires these additional dependencies:
-```bash
-go get github.com/aws/aws-sdk-go-v2/aws
-go get github.com/aws/aws-sdk-go-v2/config
-go get github.com/aws/aws-sdk-go-v2/feature/rds/auth
-```
+AWS IAM authentication uses the following libraries:
+- `github.com/davepgreene/go-db-credential-refresh` - Automatic credential refresh handling
+- `github.com/davepgreene/go-db-credential-refresh/store/awsrds` - AWS RDS IAM token store
+- `github.com/aws/aws-sdk-go-v2/config` - AWS SDK configuration
+- `github.com/aws/aws-sdk-go-v2/feature/rds/auth` - RDS IAM authentication token generation
 
-These are automatically added when you use the database module with AWS IAM authentication enabled.
+These dependencies are automatically included when you use the database module with AWS IAM authentication enabled.
 
 ### Using the Database Service
 

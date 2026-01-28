@@ -50,6 +50,7 @@ type YamlFeeder struct {
 		Debug(msg string, args ...any)
 	}
 	fieldTracker FieldTracker
+	priority     int
 }
 
 // NewYamlFeeder creates a new YamlFeeder that reads from the specified YAML file
@@ -59,7 +60,21 @@ func NewYamlFeeder(filePath string) *YamlFeeder {
 		verboseDebug: false,
 		logger:       nil,
 		fieldTracker: nil,
+		priority:     0, // Default priority
 	}
+}
+
+// WithPriority sets the priority for this feeder and returns the feeder for chaining.
+// Higher priority values mean the feeder will be applied later, allowing it to override
+// values from lower priority feeders.
+func (y *YamlFeeder) WithPriority(priority int) *YamlFeeder {
+	y.priority = priority
+	return y
+}
+
+// Priority returns the priority value for this feeder.
+func (y *YamlFeeder) Priority() int {
+	return y.priority
 }
 
 // SetVerboseDebug enables or disables verbose debug logging

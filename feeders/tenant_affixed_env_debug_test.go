@@ -9,8 +9,8 @@ import (
 func TestTenantAffixedEnvFeeder_Debug(t *testing.T) {
 	// Set up multiple environment variables to test
 	envVars := []string{
-		"APP_test123__NAME__PROD",
-		"APP_TEST123__NAME__PROD",
+		"APP_test123_NAME_PROD",
+		"APP_TEST123_NAME_PROD",
 		"APP_test123_NAME_PROD",
 		"APP_TEST123_NAME_PROD",
 	}
@@ -40,13 +40,13 @@ func TestTenantAffixedEnvFeeder_Debug(t *testing.T) {
 	fmt.Printf("Final prefix: %s\n", feeder.Prefix)
 	fmt.Printf("Final suffix: %s\n", feeder.Suffix)
 
-	// Expected env var name: APP_test123_ + _ + NAME + _ + _PROD = APP_test123__NAME__PROD
-	expectedEnvVar := "APP_test123__NAME__PROD"
+	// Expected env var name: APP_test123_ + NAME + _PROD = APP_TEST123_NAME_PROD (uppercased, framework no longer adds underscores)
+	expectedEnvVar := "APP_TEST123_NAME_PROD"
 	fmt.Printf("Expected env var name: %s\n", expectedEnvVar)
 	fmt.Printf("Actual value in env: %s\n", os.Getenv(expectedEnvVar))
 
 	// But AffixedEnvFeeder does ToUpper on the env tag, so let's check uppercase version
-	expectedEnvVarUpper := "APP_test123__NAME__PROD"
+	expectedEnvVarUpper := "APP_TEST123_NAME_PROD"
 	fmt.Printf("Expected env var name (upper): %s\n", expectedEnvVarUpper)
 	fmt.Printf("Actual value in env (upper): %s\n", os.Getenv(expectedEnvVarUpper))
 

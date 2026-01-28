@@ -1,0 +1,20 @@
+name: "NATS EventBus Demo"
+environment: "development"
+
+eventbus:
+  engines:
+    - name: nats-primary
+      type: nats
+      config:
+        url: "nats://localhost:4222"
+        connectionName: "nats-eventbus-demo"
+        maxReconnects: 10
+        reconnectWait: 2
+        allowReconnect: true
+        pingInterval: 20
+        maxPingsOut: 2
+        subscribeTimeout: 5
+  routing:
+    - topics:
+        - "*"
+      engine: nats-primary

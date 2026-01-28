@@ -49,10 +49,9 @@ func TestSpecialCharacterPasswordDSNParsingWithAWSIAM(t *testing.T) {
 		Driver: "postgres",
 		DSN:    issueExampleDSN,
 		AWSIAMAuth: &AWSIAMAuthConfig{
-			Enabled:              true,
-			Region:               "us-east-1",
-			DBUser:               "someuser",
-			TokenRefreshInterval: 300,
+			Enabled: true,
+			Region:  "us-east-1",
+			DBUser:  "someuser",
 		},
 	}
 

@@ -230,6 +230,24 @@ func (m *MockApplication) GetObservers() []modular.ObserverInfo {
 	return info
 }
 
+// GetModule returns a module by name (mock implementation)
+func (m *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+
+// GetAllModules returns all registered modules (mock implementation)
+func (m *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+
+// StartTime returns the application start time (mock implementation)
+func (m *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+// OnConfigLoaded registers a config loaded hook (mock implementation)
+func (m *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
+
 // MockAppConfig is a simple configuration struct for testing
 type mockAppConfig struct {
 	Name    string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -202,3 +203,13 @@ func (m *mockApplicationForNilSubjectTest) GetServiceEntry(serviceName string) (
 func (m *mockApplicationForNilSubjectTest) GetServicesByInterface(interfaceType reflect.Type) []*ServiceRegistryEntry {
 	return nil
 }
+func (m *mockApplicationForNilSubjectTest) StartTime() time.Time {
+	return time.Time{}
+}
+func (m *mockApplicationForNilSubjectTest) GetModule(name string) Module {
+	return nil
+}
+func (m *mockApplicationForNilSubjectTest) GetAllModules() map[string]Module {
+	return nil
+}
+func (m *mockApplicationForNilSubjectTest) OnConfigLoaded(hook func(Application) error) {}

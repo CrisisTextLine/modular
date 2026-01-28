@@ -295,7 +295,7 @@ Feature: Reverse Proxy Module
     Given I have a reverse proxy with global request timeout configured
     When backend requests exceed the timeout
     Then requests should be terminated after timeout
-    And appropriate error responses should be returned
+    And appropriate timeout error responses should be returned
 
   Scenario: Per-route timeout overrides
     Given I have a reverse proxy with per-route timeout overrides configured

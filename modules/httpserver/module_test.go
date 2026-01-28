@@ -119,6 +119,20 @@ func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*
 	return []*modular.ServiceRegistryEntry{}
 }
 
+func (m *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+
+func (m *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+
+func (m *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+func (m *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
+
 // MockLogger is a mock implementation of the modular.Logger interface
 type MockLogger struct {
 	mock.Mock

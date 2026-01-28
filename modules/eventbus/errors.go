@@ -9,4 +9,7 @@ import (
 var (
 	// ErrNoSubjectForEventEmission is returned when trying to emit events without a subject
 	ErrNoSubjectForEventEmission = errors.New("no subject available for event emission")
+
+	// ErrNATSConnectionNotEstablished is returned when NATS connection is not established
+	ErrNATSConnectionNotEstablished = errors.New("NATS connection is not established")
 )

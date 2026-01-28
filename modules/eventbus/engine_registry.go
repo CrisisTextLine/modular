@@ -338,6 +338,9 @@ func init() {
 	// Register Kinesis engine
 	RegisterEngine("kinesis", NewKinesisEventBus)
 
+	// Register NATS engine
+	RegisterEngine("nats", NewNatsEventBus)
+
 	// Register custom memory engine
 	RegisterEngine("custom", NewCustomMemoryEventBus)
 }

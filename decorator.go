@@ -3,6 +3,7 @@ package modular
 import (
 	"context"
 	"reflect"
+	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 )
@@ -122,6 +123,19 @@ func (d *BaseApplicationDecorator) GetServicesByInterface(interfaceType reflect.
 	return d.inner.GetServicesByInterface(interfaceType)
 }
 
+func (d *BaseApplicationDecorator) StartTime() time.Time {
+	return d.inner.StartTime()
+}
+
+// Module access methods
+func (d *BaseApplicationDecorator) GetModule(name string) Module {
+	return d.inner.GetModule(name)
+}
+
+func (d *BaseApplicationDecorator) GetAllModules() map[string]Module {
+	return d.inner.GetAllModules()
+}
+
 // TenantAware methods - if inner supports TenantApplication interface
 func (d *BaseApplicationDecorator) GetTenantService() (TenantService, error) {
 	if tenantApp, ok := d.inner.(TenantApplication); ok {
@@ -171,4 +185,9 @@ func (d *BaseApplicationDecorator) GetObservers() []ObserverInfo {
 		return observableApp.GetObservers()
 	}
 	return nil
+}
+
+// OnConfigLoaded forwards the hook registration to the inner application
+func (d *BaseApplicationDecorator) OnConfigLoaded(hook func(Application) error) {
+	d.inner.OnConfigLoaded(hook)
 }

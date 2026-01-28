@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/go-chi/chi/v5" // Import chi for router type assertion
@@ -94,6 +95,16 @@ func (m *MockApplication) GetService(name string, target interface{}) error {
 	case *FeatureFlagEvaluator:
 		if evaluator, ok := service.(FeatureFlagEvaluator); ok {
 			*ptr = evaluator
+			return nil
+		}
+	case **ReverseProxyModule:
+		if reverseProxy, ok := service.(*ReverseProxyModule); ok {
+			*ptr = reverseProxy
+			return nil
+		}
+	case **testRouter:
+		if testRouter, ok := service.(*testRouter); ok {
+			*ptr = testRouter
 			return nil
 		}
 	case *interface{}:
@@ -193,6 +204,24 @@ func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*
 	}
 	return entries
 }
+
+// GetModule returns a module by name (mock implementation)
+func (m *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+
+// GetAllModules returns all registered modules (mock implementation)
+func (m *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+
+// StartTime returns the application start time (mock implementation)
+func (m *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+// OnConfigLoaded registers a config loaded hook (mock implementation)
+func (m *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
 
 // NewStdConfigProvider is a simple mock implementation of modular.ConfigProvider
 func NewStdConfigProvider(config interface{}) modular.ConfigProvider {
@@ -391,4 +420,9 @@ func (m *MockLogger) GetErrorMessages() []string {
 	out := make([]string, len(m.ErrorMessages))
 	copy(out, m.ErrorMessages)
 	return out
+}
+
+// With returns the same logger instance (simplified for testing)
+func (m *MockLogger) With(keysAndValues ...interface{}) modular.Logger {
+	return m
 }

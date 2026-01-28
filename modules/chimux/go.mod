@@ -3,15 +3,15 @@ module github.com/CrisisTextLine/modular/modules/chimux
 go 1.25
 
 require (
-	github.com/CrisisTextLine/modular v1.11.1
-	github.com/cloudevents/sdk-go/v2 v2.16.1
+	github.com/CrisisTextLine/modular v1.11.11
+	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/cucumber/godog v0.15.1
 	github.com/go-chi/chi/v5 v5.2.2
-	github.com/stretchr/testify v1.11.0
+	github.com/stretchr/testify v1.11.1
 )
 
 require (
-	github.com/BurntSushi/toml v1.5.0 // indirect
+	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/cucumber/gherkin/go/v26 v26.2.0 // indirect
 	github.com/cucumber/messages/go/v21 v21.0.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect

@@ -46,3 +46,5 @@ coverage.txt
 *.backup
 *.bak
 *~
+*.deprecated
+/.claude/settings.local.json

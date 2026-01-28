@@ -200,6 +200,103 @@ func TestRunExtractContract_InvalidDirectory(t *testing.T) {
 	}
 }
 
+func TestExtractCommand_PathHandling(t *testing.T) {
+	// This test ensures that paths like "modules/scheduler" are treated as local directories,
+	// not as Go package import paths. This was a bug where "modules/scheduler" was being
+	// looked up in GOROOT/src instead of being treated as a relative path.
+
+	// Create a temporary directory structure to simulate modules/scheduler
+	tmpDir, err := os.MkdirTemp("", "path-test-")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create nested directory: testdir/modules/scheduler
+	modulesDir := filepath.Join(tmpDir, "modules")
+	schedulerDir := filepath.Join(modulesDir, "scheduler")
+	if err := os.MkdirAll(schedulerDir, 0755); err != nil {
+		t.Fatalf("Failed to create nested directories: %v", err)
+	}
+
+	// Create a simple Go file in the scheduler directory
+	testCode := `package scheduler
+
+// Worker is a test interface
+type Worker interface {
+	Run() error
+}
+
+// NewScheduler creates a scheduler
+func NewScheduler() *Scheduler {
+	return &Scheduler{}
+}
+
+// Scheduler manages scheduled tasks
+type Scheduler struct{}
+`
+
+	testFile := filepath.Join(schedulerDir, "scheduler.go")
+	if err := os.WriteFile(testFile, []byte(testCode), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	// Change to the temp directory so we can use a relative path
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+
+	// Test 1: Path with separator (modules/scheduler) should be treated as local directory
+	t.Run("PathWithSeparator", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		err := runExtractContractWithFlags(cmd, []string{"modules/scheduler"}, "", false, false, false, false)
+		if err != nil {
+			t.Errorf("Failed to extract contract from 'modules/scheduler' path: %v", err)
+			t.Logf("This indicates the path was treated as a package import instead of a local directory")
+		}
+	})
+
+	// Test 2: Path with ./ prefix should also work
+	t.Run("PathWithDotSlash", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		err := runExtractContractWithFlags(cmd, []string{"./modules/scheduler"}, "", false, false, false, false)
+		if err != nil {
+			t.Errorf("Failed to extract contract from './modules/scheduler' path: %v", err)
+		}
+	})
+
+	// Test 3: Absolute path should work
+	t.Run("AbsolutePath", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		err := runExtractContractWithFlags(cmd, []string{schedulerDir}, "", false, false, false, false)
+		if err != nil {
+			t.Errorf("Failed to extract contract from absolute path: %v", err)
+		}
+	})
+
+	// Test 4: Single directory name that exists should be treated as local
+	t.Run("SingleDirectoryName", func(t *testing.T) {
+		// Change into modules directory
+		if err := os.Chdir(modulesDir); err != nil {
+			t.Fatalf("Failed to change to modules directory: %v", err)
+		}
+		defer os.Chdir(tmpDir)
+
+		cmd := &cobra.Command{}
+		err := runExtractContractWithFlags(cmd, []string{"scheduler"}, "", false, false, false, false)
+		if err != nil {
+			t.Errorf("Failed to extract contract from 'scheduler' directory: %v", err)
+			t.Logf("Single directory names that exist should be treated as local paths")
+		}
+	})
+}
+
 func TestRunCompareContract_ValidContracts(t *testing.T) {
 	// Create two test contracts
 	contract1 := &contract.Contract{

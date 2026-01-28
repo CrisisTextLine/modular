@@ -253,103 +253,149 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 	}
 
 	// Start the server in a goroutine
-	go func() {
-		m.logger.Info("Starting HTTP server", "address", addr)
-		var err error
-
-		// Start server with or without TLS based on configuration
-		if m.config.TLS != nil && m.config.TLS.Enabled {
-			// Configure TLS
-			tlsConfig := &tls.Config{
-				MinVersion: tls.VersionTLS12,
-			}
-
-			// UseService flag takes precedence
-			if m.config.TLS.UseService {
-				if m.certificateService != nil {
-					m.logger.Info("Using certificate service for TLS")
-					tlsConfig.GetCertificate = m.certificateService.GetCertificate
-
-					// Emit TLS enabled event SYNCHRONOUSLY
-					tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
-						"method": "certificate_service",
-					}, nil)
-					if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
-						m.logger.Debug("Failed to emit TLS enabled event", "error", emitErr)
-					}
-
-				} else {
-					// Fall back to auto-generated certificates if UseService is true but no service is available
-					m.logger.Warn("No certificate service available, falling back to auto-generated certificates")
-					if len(m.config.TLS.Domains) == 0 {
-						// If no domains specified, use localhost
-						m.config.TLS.Domains = []string{"localhost"}
-					}
-					cert, key, err := m.generateSelfSignedCertificate(m.config.TLS.Domains)
-					if err != nil {
-						m.logger.Error("Failed to generate self-signed certificate", "error", err)
-						if listenErr := m.server.ListenAndServe(); listenErr != nil {
-							m.logger.Error("Failed to start HTTP server as fallback", "error", listenErr)
-						}
-					} else {
-						m.server.TLSConfig = tlsConfig
-						if listenErr := m.server.ListenAndServeTLS(cert, key); listenErr != nil {
-							m.logger.Error("Failed to start HTTPS server", "error", listenErr)
-						}
-					}
-				}
-			} else if m.config.TLS.AutoGenerate {
-				// Auto-generate self-signed certificates
-				m.logger.Info("Auto-generating self-signed certificates", "domains", m.config.TLS.Domains)
-
-				// Emit TLS enabled event SYNCHRONOUSLY before starting server
-				tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
-					"method":  "auto_generate",
-					"domains": m.config.TLS.Domains,
-				}, nil)
-				if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
-					m.logger.Debug("Failed to emit TLS auto-generate event", "error", emitErr)
-				}
-
-				cert, key, err := m.generateSelfSignedCertificate(m.config.TLS.Domains)
-				if err != nil {
-					m.logger.Error("Failed to generate self-signed certificate", "error", err)
-					if listenErr := m.server.ListenAndServe(); listenErr != nil {
-						m.logger.Error("Failed to start HTTP server as fallback", "error", listenErr)
-					}
-				} else {
-					m.server.TLSConfig = tlsConfig
-					if listenErr := m.server.ListenAndServeTLS(cert, key); listenErr != nil {
-						m.logger.Error("Failed to start HTTPS server", "error", listenErr)
-					}
-				}
-			} else {
-				// Use provided certificate files
-				m.logger.Info("Using TLS configuration", "cert", m.config.TLS.CertFile, "key", m.config.TLS.KeyFile)
-
-				// Emit TLS enabled event SYNCHRONOUSLY
-				tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
-					"method":    "certificate_files",
-					"cert_file": m.config.TLS.CertFile,
-					"key_file":  m.config.TLS.KeyFile,
-				}, nil)
-				if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
-					m.logger.Debug("Failed to emit TLS configured event", "error", emitErr)
-				}
-
-				err = m.server.ListenAndServeTLS(m.config.TLS.CertFile, m.config.TLS.KeyFile)
-			}
-		} else {
-			err = m.server.ListenAndServe()
-		}
-
-		// If server was shut down gracefully, err will be http.ErrServerClosed
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			m.logger.Error("HTTP server error", "error", err)
-		}
-	}()
+	go m.runServer(ctx, addr)
 
 	// Test that server is actually listening
+	if err := m.waitForServerStart(ctx, addr); err != nil {
+		return err
+	}
+
+	m.started = true
+	m.logger.Info("HTTP server started successfully", "address", addr)
+
+	// Emit server started event synchronously
+	event := modular.NewCloudEvent(EventTypeServerStarted, "httpserver-service", map[string]interface{}{
+		"address":     addr,
+		"tls_enabled": m.config.TLS != nil && m.config.TLS.Enabled,
+		"host":        m.config.Host,
+		"port":        m.config.Port,
+	}, nil)
+
+	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
+		m.logger.Debug("Failed to emit server started event", "error", emitErr)
+	}
+
+	// Emit TLS configured event if TLS is enabled
+	m.emitTLSConfiguredEvent(ctx)
+
+	return nil
+}
+
+// runServer starts the HTTP server with appropriate TLS configuration
+func (m *HTTPServerModule) runServer(ctx context.Context, addr string) {
+	m.logger.Info("Starting HTTP server", "address", addr)
+	var err error
+
+	// Start server with or without TLS based on configuration
+	if m.config.TLS != nil && m.config.TLS.Enabled {
+		err = m.startTLSServer(ctx)
+	} else {
+		err = m.server.ListenAndServe()
+	}
+
+	// If server was shut down gracefully, err will be http.ErrServerClosed
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		m.logger.Error("HTTP server error", "error", err)
+	}
+}
+
+// startTLSServer configures and starts the server with TLS
+func (m *HTTPServerModule) startTLSServer(ctx context.Context) error {
+	// Configure TLS
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	// UseService flag takes precedence
+	if m.config.TLS.UseService {
+		return m.startWithCertificateService(ctx, tlsConfig)
+	} else if m.config.TLS.AutoGenerate {
+		return m.startWithAutoGeneratedCerts(ctx, tlsConfig)
+	} else {
+		return m.startWithCertificateFiles(ctx)
+	}
+}
+
+// startWithCertificateService starts server using certificate service
+func (m *HTTPServerModule) startWithCertificateService(ctx context.Context, tlsConfig *tls.Config) error {
+	if m.certificateService != nil {
+		m.logger.Info("Using certificate service for TLS")
+		tlsConfig.GetCertificate = m.certificateService.GetCertificate
+
+		// Emit TLS enabled event SYNCHRONOUSLY
+		tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
+			"method": "certificate_service",
+		}, nil)
+		if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
+			m.logger.Debug("Failed to emit TLS enabled event", "error", emitErr)
+		}
+
+		m.server.TLSConfig = tlsConfig
+		if err := m.server.ListenAndServeTLS("", ""); err != nil {
+			return fmt.Errorf("failed to start HTTPS server with certificate service: %w", err)
+		}
+		return nil
+	}
+
+	// Fall back to auto-generated certificates if UseService is true but no service is available
+	m.logger.Warn("No certificate service available, falling back to auto-generated certificates")
+	if len(m.config.TLS.Domains) == 0 {
+		m.config.TLS.Domains = []string{"localhost"}
+	}
+	return m.startWithAutoGeneratedCerts(ctx, tlsConfig)
+}
+
+// startWithAutoGeneratedCerts starts server with auto-generated certificates
+func (m *HTTPServerModule) startWithAutoGeneratedCerts(ctx context.Context, tlsConfig *tls.Config) error {
+	m.logger.Info("Auto-generating self-signed certificates", "domains", m.config.TLS.Domains)
+
+	// Emit TLS enabled event SYNCHRONOUSLY before starting server
+	tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
+		"method":  "auto_generate",
+		"domains": m.config.TLS.Domains,
+	}, nil)
+	if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
+		m.logger.Debug("Failed to emit TLS auto-generate event", "error", emitErr)
+	}
+
+	cert, key, err := m.generateSelfSignedCertificate(m.config.TLS.Domains)
+	if err != nil {
+		m.logger.Error("Failed to generate self-signed certificate", "error", err)
+		if err := m.server.ListenAndServe(); err != nil {
+			return fmt.Errorf("failed to start HTTP server after certificate generation failure: %w", err)
+		}
+		return nil
+	}
+
+	m.server.TLSConfig = tlsConfig
+	if err := m.server.ListenAndServeTLS(cert, key); err != nil {
+		return fmt.Errorf("failed to start HTTPS server with auto-generated certificates: %w", err)
+	}
+	return nil
+}
+
+// startWithCertificateFiles starts server using provided certificate files
+func (m *HTTPServerModule) startWithCertificateFiles(ctx context.Context) error {
+	m.logger.Info("Using TLS configuration", "cert", m.config.TLS.CertFile, "key", m.config.TLS.KeyFile)
+
+	// Emit TLS enabled event SYNCHRONOUSLY
+	tlsEvent := modular.NewCloudEvent(EventTypeTLSEnabled, "httpserver-service", map[string]interface{}{
+		"method":    "certificate_files",
+		"cert_file": m.config.TLS.CertFile,
+		"key_file":  m.config.TLS.KeyFile,
+	}, nil)
+	if emitErr := m.EmitEvent(ctx, tlsEvent); emitErr != nil {
+		m.logger.Debug("Failed to emit TLS configured event", "error", emitErr)
+	}
+
+	if err := m.server.ListenAndServeTLS(m.config.TLS.CertFile, m.config.TLS.KeyFile); err != nil {
+		return fmt.Errorf("failed to start HTTPS server with certificate files: %w", err)
+	}
+	return nil
+}
+
+// waitForServerStart waits for the server to start accepting connections
+func (m *HTTPServerModule) waitForServerStart(ctx context.Context, addr string) error {
 	timeout := time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		timeout = time.Until(deadline)
@@ -394,44 +440,33 @@ func (m *HTTPServerModule) Start(ctx context.Context) error {
 		}
 	}
 
-	m.started = true
-	m.logger.Info("HTTP server started successfully", "address", addr)
+	return nil
+}
 
-	// Emit server started event synchronously
-	event := modular.NewCloudEvent(EventTypeServerStarted, "httpserver-service", map[string]interface{}{
-		"address":     addr,
-		"tls_enabled": m.config.TLS != nil && m.config.TLS.Enabled,
-		"host":        m.config.Host,
-		"port":        m.config.Port,
+// emitTLSConfiguredEvent emits TLS configured event if TLS is enabled
+func (m *HTTPServerModule) emitTLSConfiguredEvent(ctx context.Context) {
+	if m.config.TLS == nil || !m.config.TLS.Enabled {
+		return
+	}
+
+	var tlsMethod string
+	if m.certificateService != nil && m.config.TLS.UseService {
+		tlsMethod = "certificate_service"
+	} else if m.config.TLS.AutoGenerate {
+		tlsMethod = "auto_generate"
+	} else {
+		tlsMethod = "certificate_files"
+	}
+
+	tlsConfiguredEvent := modular.NewCloudEvent(EventTypeTLSConfigured, "httpserver-service", map[string]interface{}{
+		"method":      tlsMethod,
+		"https_port":  m.config.Port,
+		"cert_method": tlsMethod,
 	}, nil)
 
-	if emitErr := m.EmitEvent(ctx, event); emitErr != nil {
-		m.logger.Debug("Failed to emit server started event", "error", emitErr)
+	if emitErr := m.EmitEvent(ctx, tlsConfiguredEvent); emitErr != nil {
+		m.logger.Debug("Failed to emit TLS configured event", "error", emitErr)
 	}
-
-	// If TLS is enabled, emit TLS configured event now that server is fully started
-	if m.config.TLS != nil && m.config.TLS.Enabled {
-		var tlsMethod string
-		if m.certificateService != nil && m.config.TLS.UseService {
-			tlsMethod = "certificate_service"
-		} else if m.config.TLS.AutoGenerate {
-			tlsMethod = "auto_generate"
-		} else {
-			tlsMethod = "certificate_files"
-		}
-
-		tlsConfiguredEvent := modular.NewCloudEvent(EventTypeTLSConfigured, "httpserver-service", map[string]interface{}{
-			"method":      tlsMethod,
-			"https_port":  m.config.Port,
-			"cert_method": tlsMethod,
-		}, nil)
-
-		if emitErr := m.EmitEvent(ctx, tlsConfiguredEvent); emitErr != nil {
-			m.logger.Debug("Failed to emit TLS configured event", "error", emitErr)
-		}
-	}
-
-	return nil
 }
 
 // Stop stops the HTTP server gracefully.
@@ -667,7 +702,6 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 			if m.logger != nil {
 				m.logger.Debug("Failed to emit request received event", "error", emitErr)
 			}
-		} else {
 		}
 
 		// Wrap response writer to capture status code
@@ -695,7 +729,6 @@ func (m *HTTPServerModule) wrapHandlerWithRequestEvents(handler http.Handler) ht
 			if m.logger != nil {
 				m.logger.Debug("Failed to emit request handled event", "error", emitErr)
 			}
-		} else {
 		}
 	})
 }

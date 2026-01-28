@@ -167,7 +167,8 @@ func TestFeatureFlagEvaluatorServiceExposure(t *testing.T) {
 	}
 }
 
-// TestFeatureFlagEvaluatorServiceDependencyResolution tests that external services take precedence
+// TestFeatureFlagEvaluatorServiceDependencyResolution tests that external evaluators are integrated into the aggregator
+// for proper fallback behavior instead of bypassing the aggregation system entirely.
 func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 	// Create mock router
 	mockRouter := &testRouter{routes: make(map[string]http.HandlerFunc)}
@@ -187,7 +188,7 @@ func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 	}
 	app.RegisterConfigSection("reverseproxy", modular.NewStdConfigProvider(externalConfig))
 
-	externalEvaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	externalEvaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}
@@ -248,7 +249,7 @@ func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 	// Test that the external evaluator is used, not the internal one
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/test", nil)
 
-	// The external flag should exist
+	// The external flag should exist and work
 	externalValue, err := module.featureFlagEvaluator.EvaluateFlag(context.Background(), "external-flag", "", req)
 	if err != nil {
 		t.Errorf("Error evaluating external flag: %v", err)
@@ -257,10 +258,19 @@ func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 		t.Error("Expected external flag to be true")
 	}
 
-	// The internal flag should not exist (because we're using external evaluator)
-	_, err = module.featureFlagEvaluator.EvaluateFlag(context.Background(), "internal-flag", "", req)
-	if err == nil {
-		t.Error("Expected internal flag to not exist when using external evaluator")
+	// The internal flag should now ALSO work (via aggregator fallback when external evaluator abstains)
+	// This is the fix: aggregator provides fallback behavior instead of only using external evaluator
+	internalValue, err := module.featureFlagEvaluator.EvaluateFlag(context.Background(), "internal-flag", "", req)
+	if err != nil {
+		t.Logf("Internal flag evaluation error (expected with current external evaluator): %v", err)
+		// This is okay - the external evaluator doesn't have internal-flag, so it should fallback to file evaluator
+		// Let's test with EvaluateFlagWithDefault to see fallback behavior
+		internalValueWithDefault := module.featureFlagEvaluator.EvaluateFlagWithDefault(context.Background(), "internal-flag", "", req, false)
+		if !internalValueWithDefault {
+			t.Error("Expected internal flag to be true via aggregator fallback, but got false")
+		}
+	} else if !internalValue {
+		t.Error("Expected internal flag to be true via aggregator fallback")
 	}
 
 	// The module should still provide both services (reverseproxy.provider + external evaluator)
@@ -284,9 +294,20 @@ func TestFeatureFlagEvaluatorServiceDependencyResolution(t *testing.T) {
 		return
 	}
 
-	// Verify it's the same instance as the external evaluator
-	if flagService.Instance != externalEvaluator {
-		t.Error("Expected provided service to be the same instance as external evaluator")
+	// Verify the provided service is now the aggregator (which incorporates the external evaluator)
+	if _, isAggregator := flagService.Instance.(*FeatureFlagAggregator); !isAggregator {
+		t.Errorf("Expected provided service to be aggregator, got: %T", flagService.Instance)
+	}
+
+	// Verify that the external evaluator was registered and can be discovered by the aggregator
+	var registeredExternalEvaluator FeatureFlagEvaluator
+	if err := module.app.GetService("featureFlagEvaluator.external", &registeredExternalEvaluator); err != nil {
+		t.Errorf("Expected external evaluator to be registered for aggregation: %v", err)
+	} else {
+		// The registered external evaluator should be the same instance we provided
+		if registeredExternalEvaluator != externalEvaluator {
+			t.Error("Expected registered external evaluator to be the same instance we provided")
+		}
 	}
 }
 
@@ -329,7 +350,7 @@ func TestServiceProviderInterface(t *testing.T) {
 	// Create the evaluator
 	app := NewMockTenantApplication()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	evaluator, err := NewFileBasedFeatureFlagEvaluator(app, logger)
+	evaluator, err := NewFileBasedFeatureFlagEvaluator(context.Background(), app, logger)
 	if err != nil {
 		t.Fatalf("Failed to create feature flag evaluator: %v", err)
 	}

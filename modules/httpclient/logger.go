@@ -113,7 +113,7 @@ func (f *FileLogger) LogTransactionToFile(id string, reqData, respData []byte, d
 	// Create a filename that's safe for the filesystem
 	safeURL := sanitizeForFilename(url)
 	if safeURL == "" {
-		return ErrUnsafeFilename
+		return fmt.Errorf("URL %q: %w", url, ErrUnsafeFilename)
 	}
 
 	txnFile := filepath.Join(f.txnDir, fmt.Sprintf("txn_%s_%s_%d.log", id, safeURL, time.Now().UnixNano()))

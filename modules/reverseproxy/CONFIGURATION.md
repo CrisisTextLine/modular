@@ -42,7 +42,7 @@ This document provides comprehensive configuration guidance for the Reverse Prox
 | `debug_endpoints` | Diagnostic HTTP endpoints. | Exposes `/debug` (customisable `base_path`) routes for flags, info, backends, circuit breakers, and health checks. Can optionally require an auth token. |
 | `circuit_breaker` / `backend_circuit_breakers` | Failure isolation. | Provides global defaults plus per-backend overrides; state changes trigger CloudEvents so you can observe openings, closures, and half-open transitions. |
 
-> **Note:** The `global_timeout` configuration value is currently persisted with the module but is not yet consumed in request handling; keep per-route `timeout` and the global `request_timeout` aligned with your SLOs until the orchestration logic starts honouring it.
+> **Note:** The `global_timeout` configuration value sets a default timeout for all backend requests. Individual routes can override this with their own `timeout` setting in `route_configs`. The priority order is: route-specific timeout > `global_timeout` > `request_timeout`. If not set, the module uses `request_timeout` as the fallback.
 
 ## Routing, Load Balancing, and Tenants
 

@@ -16,14 +16,15 @@ The mock application is a lightweight, in-memory implementation of the `Applicat
 ### Creating a Mock Application
 
 ```go
-// Create a mock application with a logger and config provider
-mockApp := modular.NewMockApplication(
-    modular.WithLogger(logger),
-    modular.WithConfigProvider(configProvider),
-)
+// For testing individual modules, use the module's generated mock
+// The modcli tool generates a NewMockApplication() function for each module
+mockApp := NewMockApplication()
+
+// Register modules for testing
+mockApp.RegisterModule(NewDatabaseModule())
 ```
 
-The mock application can be used to register modules, set services, and configure expectations.
+The mock application can be used to register modules and services for testing.
 
 ### Registering Modules
 
@@ -32,23 +33,11 @@ The mock application can be used to register modules, set services, and configur
 mockApp.RegisterModule(NewDatabaseModule())
 ```
 
-### Setting Services
+### Registering Services
 
 ```go
-// Set a service value
-mockApp.SetService("database", &sql.DB{})
-```
-
-### Expectations
-
-You can set expectations on the mock application to assert that certain methods are called:
-
-```go
-// Expect the Init method to be called
-mockApp.ExpectInit()
-
-// Expect the Start method to be called with a context
-mockApp.ExpectStart(context.Background())
+// Register a service with the mock application
+mockApp.RegisterService("database", &sql.DB{})
 ```
 
 ## Testing Services
@@ -67,8 +56,8 @@ Use the mock application to provide mock implementations of dependencies:
 // Mock a database connection
 dbMock := &sql.DB{}
 
-// Set the mock service
-mockApp.SetService("database", dbMock)
+// Register the mock service
+mockApp.RegisterService("database", dbMock)
 ```
 
 ### Asserting Method Calls

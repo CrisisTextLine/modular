@@ -55,6 +55,7 @@ type CompositeHandler struct {
 	responseCache       *responseCache
 	eventEmitter        func(eventType string, data map[string]interface{})
 	responseTransformer ResponseTransformer
+	mapReduceConfig     *MapReduceConfig
 }
 
 // NewCompositeHandler creates a new composite handler with the given backends and strategy.
@@ -121,6 +122,11 @@ func (h *CompositeHandler) SetResponseTransformer(transformer ResponseTransforme
 	h.responseTransformer = transformer
 }
 
+// SetMapReduceConfig sets the map/reduce configuration for this handler.
+func (h *CompositeHandler) SetMapReduceConfig(config *MapReduceConfig) {
+	h.mapReduceConfig = config
+}
+
 // ServeHTTP handles the request by forwarding it to all backends
 // and merging the responses.
 func (h *CompositeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -173,6 +179,8 @@ func (h *CompositeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.executeMerge(ctx, recorder, r, bodyBytes)
 	case StrategySequential:
 		h.executeSequential(ctx, recorder, r, bodyBytes)
+	case StrategyMapReduce:
+		h.executeMapReduce(ctx, recorder, r, bodyBytes, h.mapReduceConfig)
 	default:
 		// Default to first-success for unknown strategies
 		h.executeFirstSuccess(ctx, recorder, r, bodyBytes)
@@ -534,6 +542,11 @@ func (m *ReverseProxyModule) createCompositeHandler(ctx context.Context, routeCo
 	// Set response transformer if available for this route
 	if transformer, exists := m.responseTransformers[routeConfig.Pattern]; exists {
 		handler.SetResponseTransformer(transformer)
+	}
+
+	// Set map/reduce config if this is a map-reduce strategy
+	if strategy == StrategyMapReduce && routeConfig.MapReduce != nil {
+		handler.SetMapReduceConfig(routeConfig.MapReduce)
 	}
 
 	return handler, nil

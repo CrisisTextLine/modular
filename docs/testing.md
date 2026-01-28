@@ -206,7 +206,7 @@ func TestModuleServiceDependencies(t *testing.T) {
     mockApp := modular.NewMockApplication()
     
     // Provide required services
-    mockApp.SetService("database", &mockDB{})
+    mockApp.RegisterService("database", &mockDB{})
     
     module := NewMyModule()
     mockApp.RegisterModule(module)
@@ -372,7 +372,7 @@ func TestMyModule(t *testing.T) {
     
     t.Run("handles service dependencies", func(t *testing.T) {
         mockApp := modular.NewMockApplication()
-        mockApp.SetService("database", &mockDB{})
+        mockApp.RegisterService("database", &mockDB{})
         
         module := NewMyModule()
         mockApp.RegisterModule(module)

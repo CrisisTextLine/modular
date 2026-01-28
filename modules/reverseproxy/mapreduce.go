@@ -136,7 +136,7 @@ func (h *CompositeHandler) executeSequentialMapReduce(ctx context.Context, w htt
 		return
 	}
 
-	sourceResp, err := h.executeBackendRequest(ctx, sourceBackend, r, bodyBytes) //nolint:bodyclose // closed later
+	sourceResp, err := h.executeBackendRequest(ctx, sourceBackend, r, bodyBytes)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		fmt.Fprintf(w, "Failed to query source backend: %v", err)
@@ -248,7 +248,7 @@ func (h *CompositeHandler) executeParallelMapReduce(ctx context.Context, w http.
 		go func(b *Backend, bid string) {
 			defer wg.Done()
 
-			resp, err := h.executeBackendRequest(ctx, b, r, bodyBytes) //nolint:bodyclose // closed after reading
+			resp, err := h.executeBackendRequest(ctx, b, r, bodyBytes)
 			if err != nil {
 				return
 			}
@@ -454,8 +454,8 @@ func mergeResponses(sourceBody, targetBody []byte, config *MapReduceConfig) ([]b
 		}
 
 	case MergeStrategyJoin:
-		// Join strategy doesn't apply to sequential, default to nested
-		fallthrough
+		// Join strategy is only supported in parallel mode
+		return nil, fmt.Errorf("%w: join strategy is only supported in parallel mode", ErrMergeResponseFailed)
 
 	default:
 		// Default to nested
@@ -575,11 +575,8 @@ func mergeByJoinField(responses map[string][]byte, config *MapReduceConfig) ([]b
 	if len(config.Backends) > 0 {
 		baseBackendID = config.Backends[0]
 	} else {
-		// Fallback to first in map (non-deterministic but better than nothing)
-		for bid := range backendData {
-			baseBackendID = bid
-			break
-		}
+		// Configuration error - backends list is required for deterministic merge
+		return nil, fmt.Errorf("%w: config.Backends must not be empty for deterministic merge", ErrMergeResponseFailed)
 	}
 
 	// Iterate through base backend items

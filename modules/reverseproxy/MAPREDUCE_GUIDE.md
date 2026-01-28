@@ -151,10 +151,10 @@ Adds target response data into the source response:
 // Target
 {"analytics": {"views": 100}}
 
-// Result
+// Result (with merge_into_field: "analytics")
 {
   "user": {"id": 123, "name": "John"},
-  "analytics": {"analytics": {"views": 100}}
+  "analytics": {"views": 100}
 }
 ```
 

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
-	"github.com/stretchr/testify/assert"
 )
 
 // MapReduceBDDTestContext holds the state for map/reduce BDD tests
@@ -42,11 +41,6 @@ type MapReduceBDDTestContext struct {
 	expectedData    interface{}
 }
 
-// TestMapReduceCompositeFeatures is disabled pending integration with main BDD test suite
-// The map/reduce feature file has been temporarily disabled (renamed to .disabled)
-// TODO: Integrate map/reduce step definitions into bdd_step_registry_test.go
-// TODO: Migrate MapReduceBDDTestContext to use shared ReverseProxyBDDTestContext
-/*
 func TestMapReduceCompositeFeatures(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: InitializeMapReduceScenarios,
@@ -61,7 +55,6 @@ func TestMapReduceCompositeFeatures(t *testing.T) {
 		t.Fatal("non-zero status returned, failed to run feature tests")
 	}
 }
-*/
 
 // InitializeMapReduceScenarios initializes the Godog scenario steps
 func InitializeMapReduceScenarios(ctx *godog.ScenarioContext) {
@@ -100,7 +93,6 @@ func InitializeMapReduceScenarios(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a backend "([^"]*)" that returns items with some null fields$`, testCtx.aBackendThatReturnsItemsWithNullFields)
 	ctx.Step(`^a backend "([^"]*)" that adds data$`, testCtx.aBackendThatAddsData)
 	ctx.Step(`^a backend "([^"]*)" that expects a PUT request$`, testCtx.aBackendThatExpectsPUTRequest)
-	ctx.Step(`^a backend "([^"]*)" that returns (\d+) items$`, testCtx.aBackendThatReturnsNItems)
 	ctx.Step(`^multiple backends that return data in random order$`, testCtx.multipleBackendsThatReturnDataInRandomOrder)
 
 	// Configuration steps
@@ -1064,6 +1056,10 @@ func (t *MapReduceBDDTestContext) createBackendWithData(backendName string, data
 }
 
 func (t *MapReduceBDDTestContext) applyConfigValue(key, value string) {
+	// Trim spaces from key and value
+	key = strings.TrimSpace(key)
+	value = strings.TrimSpace(value)
+	
 	switch key {
 	case "extract_path":
 		t.mapReduceConfig.MappingConfig.ExtractPath = value
@@ -1106,12 +1102,4 @@ func getKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
-}
-
-// Assertions helper for use in tests
-func assertNoError(t testing.TB, err error) {
-	if err != nil {
-		t.Helper()
-		assert.NoError(t, err)
-	}
 }

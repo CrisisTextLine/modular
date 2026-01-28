@@ -8,6 +8,7 @@ import (
 	"net/http/httputil"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/stretchr/testify/assert"
@@ -511,6 +512,38 @@ func (m *mockTenantApplication) GetServiceEntry(serviceName string) (*modular.Se
 func (m *mockTenantApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
 	args := m.Called(interfaceType)
 	return args.Get(0).([]*modular.ServiceRegistryEntry)
+}
+
+// GetModule returns a module by name (mock implementation)
+func (m *mockTenantApplication) GetModule(name string) modular.Module {
+	args := m.Called(name)
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(modular.Module)
+}
+
+// GetAllModules returns all registered modules (mock implementation)
+func (m *mockTenantApplication) GetAllModules() map[string]modular.Module {
+	args := m.Called()
+	return args.Get(0).(map[string]modular.Module)
+}
+
+// StartTime returns the application start time (mock implementation)
+func (m *mockTenantApplication) StartTime() time.Time {
+	args := m.Called()
+	return args.Get(0).(time.Time)
+}
+
+// OnConfigLoaded registers a config loaded hook (mock implementation)
+func (m *mockTenantApplication) OnConfigLoaded(hook func(app modular.Application) error) {
+	m.Called(hook)
+}
+
+// Context returns the application context (mock implementation)
+func (m *mockTenantApplication) Context() context.Context {
+	args := m.Called()
+	return args.Get(0).(context.Context)
 }
 
 type mockLogger struct{}

@@ -70,6 +70,9 @@ type ReverseProxyModule struct {
 	// Response header modification callback
 	responseHeaderModifier func(*http.Response, string, modular.TenantID) error
 
+	// Response transformers for composite routes (keyed by route pattern)
+	responseTransformers map[string]ResponseTransformer
+
 	// Metrics collection
 	metrics       *MetricsCollector
 	enableMetrics bool
@@ -177,6 +180,7 @@ func NewModule() *ReverseProxyModule {
 		circuitBreakers:      make(map[string]*CircuitBreaker),
 		enableMetrics:        true,
 		loadBalanceCounters:  make(map[string]int),
+		responseTransformers: make(map[string]ResponseTransformer),
 	}
 
 	return module
@@ -1553,6 +1557,12 @@ func (m *ReverseProxyModule) SetHttpClient(client *http.Client) {
 // Example use case: Dynamically consolidate CORS headers from multiple backends.
 func (m *ReverseProxyModule) SetResponseHeaderModifier(modifier func(*http.Response, string, modular.TenantID) error) {
 	m.responseHeaderModifier = modifier
+}
+
+// SetResponseTransformer sets a custom response transformer for a specific composite route pattern.
+// The transformer receives responses from all backends and can create a custom merged response.
+func (m *ReverseProxyModule) SetResponseTransformer(pattern string, transformer ResponseTransformer) {
+	m.responseTransformers[pattern] = transformer
 }
 
 // createReverseProxyForBackend creates a reverse proxy for a specific backend with per-backend configuration.

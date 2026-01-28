@@ -1,12 +1,34 @@
 # Reverse Proxy Example Configuration
+# This configuration demonstrates all three composite route strategies
 
 # Reverse Proxy configuration
 reverseproxy:
+  # Backend service definitions
   backend_services:
+    # Original backends
     global-default: "http://localhost:9001"
     tenant1-backend: "http://localhost:9002"
     tenant2-backend: "http://localhost:9003"
     specific-api: "http://localhost:9004"
+    
+    # First-Success Strategy Backends
+    primary-backend: "http://localhost:9005"
+    fallback-backend: "http://localhost:9006"
+    
+    # Merge Strategy Backends
+    users-backend: "http://localhost:9007"
+    orders-backend: "http://localhost:9008"
+    preferences-backend: "http://localhost:9009"
+    
+    # Sequential Strategy Backends
+    auth-backend: "http://localhost:9010"
+    processing-backend: "http://localhost:9011"
+    finalization-backend: "http://localhost:9012"
+    
+    # Custom Transformer Backends
+    profile-backend: "http://localhost:9013"
+    analytics-backend: "http://localhost:9014"
+  
   default_backend: "global-default"
   tenant_id_header: "X-Tenant-ID"
   require_tenant_id: false
@@ -30,6 +52,53 @@ reverseproxy:
           Access-Control-Max-Age: "86400"
         remove_headers:
           - "X-Internal-Header"  # Remove internal headers from backend
+
+  # ========================================
+  # COMPOSITE ROUTES - Demonstrating all three strategies
+  # ========================================
+  
+  composite_routes:
+    # STRATEGY 1: FIRST-SUCCESS
+    # Tries backends sequentially until one succeeds.
+    # Use case: High-availability setup with primary and fallback backends.
+    "/api/composite/first-success":
+      pattern: "/api/composite/first-success"
+      backends:
+        - "primary-backend"
+        - "fallback-backend"
+      strategy: "first-success"
+    
+    # STRATEGY 2: MERGE
+    # Executes all backend requests in parallel and merges JSON responses.
+    # Use case: Aggregating data from multiple microservices into a single response.
+    "/api/composite/merge":
+      pattern: "/api/composite/merge"
+      backends:
+        - "users-backend"
+        - "orders-backend"
+        - "preferences-backend"
+      strategy: "merge"
+    
+    # STRATEGY 3: SEQUENTIAL
+    # Executes requests one at a time, returning the last successful response.
+    # Use case: Multi-step workflows where later steps depend on earlier ones.
+    "/api/composite/sequential":
+      pattern: "/api/composite/sequential"
+      backends:
+        - "auth-backend"
+        - "processing-backend"
+        - "finalization-backend"
+      strategy: "sequential"
+    
+    # CUSTOM TRANSFORMER EXAMPLE
+    # Uses a custom response transformer to intelligently merge data.
+    # The transformer enriches profile data with analytics information.
+    "/api/composite/profile-with-analytics":
+      pattern: "/api/composite/profile-with-analytics"
+      backends:
+        - "profile-backend"
+        - "analytics-backend"
+      strategy: "merge"  # Strategy is set, but transformer overrides merge behavior
 
 # ChiMux router configuration
 chimux:

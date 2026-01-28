@@ -169,7 +169,7 @@ func TestCircuitBreakerConfiguration(t *testing.T) {
 		},
 	}
 
-	handler := NewCompositeHandler(backends, true, 5*time.Second)
+	handler := NewCompositeHandler(backends, StrategyMerge, 5*time.Second)
 
 	// Initially, circuit breakers should be nil
 	for _, b := range backends {
@@ -213,7 +213,7 @@ func TestCircuitBreakerConfiguration(t *testing.T) {
 	}
 
 	// Reset and apply new configuration
-	handler = NewCompositeHandler(backends, true, 5*time.Second)
+	handler = NewCompositeHandler(backends, StrategyMerge, 5*time.Second)
 	handler.ConfigureCircuitBreakers(globalConfig, disabledConfig)
 
 	// api1 should be disabled, api2 should use global config
@@ -231,7 +231,7 @@ func TestGlobalCircuitBreakerDisabled(t *testing.T) {
 		},
 	}
 
-	handler := NewCompositeHandler(backends, true, 5*time.Second)
+	handler := NewCompositeHandler(backends, StrategyMerge, 5*time.Second)
 
 	// Create configuration with circuit breaker disabled globally
 	globalConfig := CircuitBreakerConfig{

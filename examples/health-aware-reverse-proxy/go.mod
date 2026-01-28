@@ -5,14 +5,14 @@ go 1.25
 toolchain go1.25.0
 
 require (
-	github.com/CrisisTextLine/modular v1.11.6
+	github.com/CrisisTextLine/modular v1.11.11
 	github.com/CrisisTextLine/modular/modules/chimux v0.0.0-00010101000000-000000000000
 	github.com/CrisisTextLine/modular/modules/httpserver v0.0.0-00010101000000-000000000000
 	github.com/CrisisTextLine/modular/modules/reverseproxy v0.0.0-00010101000000-000000000000
 )
 
 require (
-	github.com/BurntSushi/toml v1.5.0 // indirect
+	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/cloudevents/sdk-go/v2 v2.16.2 // indirect
 	github.com/go-chi/chi/v5 v5.2.2 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect

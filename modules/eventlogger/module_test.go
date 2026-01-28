@@ -407,6 +407,16 @@ func (m *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceR
 func (m *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
 	return []*modular.ServiceRegistryEntry{}
 }
+func (m *MockApplication) GetModule(name string) modular.Module {
+	return nil
+}
+func (m *MockApplication) GetAllModules() map[string]modular.Module {
+	return make(map[string]modular.Module)
+}
+func (m *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+func (m *MockApplication) OnConfigLoaded(hook func(app modular.Application) error) {}
 
 type MockLogger struct {
 	entries []MockLogEntry

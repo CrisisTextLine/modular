@@ -118,8 +118,8 @@ func (h *KafkaConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSes
 			// Process message for each matching subscription
 			for _, sub := range subs {
 				// Deserialize event
-				var event Event
-				if err := json.Unmarshal(msg.Value, &event); err != nil {
+				event, err := parseRecord(msg.Value)
+				if err != nil {
 					slog.Error("Failed to deserialize Kafka message", "error", err, "topic", msg.Topic)
 					continue
 				}

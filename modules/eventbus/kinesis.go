@@ -232,11 +232,17 @@ func (k *KinesisEventBus) Publish(ctx context.Context, event Event) error {
 		return fmt.Errorf("failed to serialize event: %w", err)
 	}
 
+	// Determine partition key: use context hint if set, otherwise default to topic
+	partitionKey := event.Topic
+	if key, ok := PartitionKeyFromContext(ctx); ok {
+		partitionKey = key
+	}
+
 	// Create Kinesis record
 	_, err = k.client.PutRecord(ctx, &kinesis.PutRecordInput{
 		StreamName:   &k.config.StreamName,
 		Data:         eventData,
-		PartitionKey: &event.Topic, // Use topic as partition key
+		PartitionKey: &partitionKey,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to publish to Kinesis: %w", err)

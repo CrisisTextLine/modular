@@ -354,6 +354,22 @@ func (k *KinesisEventBus) readShard(shardID string) {
 			})
 			if err != nil {
 				slog.Error("Failed to get Kinesis records", "error", err, "shard", shardID)
+
+				if isExpiredIteratorError(err) {
+					slog.Info("Refreshing expired shard iterator", "shard", shardID)
+					iterResp, iterErr := k.client.GetShardIterator(k.ctx, &kinesis.GetShardIteratorInput{
+						StreamName:        &k.config.StreamName,
+						ShardId:           &shardID,
+						ShardIteratorType: types.ShardIteratorTypeLatest,
+					})
+					if iterErr != nil {
+						slog.Error("Failed to refresh shard iterator", "error", iterErr, "shard", shardID)
+						time.Sleep(5 * time.Second)
+						continue
+					}
+					shardIterator = iterResp.ShardIterator
+				}
+
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -409,6 +425,12 @@ func (k *KinesisEventBus) topicMatches(eventTopic, subscriptionTopic string) boo
 	}
 
 	return false
+}
+
+// isExpiredIteratorError checks if the error is an AWS Kinesis ExpiredIteratorException
+func isExpiredIteratorError(err error) bool {
+	var expiredErr *types.ExpiredIteratorException
+	return errors.As(err, &expiredErr)
 }
 
 // Unsubscribe removes a subscription

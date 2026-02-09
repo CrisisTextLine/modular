@@ -309,7 +309,7 @@ func (k *KafkaEventBus) Publish(ctx context.Context, event Event) error {
 		Value: sarama.StringEncoder(eventData),
 	}
 
-	// Set partition key if provided (otherwise Kafka uses round-robin)
+	// Set partition key if provided (otherwise uses client's default partitioner)
 	if key, ok := PartitionKeyFromContext(ctx); ok {
 		message.Key = sarama.StringEncoder(key)
 	}

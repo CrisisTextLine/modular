@@ -9,11 +9,13 @@ type partitionKeyCtxKey struct{}
 //
 // The partition key controls how events are distributed across shards/partitions:
 //   - Kinesis: determines which shard receives the record (default: topic name)
-//   - Kafka: determines which partition receives the message (default: round-robin)
+//   - Kafka: determines which partition receives the message (using the client's default partitioner)
 //   - Memory, Redis, NATS: ignored (no partitioning concept)
 //
-// Use this when you need ordering guarantees for related events.
-// Events with the same partition key are guaranteed to be processed in order.
+// Use this when you want related events to be routed to the same shard/partition
+// so that broker-level ordering within that shard/partition is preserved. The
+// actual handler processing order still depends on the subscription/consumer
+// behavior (for example, concurrency and async processing settings).
 //
 // Example:
 //

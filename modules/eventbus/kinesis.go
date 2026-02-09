@@ -232,9 +232,9 @@ func (k *KinesisEventBus) Publish(ctx context.Context, event Event) error {
 		return fmt.Errorf("failed to serialize event: %w", err)
 	}
 
-	// Determine partition key: use context hint if set, otherwise default to topic
+	// Determine partition key: use context hint if set and non-empty, otherwise default to topic
 	partitionKey := event.Topic
-	if key, ok := PartitionKeyFromContext(ctx); ok {
+	if key, ok := PartitionKeyFromContext(ctx); ok && key != "" {
 		partitionKey = key
 	}
 

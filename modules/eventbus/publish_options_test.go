@@ -3,6 +3,7 @@ package eventbus
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -143,8 +144,9 @@ func TestPublishWithPartitionKeyConcurrency(t *testing.T) {
 		cfg := &EventBusConfig{
 			Engine:                 "memory",
 			MaxEventQueueSize:      1000,
-			DefaultEventBufferSize: 100,
+			DefaultEventBufferSize: 1000,
 			WorkerCount:            5,
+			DeliveryMode:           "block",
 		}
 		app.RegisterConfigSection(ModuleName, modular.NewStdConfigProvider(cfg))
 
@@ -158,12 +160,9 @@ func TestPublishWithPartitionKeyConcurrency(t *testing.T) {
 			_ = module.Stop(ctx)
 		}()
 
-		var receivedCount int64
-		var mu sync.Mutex
-		_, err = module.SubscribeAsync(ctx, "concurrent.topic", func(ctx context.Context, event Event) error {
-			mu.Lock()
-			receivedCount++
-			mu.Unlock()
+		var receivedCount atomic.Int64
+		_, err = module.Subscribe(ctx, "concurrent.topic", func(ctx context.Context, event Event) error {
+			receivedCount.Add(1)
 			return nil
 		})
 		require.NoError(t, err)
@@ -186,5 +185,11 @@ func TestPublishWithPartitionKeyConcurrency(t *testing.T) {
 		}
 
 		wg.Wait()
+
+		// Wait for the handler goroutine to drain all buffered events
+		assert.Eventually(t, func() bool {
+			return receivedCount.Load() == int64(numPublishers*messagesPerPublisher)
+		}, 10*time.Second, 50*time.Millisecond,
+			"expected %d events, got %d", numPublishers*messagesPerPublisher, receivedCount.Load())
 	})
 }

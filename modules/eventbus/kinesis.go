@@ -338,6 +338,7 @@ func (k *KinesisEventBus) readShard(shardID string) {
 	}
 
 	shardIterator := iterResp.ShardIterator
+	var lastSeqNum string
 
 	for {
 		select {
@@ -357,17 +358,28 @@ func (k *KinesisEventBus) readShard(shardID string) {
 
 				if isExpiredIteratorError(err) {
 					slog.Info("Refreshing expired shard iterator", "shard", shardID)
-					iterResp, iterErr := k.client.GetShardIterator(k.ctx, &kinesis.GetShardIteratorInput{
-						StreamName:        &k.config.StreamName,
-						ShardId:           &shardID,
-						ShardIteratorType: types.ShardIteratorTypeLatest,
-					})
+					iterInput := &kinesis.GetShardIteratorInput{
+						StreamName: &k.config.StreamName,
+						ShardId:    &shardID,
+					}
+					if lastSeqNum != "" {
+						iterInput.ShardIteratorType = types.ShardIteratorTypeAfterSequenceNumber
+						iterInput.StartingSequenceNumber = &lastSeqNum
+					} else {
+						iterInput.ShardIteratorType = types.ShardIteratorTypeLatest
+					}
+					iterResp, iterErr := k.client.GetShardIterator(k.ctx, iterInput)
 					if iterErr != nil {
 						slog.Error("Failed to refresh shard iterator", "error", iterErr, "shard", shardID)
-						time.Sleep(5 * time.Second)
+						select {
+						case <-time.After(5 * time.Second):
+						case <-k.ctx.Done():
+							return
+						}
 						continue
 					}
 					shardIterator = iterResp.ShardIterator
+					continue
 				}
 
 				time.Sleep(1 * time.Second)
@@ -401,6 +413,13 @@ func (k *KinesisEventBus) readShard(shardID string) {
 					} else {
 						k.processEvent(sub, event)
 					}
+				}
+			}
+
+			// Track last sequence number for iterator recovery
+			if n := len(resp.Records); n > 0 {
+				if seq := resp.Records[n-1].SequenceNumber; seq != nil {
+					lastSeqNum = *seq
 				}
 			}
 

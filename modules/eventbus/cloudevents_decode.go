@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"time"
 )
 
@@ -29,6 +30,21 @@ var knownCloudEventKeys = map[string]bool{
 	"data":            true,
 	"data_base64":     true,
 	"subject":         true,
+}
+
+// isJSONContentType checks whether the datacontenttype attribute in a
+// CloudEvent map indicates a JSON media type (e.g. "application/json",
+// "application/json; charset=utf-8").
+func isJSONContentType(m map[string]json.RawMessage) bool {
+	dct, ok := extractString(m, "datacontenttype")
+	if !ok {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(dct)
+	if err != nil {
+		return false
+	}
+	return mediaType == "application/json"
 }
 
 // extractString extracts a JSON string value from a pre-parsed map.
@@ -101,8 +117,8 @@ func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
 			return Event{}, fmt.Errorf("failed to base64-decode CloudEvent 'data_base64' field: %w", err)
 		}
 		// If datacontenttype indicates JSON, unmarshal the decoded bytes.
-		dct, _ := extractString(m, "datacontenttype")
-		if dct == "application/json" {
+		// Use mime.ParseMediaType to handle parameters like charset.
+		if isJSONContentType(m) {
 			if err := json.Unmarshal(decoded, &payload); err != nil {
 				return Event{}, fmt.Errorf("failed to parse CloudEvent 'data_base64' JSON content: %w", err)
 			}
@@ -114,6 +130,7 @@ func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
 	// Build metadata from known attributes and extension attributes.
 	metadata := make(map[string]interface{})
 	metadata["ce_specversion"] = specversion
+	metadata["ce_type"] = ceType
 	metadata["ce_source"] = source
 	metadata["ce_id"] = id
 	if dct, ok := extractString(m, "datacontenttype"); ok {
@@ -145,9 +162,10 @@ func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
 
 // parseRecord attempts to parse raw JSON as either a CloudEvents envelope
 // or a native eventbus.Event. This is the entry point used by engine
-// deserialization paths. It performs a single JSON unmarshal into a generic
-// map; if the map contains "specversion" the record is treated as a
-// CloudEvent, otherwise it falls back to native Event deserialization.
+// deserialization paths. It first unmarshals into a generic map to probe
+// for the "specversion" key; CloudEvents are then decoded from that map
+// in a single pass, while native Events require a second unmarshal into
+// the Event struct.
 func parseRecord(raw []byte) (Event, error) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &m); err != nil {

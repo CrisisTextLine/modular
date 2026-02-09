@@ -45,6 +45,40 @@ func TestExtractString(t *testing.T) {
 	})
 }
 
+func TestIsJSONContentType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("application/json", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{"datacontenttype": json.RawMessage(`"application/json"`)}
+		assert.True(t, isJSONContentType(m))
+	})
+
+	t.Run("application/json with charset", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{"datacontenttype": json.RawMessage(`"application/json; charset=utf-8"`)}
+		assert.True(t, isJSONContentType(m))
+	})
+
+	t.Run("non-JSON content type", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{"datacontenttype": json.RawMessage(`"text/plain"`)}
+		assert.False(t, isJSONContentType(m))
+	})
+
+	t.Run("missing datacontenttype", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{}
+		assert.False(t, isJSONContentType(m))
+	})
+
+	t.Run("invalid media type", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{"datacontenttype": json.RawMessage(`";;;invalid"`)}
+		assert.False(t, isJSONContentType(m))
+	})
+}
+
 func TestParseCloudEvent(t *testing.T) {
 	t.Parallel()
 
@@ -66,6 +100,7 @@ func TestParseCloudEvent(t *testing.T) {
 		assert.Equal(t, "conversations.conversation.started", event.Topic)
 		assert.NotNil(t, event.Payload)
 		assert.Equal(t, "1.0", event.Metadata["ce_specversion"])
+		assert.Equal(t, "conversations.conversation.started", event.Metadata["ce_type"])
 		assert.Equal(t, "platform.conversations", event.Metadata["ce_source"])
 		assert.Equal(t, "evt-ff9745302bb23718d9da693c", event.Metadata["ce_id"])
 		assert.Equal(t, "application/json", event.Metadata["ce_datacontenttype"])
@@ -308,13 +343,13 @@ func TestParseCloudEvent(t *testing.T) {
 
 	t.Run("CloudEvent with data_base64 JSON payload", func(t *testing.T) {
 		t.Parallel()
-		// base64 of `{"key":"value"}`
+		// base64 of `{"key":"value"}`, with charset parameter in content type
 		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "test.event",
 			"source": "test",
 			"id": "1",
-			"datacontenttype": "application/json",
+			"datacontenttype": "application/json; charset=utf-8",
 			"data_base64": "eyJrZXkiOiJ2YWx1ZSJ9"
 		}`)
 

@@ -9,48 +9,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIsCloudEvent(t *testing.T) {
+// helper to unmarshal a JSON string into the map that parseCloudEvent expects.
+func ceMap(t *testing.T, raw string) map[string]json.RawMessage {
+	t.Helper()
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(raw), &m))
+	return m
+}
+
+func TestExtractString(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{
-			name:     "valid CloudEvent with specversion",
-			input:    `{"specversion":"1.0","type":"test","source":"test","id":"1"}`,
-			expected: true,
-		},
-		{
-			name:     "native Event without specversion",
-			input:    `{"topic":"user.created","payload":{"id":"123"},"createdAt":"2026-01-01T00:00:00Z"}`,
-			expected: false,
-		},
-		{
-			name:     "empty JSON object",
-			input:    `{}`,
-			expected: false,
-		},
-		{
-			name:     "invalid JSON",
-			input:    `not json`,
-			expected: false,
-		},
-		{
-			name:     "array not object",
-			input:    `[1,2,3]`,
-			expected: false,
-		},
-	}
+	t.Run("key present and string", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{"k": json.RawMessage(`"hello"`)}
+		v, ok := extractString(m, "k")
+		assert.True(t, ok)
+		assert.Equal(t, "hello", v)
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			result := isCloudEvent(json.RawMessage(tt.input))
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+	t.Run("key absent", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{}
+		v, ok := extractString(m, "k")
+		assert.False(t, ok)
+		assert.Equal(t, "", v)
+	})
+
+	t.Run("key present but not a string", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{"k": json.RawMessage(`123`)}
+		v, ok := extractString(m, "k")
+		assert.False(t, ok)
+		assert.Equal(t, "", v)
+	})
 }
 
 func TestParseCloudEvent(t *testing.T) {
@@ -58,7 +50,7 @@ func TestParseCloudEvent(t *testing.T) {
 
 	t.Run("full CloudEvent with all fields", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{
+		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "conversations.conversation.started",
 			"source": "platform.conversations",
@@ -68,7 +60,7 @@ func TestParseCloudEvent(t *testing.T) {
 			"data": {"id": "123", "texterId": "987", "keyword": "HELLO"}
 		}`)
 
-		event, err := parseCloudEvent(raw)
+		event, err := parseCloudEvent(m)
 		require.NoError(t, err)
 
 		assert.Equal(t, "conversations.conversation.started", event.Topic)
@@ -90,7 +82,7 @@ func TestParseCloudEvent(t *testing.T) {
 
 	t.Run("CloudEvent with extension attributes", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{
+		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "user.created",
 			"source": "user-service",
@@ -99,7 +91,7 @@ func TestParseCloudEvent(t *testing.T) {
 			"traceparent": "00-abc-def-01"
 		}`)
 
-		event, err := parseCloudEvent(raw)
+		event, err := parseCloudEvent(m)
 		require.NoError(t, err)
 
 		assert.Equal(t, "user.created", event.Topic)
@@ -109,7 +101,7 @@ func TestParseCloudEvent(t *testing.T) {
 
 	t.Run("CloudEvent without time uses current time", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{
+		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "test.event",
 			"source": "test",
@@ -117,7 +109,7 @@ func TestParseCloudEvent(t *testing.T) {
 		}`)
 
 		before := time.Now()
-		event, err := parseCloudEvent(raw)
+		event, err := parseCloudEvent(m)
 		after := time.Now()
 		require.NoError(t, err)
 
@@ -127,7 +119,7 @@ func TestParseCloudEvent(t *testing.T) {
 
 	t.Run("CloudEvent with unparseable time falls back to now", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{
+		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "test.event",
 			"source": "test",
@@ -136,7 +128,7 @@ func TestParseCloudEvent(t *testing.T) {
 		}`)
 
 		before := time.Now()
-		event, err := parseCloudEvent(raw)
+		event, err := parseCloudEvent(m)
 		after := time.Now()
 		require.NoError(t, err)
 
@@ -147,7 +139,7 @@ func TestParseCloudEvent(t *testing.T) {
 
 	t.Run("CloudEvent with null data", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{
+		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "test.event",
 			"source": "test",
@@ -155,60 +147,112 @@ func TestParseCloudEvent(t *testing.T) {
 			"data": null
 		}`)
 
-		event, err := parseCloudEvent(raw)
+		event, err := parseCloudEvent(m)
 		require.NoError(t, err)
 		assert.Nil(t, event.Payload)
 	})
 
 	t.Run("CloudEvent with no data field", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{
+		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "test.event",
 			"source": "test",
 			"id": "1"
 		}`)
 
-		event, err := parseCloudEvent(raw)
+		event, err := parseCloudEvent(m)
 		require.NoError(t, err)
 		assert.Nil(t, event.Payload)
 	})
 
 	t.Run("missing required type returns error", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{"specversion": "1.0", "source": "test", "id": "1"}`)
-		_, err := parseCloudEvent(raw)
+		m := ceMap(t, `{"specversion": "1.0", "source": "test", "id": "1"}`)
+		_, err := parseCloudEvent(m)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "type")
 	})
 
 	t.Run("missing required source returns error", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{"specversion": "1.0", "type": "test", "id": "1"}`)
-		_, err := parseCloudEvent(raw)
+		m := ceMap(t, `{"specversion": "1.0", "type": "test", "id": "1"}`)
+		_, err := parseCloudEvent(m)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "source")
 	})
 
 	t.Run("missing required id returns error", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{"specversion": "1.0", "type": "test", "source": "test"}`)
-		_, err := parseCloudEvent(raw)
+		m := ceMap(t, `{"specversion": "1.0", "type": "test", "source": "test"}`)
+		_, err := parseCloudEvent(m)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "id")
 	})
 
 	t.Run("missing required specversion returns error", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{"type": "test", "source": "test", "id": "1"}`)
-		_, err := parseCloudEvent(raw)
+		m := ceMap(t, `{"type": "test", "source": "test", "id": "1"}`)
+		_, err := parseCloudEvent(m)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "specversion")
 	})
 
+	t.Run("non-string specversion returns error", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{
+			"specversion": json.RawMessage(`1.0`),
+			"type":        json.RawMessage(`"test"`),
+			"source":      json.RawMessage(`"src"`),
+			"id":          json.RawMessage(`"1"`),
+		}
+		_, err := parseCloudEvent(m)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "specversion")
+	})
+
+	t.Run("non-string type returns error", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{
+			"specversion": json.RawMessage(`"1.0"`),
+			"type":        json.RawMessage(`42`),
+			"source":      json.RawMessage(`"src"`),
+			"id":          json.RawMessage(`"1"`),
+		}
+		_, err := parseCloudEvent(m)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "type")
+	})
+
+	t.Run("non-string source returns error", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{
+			"specversion": json.RawMessage(`"1.0"`),
+			"type":        json.RawMessage(`"test"`),
+			"source":      json.RawMessage(`true`),
+			"id":          json.RawMessage(`"1"`),
+		}
+		_, err := parseCloudEvent(m)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "source")
+	})
+
+	t.Run("non-string id returns error", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{
+			"specversion": json.RawMessage(`"1.0"`),
+			"type":        json.RawMessage(`"test"`),
+			"source":      json.RawMessage(`"src"`),
+			"id":          json.RawMessage(`99`),
+		}
+		_, err := parseCloudEvent(m)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "id")
+	})
+
 	t.Run("CloudEvent with subject attribute", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{
+		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "test.event",
 			"source": "test",
@@ -216,14 +260,14 @@ func TestParseCloudEvent(t *testing.T) {
 			"subject": "resource-123"
 		}`)
 
-		event, err := parseCloudEvent(raw)
+		event, err := parseCloudEvent(m)
 		require.NoError(t, err)
 		assert.Equal(t, "resource-123", event.Metadata["ce_subject"])
 	})
 
 	t.Run("CloudEvent with string data payload", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{
+		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "test.event",
 			"source": "test",
@@ -231,14 +275,14 @@ func TestParseCloudEvent(t *testing.T) {
 			"data": "plain text payload"
 		}`)
 
-		event, err := parseCloudEvent(raw)
+		event, err := parseCloudEvent(m)
 		require.NoError(t, err)
 		assert.Equal(t, "plain text payload", event.Payload)
 	})
 
 	t.Run("CloudEvent with array data payload", func(t *testing.T) {
 		t.Parallel()
-		raw := json.RawMessage(`{
+		m := ceMap(t, `{
 			"specversion": "1.0",
 			"type": "test.event",
 			"source": "test",
@@ -246,11 +290,39 @@ func TestParseCloudEvent(t *testing.T) {
 			"data": [1, 2, 3]
 		}`)
 
-		event, err := parseCloudEvent(raw)
+		event, err := parseCloudEvent(m)
 		require.NoError(t, err)
 		arr, ok := event.Payload.([]interface{})
 		require.True(t, ok)
 		assert.Len(t, arr, 3)
+	})
+
+	t.Run("invalid data field returns error", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{
+			"specversion": json.RawMessage(`"1.0"`),
+			"type":        json.RawMessage(`"test"`),
+			"source":      json.RawMessage(`"src"`),
+			"id":          json.RawMessage(`"1"`),
+			"data":        json.RawMessage(`{invalid`),
+		}
+		_, err := parseCloudEvent(m)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "data")
+	})
+
+	t.Run("extension with non-JSON value falls back to string", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{
+			"specversion": json.RawMessage(`"1.0"`),
+			"type":        json.RawMessage(`"test"`),
+			"source":      json.RawMessage(`"src"`),
+			"id":          json.RawMessage(`"1"`),
+			"customext":   json.RawMessage(`{bad json`),
+		}
+		event, err := parseCloudEvent(m)
+		require.NoError(t, err)
+		assert.Equal(t, "{bad json", event.Metadata["ce_customext"])
 	})
 }
 
@@ -301,6 +373,15 @@ func TestParseRecord(t *testing.T) {
 		event, err := parseRecord([]byte(`{}`))
 		require.NoError(t, err)
 		assert.Equal(t, "", event.Topic)
+	})
+
+	t.Run("valid JSON but invalid native Event returns error", func(t *testing.T) {
+		t.Parallel()
+		// createdAt must be a valid RFC3339 timestamp; a bare string triggers unmarshal error.
+		raw := []byte(`{"topic":"t","createdAt":"not-a-time"}`)
+		_, err := parseRecord(raw)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to deserialize record")
 	})
 
 	t.Run("native event with __topic metadata preserved", func(t *testing.T) {

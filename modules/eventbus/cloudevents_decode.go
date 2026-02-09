@@ -7,20 +7,6 @@ import (
 	"time"
 )
 
-// cloudEventEnvelope is a lightweight representation of a CloudEvents v1.0
-// JSON envelope. Only the required and commonly-used attributes are given
-// dedicated fields; extension attributes are captured separately.
-type cloudEventEnvelope struct {
-	SpecVersion     string          `json:"specversion"`
-	Type            string          `json:"type"`
-	Source          string          `json:"source"`
-	ID              string          `json:"id"`
-	Time            string          `json:"time,omitempty"`
-	DataContentType string          `json:"datacontenttype,omitempty"`
-	Data            json.RawMessage `json:"data,omitempty"`
-	Subject         string          `json:"subject,omitempty"`
-}
-
 // knownCloudEventKeys are the CloudEvents spec-defined keys that have
 // dedicated handling. Anything else is treated as an extension attribute.
 var knownCloudEventKeys = map[string]bool{
@@ -35,18 +21,23 @@ var knownCloudEventKeys = map[string]bool{
 	"subject":         true,
 }
 
-// isCloudEvent checks whether raw JSON contains a CloudEvents envelope
-// by probing for the required "specversion" key.
-func isCloudEvent(raw json.RawMessage) bool {
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return false
+// extractString extracts a JSON string value from a pre-parsed map.
+// Returns ("", false) if the key is absent or the value is not a JSON string.
+func extractString(m map[string]json.RawMessage, key string) (string, bool) {
+	raw, ok := m[key]
+	if !ok {
+		return "", false
 	}
-	_, ok := probe["specversion"]
-	return ok
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", false
+	}
+	return s, true
 }
 
-// parseCloudEvent maps a CloudEvents JSON envelope to an eventbus.Event.
+// parseCloudEvent maps a pre-parsed CloudEvents JSON map to an eventbus.Event.
+// The caller is expected to have already unmarshalled the raw bytes into the
+// map, so this function performs no redundant decoding.
 //
 // Mapping:
 //   - type         → Event.Topic
@@ -54,32 +45,31 @@ func isCloudEvent(raw json.RawMessage) bool {
 //   - time         → Event.CreatedAt (RFC3339; falls back to time.Now())
 //   - specversion, source, id, datacontenttype, subject, and all extension
 //     attributes → Event.Metadata (prefixed with "ce_")
-func parseCloudEvent(raw json.RawMessage) (Event, error) {
-	var ce cloudEventEnvelope
-	if err := json.Unmarshal(raw, &ce); err != nil {
-		return Event{}, fmt.Errorf("failed to parse CloudEvent envelope: %w", err)
-	}
-
-	if ce.SpecVersion == "" {
+func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
+	specversion, ok := extractString(m, "specversion")
+	if !ok || specversion == "" {
 		return Event{}, fmt.Errorf("CloudEvent missing required 'specversion' attribute")
 	}
-	if ce.Type == "" {
+	ceType, ok := extractString(m, "type")
+	if !ok || ceType == "" {
 		return Event{}, fmt.Errorf("CloudEvent missing required 'type' attribute")
 	}
-	if ce.Source == "" {
+	source, ok := extractString(m, "source")
+	if !ok || source == "" {
 		return Event{}, fmt.Errorf("CloudEvent missing required 'source' attribute")
 	}
-	if ce.ID == "" {
+	id, ok := extractString(m, "id")
+	if !ok || id == "" {
 		return Event{}, fmt.Errorf("CloudEvent missing required 'id' attribute")
 	}
 
 	var createdAt time.Time
-	if ce.Time != "" {
+	if timeStr, hasTime := extractString(m, "time"); hasTime && timeStr != "" {
 		var err error
-		createdAt, err = time.Parse(time.RFC3339, ce.Time)
+		createdAt, err = time.Parse(time.RFC3339, timeStr)
 		if err != nil {
 			slog.Warn("CloudEvent has unparseable 'time' attribute, using current time",
-				"time", ce.Time, "error", err)
+				"time", timeStr, "error", err)
 			createdAt = time.Now()
 		}
 	} else {
@@ -87,30 +77,25 @@ func parseCloudEvent(raw json.RawMessage) (Event, error) {
 	}
 
 	var payload interface{}
-	if len(ce.Data) > 0 && string(ce.Data) != "null" {
-		if err := json.Unmarshal(ce.Data, &payload); err != nil {
+	if data, hasData := m["data"]; hasData && len(data) > 0 && string(data) != "null" {
+		if err := json.Unmarshal(data, &payload); err != nil {
 			return Event{}, fmt.Errorf("failed to parse CloudEvent 'data' field: %w", err)
 		}
 	}
 
 	// Build metadata from known attributes and extension attributes.
-	var fullMap map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fullMap); err != nil {
-		return Event{}, fmt.Errorf("failed to parse CloudEvent for extensions: %w", err)
-	}
-
 	metadata := make(map[string]interface{})
-	metadata["ce_specversion"] = ce.SpecVersion
-	metadata["ce_source"] = ce.Source
-	metadata["ce_id"] = ce.ID
-	if ce.DataContentType != "" {
-		metadata["ce_datacontenttype"] = ce.DataContentType
+	metadata["ce_specversion"] = specversion
+	metadata["ce_source"] = source
+	metadata["ce_id"] = id
+	if dct, ok := extractString(m, "datacontenttype"); ok {
+		metadata["ce_datacontenttype"] = dct
 	}
-	if ce.Subject != "" {
-		metadata["ce_subject"] = ce.Subject
+	if subj, ok := extractString(m, "subject"); ok {
+		metadata["ce_subject"] = subj
 	}
 
-	for key, val := range fullMap {
+	for key, val := range m {
 		if knownCloudEventKeys[key] {
 			continue
 		}
@@ -123,7 +108,7 @@ func parseCloudEvent(raw json.RawMessage) (Event, error) {
 	}
 
 	return Event{
-		Topic:     ce.Type,
+		Topic:     ceType,
 		Payload:   payload,
 		Metadata:  metadata,
 		CreatedAt: createdAt,
@@ -132,10 +117,17 @@ func parseCloudEvent(raw json.RawMessage) (Event, error) {
 
 // parseRecord attempts to parse raw JSON as either a CloudEvents envelope
 // or a native eventbus.Event. This is the entry point used by engine
-// deserialization paths.
+// deserialization paths. It performs a single JSON unmarshal into a generic
+// map; if the map contains "specversion" the record is treated as a
+// CloudEvent, otherwise it falls back to native Event deserialization.
 func parseRecord(raw []byte) (Event, error) {
-	if isCloudEvent(json.RawMessage(raw)) {
-		return parseCloudEvent(json.RawMessage(raw))
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return Event{}, fmt.Errorf("failed to deserialize record: %w", err)
+	}
+
+	if _, ok := m["specversion"]; ok {
+		return parseCloudEvent(m)
 	}
 
 	var event Event

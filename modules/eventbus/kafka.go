@@ -115,16 +115,16 @@ func (h *KafkaConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSes
 			}
 			h.mutex.RUnlock()
 
+			// Deserialize once per message, reuse for all matching subscriptions
+			event, err := parseRecord(msg.Value)
+			if err != nil {
+				slog.Error("Failed to deserialize Kafka message", "error", err, "topic", msg.Topic)
+				session.MarkMessage(msg, "")
+				continue
+			}
+
 			// Process message for each matching subscription
 			for _, sub := range subs {
-				// Deserialize event
-				event, err := parseRecord(msg.Value)
-				if err != nil {
-					slog.Error("Failed to deserialize Kafka message", "error", err, "topic", msg.Topic)
-					continue
-				}
-
-				// Process the event
 				if sub.isAsync {
 					go h.eventBus.processEventAsync(sub, event)
 				} else {

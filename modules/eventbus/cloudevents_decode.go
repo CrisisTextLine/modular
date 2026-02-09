@@ -1,10 +1,20 @@
 package eventbus
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
+)
+
+// Sentinel errors for CloudEvent validation.
+var (
+	ErrCloudEventMissingSpecVersion = errors.New("CloudEvent missing required 'specversion' attribute")
+	ErrCloudEventMissingType        = errors.New("CloudEvent missing required 'type' attribute")
+	ErrCloudEventMissingSource      = errors.New("CloudEvent missing required 'source' attribute")
+	ErrCloudEventMissingID          = errors.New("CloudEvent missing required 'id' attribute")
 )
 
 // knownCloudEventKeys are the CloudEvents spec-defined keys that have
@@ -48,19 +58,19 @@ func extractString(m map[string]json.RawMessage, key string) (string, bool) {
 func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
 	specversion, ok := extractString(m, "specversion")
 	if !ok || specversion == "" {
-		return Event{}, fmt.Errorf("CloudEvent missing required 'specversion' attribute")
+		return Event{}, ErrCloudEventMissingSpecVersion
 	}
 	ceType, ok := extractString(m, "type")
 	if !ok || ceType == "" {
-		return Event{}, fmt.Errorf("CloudEvent missing required 'type' attribute")
+		return Event{}, ErrCloudEventMissingType
 	}
 	source, ok := extractString(m, "source")
 	if !ok || source == "" {
-		return Event{}, fmt.Errorf("CloudEvent missing required 'source' attribute")
+		return Event{}, ErrCloudEventMissingSource
 	}
 	id, ok := extractString(m, "id")
 	if !ok || id == "" {
-		return Event{}, fmt.Errorf("CloudEvent missing required 'id' attribute")
+		return Event{}, ErrCloudEventMissingID
 	}
 
 	var createdAt time.Time
@@ -80,6 +90,24 @@ func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
 	if data, hasData := m["data"]; hasData && len(data) > 0 && string(data) != "null" {
 		if err := json.Unmarshal(data, &payload); err != nil {
 			return Event{}, fmt.Errorf("failed to parse CloudEvent 'data' field: %w", err)
+		}
+	} else if dataB64, hasB64 := m["data_base64"]; hasB64 && len(dataB64) > 0 && string(dataB64) != "null" {
+		var b64str string
+		if err := json.Unmarshal(dataB64, &b64str); err != nil {
+			return Event{}, fmt.Errorf("failed to parse CloudEvent 'data_base64' field: %w", err)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(b64str)
+		if err != nil {
+			return Event{}, fmt.Errorf("failed to base64-decode CloudEvent 'data_base64' field: %w", err)
+		}
+		// If datacontenttype indicates JSON, unmarshal the decoded bytes.
+		dct, _ := extractString(m, "datacontenttype")
+		if dct == "application/json" {
+			if err := json.Unmarshal(decoded, &payload); err != nil {
+				return Event{}, fmt.Errorf("failed to parse CloudEvent 'data_base64' JSON content: %w", err)
+			}
+		} else {
+			payload = decoded
 		}
 	}
 

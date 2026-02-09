@@ -70,7 +70,8 @@ func TestParseCloudEvent(t *testing.T) {
 		assert.Equal(t, "evt-ff9745302bb23718d9da693c", event.Metadata["ce_id"])
 		assert.Equal(t, "application/json", event.Metadata["ce_datacontenttype"])
 
-		expectedTime, _ := time.Parse(time.RFC3339, "2026-02-06T23:02:35+00:00")
+		expectedTime, err := time.Parse(time.RFC3339, "2026-02-06T23:02:35+00:00")
+		require.NoError(t, err)
 		assert.Equal(t, expectedTime, event.CreatedAt)
 
 		payloadMap, ok := event.Payload.(map[string]interface{})
@@ -170,32 +171,28 @@ func TestParseCloudEvent(t *testing.T) {
 		t.Parallel()
 		m := ceMap(t, `{"specversion": "1.0", "source": "test", "id": "1"}`)
 		_, err := parseCloudEvent(m)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "type")
+		assert.ErrorIs(t, err, ErrCloudEventMissingType)
 	})
 
 	t.Run("missing required source returns error", func(t *testing.T) {
 		t.Parallel()
 		m := ceMap(t, `{"specversion": "1.0", "type": "test", "id": "1"}`)
 		_, err := parseCloudEvent(m)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "source")
+		assert.ErrorIs(t, err, ErrCloudEventMissingSource)
 	})
 
 	t.Run("missing required id returns error", func(t *testing.T) {
 		t.Parallel()
 		m := ceMap(t, `{"specversion": "1.0", "type": "test", "source": "test"}`)
 		_, err := parseCloudEvent(m)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "id")
+		assert.ErrorIs(t, err, ErrCloudEventMissingID)
 	})
 
 	t.Run("missing required specversion returns error", func(t *testing.T) {
 		t.Parallel()
 		m := ceMap(t, `{"type": "test", "source": "test", "id": "1"}`)
 		_, err := parseCloudEvent(m)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "specversion")
+		assert.ErrorIs(t, err, ErrCloudEventMissingSpecVersion)
 	})
 
 	t.Run("non-string specversion returns error", func(t *testing.T) {
@@ -207,8 +204,7 @@ func TestParseCloudEvent(t *testing.T) {
 			"id":          json.RawMessage(`"1"`),
 		}
 		_, err := parseCloudEvent(m)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "specversion")
+		assert.ErrorIs(t, err, ErrCloudEventMissingSpecVersion)
 	})
 
 	t.Run("non-string type returns error", func(t *testing.T) {
@@ -220,8 +216,7 @@ func TestParseCloudEvent(t *testing.T) {
 			"id":          json.RawMessage(`"1"`),
 		}
 		_, err := parseCloudEvent(m)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "type")
+		assert.ErrorIs(t, err, ErrCloudEventMissingType)
 	})
 
 	t.Run("non-string source returns error", func(t *testing.T) {
@@ -233,8 +228,7 @@ func TestParseCloudEvent(t *testing.T) {
 			"id":          json.RawMessage(`"1"`),
 		}
 		_, err := parseCloudEvent(m)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "source")
+		assert.ErrorIs(t, err, ErrCloudEventMissingSource)
 	})
 
 	t.Run("non-string id returns error", func(t *testing.T) {
@@ -246,8 +240,7 @@ func TestParseCloudEvent(t *testing.T) {
 			"id":          json.RawMessage(`99`),
 		}
 		_, err := parseCloudEvent(m)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "id")
+		assert.ErrorIs(t, err, ErrCloudEventMissingID)
 	})
 
 	t.Run("CloudEvent with subject attribute", func(t *testing.T) {
@@ -295,6 +288,120 @@ func TestParseCloudEvent(t *testing.T) {
 		arr, ok := event.Payload.([]interface{})
 		require.True(t, ok)
 		assert.Len(t, arr, 3)
+	})
+
+	t.Run("CloudEvent with data_base64 binary payload", func(t *testing.T) {
+		t.Parallel()
+		// "SGVsbG8gV29ybGQ=" is base64 for "Hello World"
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1",
+			"data_base64": "SGVsbG8gV29ybGQ="
+		}`)
+
+		event, err := parseCloudEvent(m)
+		require.NoError(t, err)
+		assert.Equal(t, []byte("Hello World"), event.Payload)
+	})
+
+	t.Run("CloudEvent with data_base64 JSON payload", func(t *testing.T) {
+		t.Parallel()
+		// base64 of `{"key":"value"}`
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1",
+			"datacontenttype": "application/json",
+			"data_base64": "eyJrZXkiOiJ2YWx1ZSJ9"
+		}`)
+
+		event, err := parseCloudEvent(m)
+		require.NoError(t, err)
+		payloadMap, ok := event.Payload.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "value", payloadMap["key"])
+	})
+
+	t.Run("CloudEvent with invalid data_base64 returns error", func(t *testing.T) {
+		t.Parallel()
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1",
+			"data_base64": "!!!not-base64!!!"
+		}`)
+
+		_, err := parseCloudEvent(m)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "data_base64")
+	})
+
+	t.Run("CloudEvent with non-string data_base64 returns error", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]json.RawMessage{
+			"specversion": json.RawMessage(`"1.0"`),
+			"type":        json.RawMessage(`"test"`),
+			"source":      json.RawMessage(`"src"`),
+			"id":          json.RawMessage(`"1"`),
+			"data_base64":  json.RawMessage(`12345`),
+		}
+		_, err := parseCloudEvent(m)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "data_base64")
+	})
+
+	t.Run("CloudEvent with data_base64 invalid JSON content returns error", func(t *testing.T) {
+		t.Parallel()
+		// base64 of "not json" = "bm90IGpzb24="
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1",
+			"datacontenttype": "application/json",
+			"data_base64": "bm90IGpzb24="
+		}`)
+
+		_, err := parseCloudEvent(m)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "data_base64")
+	})
+
+	t.Run("data takes precedence over data_base64", func(t *testing.T) {
+		t.Parallel()
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1",
+			"data": {"from": "data"},
+			"data_base64": "SGVsbG8="
+		}`)
+
+		event, err := parseCloudEvent(m)
+		require.NoError(t, err)
+		payloadMap, ok := event.Payload.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "data", payloadMap["from"])
+	})
+
+	t.Run("CloudEvent with null data_base64", func(t *testing.T) {
+		t.Parallel()
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1",
+			"data_base64": null
+		}`)
+
+		event, err := parseCloudEvent(m)
+		require.NoError(t, err)
+		assert.Nil(t, event.Payload)
 	})
 
 	t.Run("invalid data field returns error", func(t *testing.T) {

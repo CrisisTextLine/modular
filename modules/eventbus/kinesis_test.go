@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -254,6 +255,33 @@ func TestKinesisPublishNotStarted(t *testing.T) {
 
 	err := bus.Publish(context.Background(), Event{Topic: "test", Payload: "data"})
 	assert.ErrorIs(t, err, ErrEventBusNotStarted)
+}
+
+// --- isExpiredIteratorError unit tests ---
+
+func TestIsExpiredIteratorError(t *testing.T) {
+	t.Run("returns true for ExpiredIteratorException", func(t *testing.T) {
+		msg := "Iterator expired"
+		err := &types.ExpiredIteratorException{Message: &msg}
+		assert.True(t, isExpiredIteratorError(err))
+	})
+
+	t.Run("returns true for wrapped ExpiredIteratorException", func(t *testing.T) {
+		msg := "Iterator expired"
+		inner := &types.ExpiredIteratorException{Message: &msg}
+		wrapped := fmt.Errorf("kinesis error: %w", inner)
+		assert.True(t, isExpiredIteratorError(wrapped))
+	})
+
+	t.Run("returns false for other errors", func(t *testing.T) {
+		assert.False(t, isExpiredIteratorError(errors.New("something else")))
+	})
+
+	t.Run("returns false for other Kinesis errors", func(t *testing.T) {
+		msg := "Throughput exceeded"
+		err := &types.ProvisionedThroughputExceededException{Message: &msg}
+		assert.False(t, isExpiredIteratorError(err))
+	})
 }
 
 // --- ReadShard integration tests: CloudEvents deserialization via mock Kinesis ---
@@ -557,4 +585,231 @@ func TestKinesisReadShardMultipleRecords(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for user event")
 	}
+}
+
+// --- Expired iterator recovery integration tests ---
+
+func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
+	t.Run("recovers with LATEST when no sequence number tracked", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockClient := mocks.NewMockKinesisClient(ctrl)
+
+		received := make(chan Event, 1)
+		subs := map[string]map[string]*kinesisSubscription{
+			"order.placed": {
+				"test-sub": {
+					id:    "test-sub",
+					topic: "order.placed",
+					handler: func(ctx context.Context, event Event) error {
+						received <- event
+						return nil
+					},
+					done: make(chan struct{}),
+				},
+			},
+		}
+		bus := newReadShardTestBus(t, mockClient, subs)
+		subs["order.placed"]["test-sub"].bus = bus
+
+		initialIter := "shard-iter-1"
+		refreshedIter := "shard-iter-2"
+
+		// 1. Initial GetShardIterator succeeds
+		mockClient.EXPECT().
+			GetShardIterator(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, input *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+				assert.Equal(t, types.ShardIteratorTypeLatest, input.ShardIteratorType)
+				return &kinesis.GetShardIteratorOutput{ShardIterator: &initialIter}, nil
+			})
+
+		// 2. First GetRecords returns ExpiredIteratorException
+		expiredMsg := "Iterator expired because it aged past 5 minutes"
+		gomock.InOrder(
+			mockClient.EXPECT().
+				GetRecords(gomock.Any(), gomock.Any()).
+				Return(nil, &types.ExpiredIteratorException{Message: &expiredMsg}),
+		)
+
+		// 3. Refresh GetShardIterator — should use LATEST since no records were processed
+		mockClient.EXPECT().
+			GetShardIterator(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, input *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+				assert.Equal(t, types.ShardIteratorTypeLatest, input.ShardIteratorType,
+					"should use LATEST when no sequence number has been tracked")
+				assert.Nil(t, input.StartingSequenceNumber)
+				return &kinesis.GetShardIteratorOutput{ShardIterator: &refreshedIter}, nil
+			})
+
+		// 4. Second GetRecords succeeds with data, then nil iterator to terminate
+		ceJSON := []byte(`{"specversion":"1.0","type":"order.placed","source":"orders","id":"evt-recover","data":{"orderId":"recovered"}}`)
+		mockClient.EXPECT().
+			GetRecords(gomock.Any(), gomock.Any()).
+			Return(&kinesis.GetRecordsOutput{
+				Records:           []types.Record{{Data: ceJSON}},
+				NextShardIterator: nil,
+			}, nil)
+
+		bus.readShard("shard-0")
+
+		select {
+		case event := <-received:
+			assert.Equal(t, "order.placed", event.Topic)
+			payloadMap, ok := event.Payload.(map[string]interface{})
+			require.True(t, ok)
+			assert.Equal(t, "recovered", payloadMap["orderId"])
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for event after iterator recovery")
+		}
+	})
+
+	t.Run("recovers with AFTER_SEQUENCE_NUMBER when records were previously processed", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockClient := mocks.NewMockKinesisClient(ctrl)
+
+		received := make(chan Event, 2)
+		subs := map[string]map[string]*kinesisSubscription{
+			"order.placed": {
+				"test-sub": {
+					id:    "test-sub",
+					topic: "order.placed",
+					handler: func(ctx context.Context, event Event) error {
+						received <- event
+						return nil
+					},
+					done: make(chan struct{}),
+				},
+			},
+		}
+		bus := newReadShardTestBus(t, mockClient, subs)
+		subs["order.placed"]["test-sub"].bus = bus
+
+		initialIter := "shard-iter-1"
+		secondIter := "shard-iter-2"
+		refreshedIter := "shard-iter-3"
+		seqNum := "49607379238952109838144426"
+
+		// 1. Initial GetShardIterator
+		mockClient.EXPECT().
+			GetShardIterator(gomock.Any(), gomock.Any()).
+			Return(&kinesis.GetShardIteratorOutput{ShardIterator: &initialIter}, nil)
+
+		// 2. First GetRecords succeeds with a record (establishes lastSeqNum)
+		firstRecord := []byte(`{"specversion":"1.0","type":"order.placed","source":"orders","id":"evt-1","data":{"orderId":"first"}}`)
+		mockClient.EXPECT().
+			GetRecords(gomock.Any(), gomock.Any()).
+			Return(&kinesis.GetRecordsOutput{
+				Records:           []types.Record{{Data: firstRecord, SequenceNumber: &seqNum}},
+				NextShardIterator: &secondIter,
+			}, nil)
+
+		// 3. Second GetRecords returns ExpiredIteratorException
+		expiredMsg := "Iterator expired"
+		mockClient.EXPECT().
+			GetRecords(gomock.Any(), gomock.Any()).
+			Return(nil, &types.ExpiredIteratorException{Message: &expiredMsg})
+
+		// 4. Refresh GetShardIterator — should use AFTER_SEQUENCE_NUMBER with the tracked seq num
+		mockClient.EXPECT().
+			GetShardIterator(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, input *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error) {
+				assert.Equal(t, types.ShardIteratorTypeAfterSequenceNumber, input.ShardIteratorType,
+					"should use AFTER_SEQUENCE_NUMBER when a sequence number was tracked")
+				require.NotNil(t, input.StartingSequenceNumber)
+				assert.Equal(t, seqNum, *input.StartingSequenceNumber)
+				return &kinesis.GetShardIteratorOutput{ShardIterator: &refreshedIter}, nil
+			})
+
+		// 5. Third GetRecords succeeds, then nil iterator to terminate
+		secondRecord := []byte(`{"specversion":"1.0","type":"order.placed","source":"orders","id":"evt-2","data":{"orderId":"second"}}`)
+		mockClient.EXPECT().
+			GetRecords(gomock.Any(), gomock.Any()).
+			Return(&kinesis.GetRecordsOutput{
+				Records:           []types.Record{{Data: secondRecord}},
+				NextShardIterator: nil,
+			}, nil)
+
+		bus.readShard("shard-0")
+
+		// Should receive both events
+		for i, expectedID := range []string{"first", "second"} {
+			select {
+			case event := <-received:
+				assert.Equal(t, "order.placed", event.Topic)
+				payloadMap, ok := event.Payload.(map[string]interface{})
+				require.True(t, ok, "event %d payload should be a map", i)
+				assert.Equal(t, expectedID, payloadMap["orderId"])
+			case <-time.After(2 * time.Second):
+				t.Fatalf("timed out waiting for event %d", i)
+			}
+		}
+	})
+
+	t.Run("exits cleanly on context cancellation during refresh backoff", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockClient := mocks.NewMockKinesisClient(ctrl)
+
+		subs := map[string]map[string]*kinesisSubscription{
+			"order.placed": {
+				"test-sub": {
+					id:    "test-sub",
+					topic: "order.placed",
+					handler: func(ctx context.Context, event Event) error {
+						return nil
+					},
+					done: make(chan struct{}),
+				},
+			},
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		bus := &KinesisEventBus{
+			config: &KinesisConfig{
+				StreamName: "test-stream",
+				ShardCount: 1,
+			},
+			client:        mockClient,
+			subscriptions: subs,
+			ctx:           ctx,
+			cancel:        cancel,
+			isStarted:     true,
+		}
+		subs["order.placed"]["test-sub"].bus = bus
+
+		initialIter := "shard-iter-1"
+
+		// 1. Initial GetShardIterator
+		mockClient.EXPECT().
+			GetShardIterator(gomock.Any(), gomock.Any()).
+			Return(&kinesis.GetShardIteratorOutput{ShardIterator: &initialIter}, nil)
+
+		// 2. GetRecords returns ExpiredIteratorException
+		expiredMsg := "Iterator expired"
+		mockClient.EXPECT().
+			GetRecords(gomock.Any(), gomock.Any()).
+			Return(nil, &types.ExpiredIteratorException{Message: &expiredMsg})
+
+		// 3. Refresh fails — triggers the 5s backoff timer
+		mockClient.EXPECT().
+			GetShardIterator(gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("service unavailable"))
+
+		// Cancel context shortly after to test that readShard exits during backoff
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			cancel()
+		}()
+
+		done := make(chan struct{})
+		go func() {
+			bus.readShard("shard-0")
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// readShard exited cleanly during backoff — success
+		case <-time.After(3 * time.Second):
+			t.Fatal("readShard did not exit after context cancellation during refresh backoff")
+		}
+	})
 }

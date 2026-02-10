@@ -356,6 +356,7 @@ func (k *KinesisEventBus) readShard(shardID string) {
 	}
 
 	shardIterator := iterResp.ShardIterator
+	var lastSeqNum string
 
 	for {
 		select {
@@ -372,7 +373,40 @@ func (k *KinesisEventBus) readShard(shardID string) {
 			})
 			if err != nil {
 				slog.Error("Failed to get Kinesis records", "error", err, "shard", shardID)
-				time.Sleep(1 * time.Second)
+
+				if isExpiredIteratorError(err) {
+					slog.Info("Refreshing expired shard iterator", "shard", shardID)
+					iterInput := &kinesis.GetShardIteratorInput{
+						StreamName: &k.config.StreamName,
+						ShardId:    &shardID,
+					}
+					if lastSeqNum != "" {
+						iterInput.ShardIteratorType = types.ShardIteratorTypeAfterSequenceNumber
+						iterInput.StartingSequenceNumber = &lastSeqNum
+					} else {
+						iterInput.ShardIteratorType = types.ShardIteratorTypeLatest
+					}
+					iterResp, iterErr := k.client.GetShardIterator(k.ctx, iterInput)
+					if iterErr != nil {
+						slog.Error("Failed to refresh shard iterator", "error", iterErr, "shard", shardID)
+						t := time.NewTimer(5 * time.Second)
+						select {
+						case <-t.C:
+						case <-k.ctx.Done():
+							t.Stop()
+							return
+						}
+						continue
+					}
+					shardIterator = iterResp.ShardIterator
+					continue
+				}
+
+				select {
+				case <-time.After(1 * time.Second):
+				case <-k.ctx.Done():
+					return
+				}
 				continue
 			}
 
@@ -406,6 +440,13 @@ func (k *KinesisEventBus) readShard(shardID string) {
 				}
 			}
 
+			// Track last sequence number for iterator recovery
+			if n := len(resp.Records); n > 0 {
+				if seq := resp.Records[n-1].SequenceNumber; seq != nil {
+					lastSeqNum = *seq
+				}
+			}
+
 			// Update shard iterator
 			shardIterator = resp.NextShardIterator
 
@@ -427,6 +468,12 @@ func (k *KinesisEventBus) topicMatches(eventTopic, subscriptionTopic string) boo
 	}
 
 	return false
+}
+
+// isExpiredIteratorError checks if the error is an AWS Kinesis ExpiredIteratorException
+func isExpiredIteratorError(err error) bool {
+	var expiredErr *types.ExpiredIteratorException
+	return errors.As(err, &expiredErr)
 }
 
 // Unsubscribe removes a subscription

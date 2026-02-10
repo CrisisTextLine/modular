@@ -1,5 +1,7 @@
 package eventbus
 
+//go:generate mockgen -destination=mocks/mock_kafka.go -package=mocks github.com/IBM/sarama SyncProducer,ConsumerGroup
+
 import (
 	"context"
 	"encoding/json"

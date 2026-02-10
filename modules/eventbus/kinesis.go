@@ -378,8 +378,8 @@ func (k *KinesisEventBus) readShard(shardID string) {
 
 			// Process records
 			for _, record := range resp.Records {
-				var event Event
-				if err := json.Unmarshal(record.Data, &event); err != nil {
+				event, err := parseRecord(record.Data)
+				if err != nil {
 					slog.Error("Failed to deserialize Kinesis record", "error", err)
 					continue
 				}

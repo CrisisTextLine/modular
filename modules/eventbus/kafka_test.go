@@ -282,3 +282,248 @@ func TestKafkaPublishNotStarted(t *testing.T) {
 	err := bus.Publish(context.Background(), Event{Topic: "test", Payload: "data"})
 	assert.ErrorIs(t, err, ErrEventBusNotStarted)
 }
+
+// --- ConsumeClaim integration tests: CloudEvents deserialization via Kafka ---
+
+// testConsumerGroupSession implements sarama.ConsumerGroupSession for tests.
+type testConsumerGroupSession struct {
+	ctx        context.Context
+	markedMsgs []*sarama.ConsumerMessage
+}
+
+func (s *testConsumerGroupSession) Claims() map[string][]int32                                   { return nil }
+func (s *testConsumerGroupSession) MemberID() string                                             { return "test-member" }
+func (s *testConsumerGroupSession) GenerationID() int32                                          { return 1 }
+func (s *testConsumerGroupSession) MarkOffset(_ string, _ int32, _ int64, _ string)              {}
+func (s *testConsumerGroupSession) Commit()                                                      {}
+func (s *testConsumerGroupSession) ResetOffset(_ string, _ int32, _ int64, _ string)             {}
+func (s *testConsumerGroupSession) Context() context.Context                                     { return s.ctx }
+func (s *testConsumerGroupSession) MarkMessage(msg *sarama.ConsumerMessage, _ string) {
+	s.markedMsgs = append(s.markedMsgs, msg)
+}
+
+// testConsumerGroupClaim implements sarama.ConsumerGroupClaim for tests.
+type testConsumerGroupClaim struct {
+	messages chan *sarama.ConsumerMessage
+}
+
+func (c *testConsumerGroupClaim) Topic() string                            { return "test-topic" }
+func (c *testConsumerGroupClaim) Partition() int32                         { return 0 }
+func (c *testConsumerGroupClaim) InitialOffset() int64                     { return 0 }
+func (c *testConsumerGroupClaim) HighWaterMarkOffset() int64               { return 0 }
+func (c *testConsumerGroupClaim) Messages() <-chan *sarama.ConsumerMessage { return c.messages }
+
+func TestKafkaConsumeClaimCloudEvent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	producer := mocks.NewMockSyncProducer(ctrl)
+	bus := newTestKafkaEventBus(producer)
+	defer bus.cancel()
+
+	received := make(chan Event, 1)
+	handler := &KafkaConsumerGroupHandler{
+		eventBus: bus,
+		subscriptions: map[string]*kafkaSubscription{
+			"sub-1": {
+				id:    "sub-1",
+				topic: "order.placed",
+				handler: func(ctx context.Context, event Event) error {
+					received <- event
+					return nil
+				},
+				done: make(chan struct{}),
+				bus:  bus,
+			},
+		},
+	}
+
+	messages := make(chan *sarama.ConsumerMessage, 1)
+	messages <- &sarama.ConsumerMessage{
+		Topic: "order.placed",
+		Value: []byte(`{"specversion":"1.0","type":"order.placed","source":"order-svc","id":"evt-1","data":{"orderId":"42"}}`),
+	}
+	close(messages)
+
+	session := &testConsumerGroupSession{ctx: context.Background()}
+	claim := &testConsumerGroupClaim{messages: messages}
+
+	err := handler.ConsumeClaim(session, claim)
+	require.NoError(t, err)
+
+	select {
+	case event := <-received:
+		assert.Equal(t, "order.placed", event.Topic)
+		assert.Equal(t, "1.0", event.Metadata["ce_specversion"])
+		assert.Equal(t, "order-svc", event.Metadata["ce_source"])
+		payloadMap, ok := event.Payload.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "42", payloadMap["orderId"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+
+	assert.Len(t, session.markedMsgs, 1)
+}
+
+func TestKafkaConsumeClaimNativeEvent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	producer := mocks.NewMockSyncProducer(ctrl)
+	bus := newTestKafkaEventBus(producer)
+	defer bus.cancel()
+
+	received := make(chan Event, 1)
+	handler := &KafkaConsumerGroupHandler{
+		eventBus: bus,
+		subscriptions: map[string]*kafkaSubscription{
+			"sub-1": {
+				id:    "sub-1",
+				topic: "user.created",
+				handler: func(ctx context.Context, event Event) error {
+					received <- event
+					return nil
+				},
+				done: make(chan struct{}),
+				bus:  bus,
+			},
+		},
+	}
+
+	messages := make(chan *sarama.ConsumerMessage, 1)
+	messages <- &sarama.ConsumerMessage{
+		Topic: "user.created",
+		Value: []byte(`{"topic":"user.created","payload":{"userId":"u-789"},"metadata":{"__topic":"user.created"},"createdAt":"2026-01-15T10:00:00Z"}`),
+	}
+	close(messages)
+
+	session := &testConsumerGroupSession{ctx: context.Background()}
+	claim := &testConsumerGroupClaim{messages: messages}
+
+	err := handler.ConsumeClaim(session, claim)
+	require.NoError(t, err)
+
+	select {
+	case event := <-received:
+		assert.Equal(t, "user.created", event.Topic)
+		payloadMap, ok := event.Payload.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "u-789", payloadMap["userId"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+
+	assert.Len(t, session.markedMsgs, 1)
+}
+
+func TestKafkaConsumeClaimRejectsInvalidRecord(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	producer := mocks.NewMockSyncProducer(ctrl)
+	bus := newTestKafkaEventBus(producer)
+	defer bus.cancel()
+
+	handlerCalled := make(chan struct{}, 1)
+	handler := &KafkaConsumerGroupHandler{
+		eventBus: bus,
+		subscriptions: map[string]*kafkaSubscription{
+			"sub-1": {
+				id:    "sub-1",
+				topic: "order.placed",
+				handler: func(ctx context.Context, event Event) error {
+					handlerCalled <- struct{}{}
+					return nil
+				},
+				done: make(chan struct{}),
+				bus:  bus,
+			},
+		},
+	}
+
+	messages := make(chan *sarama.ConsumerMessage, 1)
+	messages <- &sarama.ConsumerMessage{
+		Topic: "order.placed",
+		Value: []byte(`not valid json`),
+	}
+	close(messages)
+
+	session := &testConsumerGroupSession{ctx: context.Background()}
+	claim := &testConsumerGroupClaim{messages: messages}
+
+	err := handler.ConsumeClaim(session, claim)
+	require.NoError(t, err)
+
+	// Handler should NOT have been called.
+	select {
+	case <-handlerCalled:
+		t.Fatal("handler should not have been called for invalid record")
+	case <-time.After(100 * time.Millisecond):
+		// Success: handler was not called.
+	}
+
+	// Message should still be marked (offset committed even on error).
+	assert.Len(t, session.markedMsgs, 1)
+}
+
+func TestKafkaConsumeClaimMultipleMessages(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	producer := mocks.NewMockSyncProducer(ctrl)
+	bus := newTestKafkaEventBus(producer)
+	defer bus.cancel()
+
+	orderReceived := make(chan Event, 1)
+	userReceived := make(chan Event, 1)
+	handler := &KafkaConsumerGroupHandler{
+		eventBus: bus,
+		subscriptions: map[string]*kafkaSubscription{
+			"order-sub": {
+				id:    "order-sub",
+				topic: "order.placed",
+				handler: func(ctx context.Context, e Event) error {
+					orderReceived <- e
+					return nil
+				},
+				done: make(chan struct{}),
+				bus:  bus,
+			},
+			"user-sub": {
+				id:    "user-sub",
+				topic: "user.created",
+				handler: func(ctx context.Context, e Event) error {
+					userReceived <- e
+					return nil
+				},
+				done: make(chan struct{}),
+				bus:  bus,
+			},
+		},
+	}
+
+	messages := make(chan *sarama.ConsumerMessage, 2)
+	messages <- &sarama.ConsumerMessage{
+		Topic: "order.placed",
+		Value: []byte(`{"specversion":"1.0","type":"order.placed","source":"orders","id":"1","data":{"orderId":"o1"}}`),
+	}
+	messages <- &sarama.ConsumerMessage{
+		Topic: "user.created",
+		Value: []byte(`{"specversion":"1.0","type":"user.created","source":"users","id":"2","data":{"userId":"u1"}}`),
+	}
+	close(messages)
+
+	session := &testConsumerGroupSession{ctx: context.Background()}
+	claim := &testConsumerGroupClaim{messages: messages}
+
+	err := handler.ConsumeClaim(session, claim)
+	require.NoError(t, err)
+
+	select {
+	case e := <-orderReceived:
+		assert.Equal(t, "order.placed", e.Topic)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for order event")
+	}
+	select {
+	case e := <-userReceived:
+		assert.Equal(t, "user.created", e.Topic)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for user event")
+	}
+
+	assert.Len(t, session.markedMsgs, 2)
+}

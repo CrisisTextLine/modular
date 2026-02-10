@@ -350,8 +350,8 @@ func (r *RedisEventBus) handleMessages(sub *redisSubscription) {
 			}
 
 			// Deserialize event
-			var event Event
-			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
+			event, err := parseRecord([]byte(msg.Payload))
+			if err != nil {
 				slog.Error("Failed to deserialize Redis message", "error", err, "topic", msg.Channel)
 				continue
 			}

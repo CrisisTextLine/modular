@@ -1,5 +1,7 @@
 package eventbus
 
+//go:generate mockgen -destination=mocks/mock_kafka.go -package=mocks github.com/IBM/sarama SyncProducer,ConsumerGroup
+
 import (
 	"context"
 	"encoding/json"
@@ -115,16 +117,16 @@ func (h *KafkaConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSes
 			}
 			h.mutex.RUnlock()
 
+			// Deserialize once per message, reuse for all matching subscriptions
+			event, err := parseRecord(msg.Value)
+			if err != nil {
+				slog.Error("Failed to deserialize Kafka message", "error", err, "topic", msg.Topic)
+				session.MarkMessage(msg, "")
+				continue
+			}
+
 			// Process message for each matching subscription
 			for _, sub := range subs {
-				// Deserialize event
-				var event Event
-				if err := json.Unmarshal(msg.Value, &event); err != nil {
-					slog.Error("Failed to deserialize Kafka message", "error", err, "topic", msg.Topic)
-					continue
-				}
-
-				// Process the event
 				if sub.isAsync {
 					go h.eventBus.processEventAsync(sub, event)
 				} else {
@@ -307,6 +309,11 @@ func (k *KafkaEventBus) Publish(ctx context.Context, event Event) error {
 	message := &sarama.ProducerMessage{
 		Topic: event.Topic,
 		Value: sarama.StringEncoder(eventData),
+	}
+
+	// Set partition key if provided (otherwise uses client's default partitioner)
+	if key, ok := PartitionKeyFromContext(ctx); ok {
+		message.Key = sarama.StringEncoder(key)
 	}
 
 	// Publish to Kafka

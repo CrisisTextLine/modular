@@ -1,5 +1,7 @@
 package eventbus
 
+//go:generate mockgen -destination=mocks/mock_kinesis.go -package=mocks github.com/CrisisTextLine/modular/modules/eventbus KinesisClient
+
 import (
 	"context"
 	"encoding/json"
@@ -21,10 +23,20 @@ var (
 	ErrInvalidShardCount = errors.New("invalid shard count")
 )
 
+// KinesisClient abstracts the subset of the AWS Kinesis client used by KinesisEventBus,
+// enabling unit testing without a real Kinesis service.
+type KinesisClient interface {
+	PutRecord(ctx context.Context, params *kinesis.PutRecordInput, optFns ...func(*kinesis.Options)) (*kinesis.PutRecordOutput, error)
+	DescribeStream(ctx context.Context, params *kinesis.DescribeStreamInput, optFns ...func(*kinesis.Options)) (*kinesis.DescribeStreamOutput, error)
+	CreateStream(ctx context.Context, params *kinesis.CreateStreamInput, optFns ...func(*kinesis.Options)) (*kinesis.CreateStreamOutput, error)
+	GetShardIterator(ctx context.Context, params *kinesis.GetShardIteratorInput, optFns ...func(*kinesis.Options)) (*kinesis.GetShardIteratorOutput, error)
+	GetRecords(ctx context.Context, params *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error)
+}
+
 // KinesisEventBus implements EventBus using AWS Kinesis
 type KinesisEventBus struct {
 	config        *KinesisConfig
-	client        *kinesis.Client
+	client        KinesisClient
 	subscriptions map[string]map[string]*kinesisSubscription
 	topicMutex    sync.RWMutex
 	ctx           context.Context
@@ -158,7 +170,7 @@ func (k *KinesisEventBus) Start(ctx context.Context) error {
 		}
 
 		// Wait for stream to become active
-		waiter := kinesis.NewStreamExistsWaiter(k.client)
+		waiter := kinesis.NewStreamExistsWaiter(k.client.(kinesis.DescribeStreamAPIClient))
 		err = waiter.Wait(ctx, &kinesis.DescribeStreamInput{
 			StreamName: &k.config.StreamName,
 		}, 5*time.Minute)
@@ -232,11 +244,17 @@ func (k *KinesisEventBus) Publish(ctx context.Context, event Event) error {
 		return fmt.Errorf("failed to serialize event: %w", err)
 	}
 
+	// Determine partition key: use context hint if set and non-empty, otherwise default to topic
+	partitionKey := event.Topic
+	if key, ok := PartitionKeyFromContext(ctx); ok && key != "" {
+		partitionKey = key
+	}
+
 	// Create Kinesis record
 	_, err = k.client.PutRecord(ctx, &kinesis.PutRecordInput{
 		StreamName:   &k.config.StreamName,
 		Data:         eventData,
-		PartitionKey: &event.Topic, // Use topic as partition key
+		PartitionKey: &partitionKey,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to publish to Kinesis: %w", err)
@@ -394,8 +412,8 @@ func (k *KinesisEventBus) readShard(shardID string) {
 
 			// Process records
 			for _, record := range resp.Records {
-				var event Event
-				if err := json.Unmarshal(record.Data, &event); err != nil {
+				event, err := parseRecord(record.Data)
+				if err != nil {
 					slog.Error("Failed to deserialize Kinesis record", "error", err)
 					continue
 				}

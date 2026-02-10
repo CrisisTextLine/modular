@@ -299,8 +299,8 @@ func (n *NatsEventBus) subscribe(ctx context.Context, topic string, handler Even
 		sub.mutex.RUnlock()
 
 		// Deserialize event
-		var event Event
-		if err := json.Unmarshal(msg.Data, &event); err != nil {
+		event, err := parseRecord(msg.Data)
+		if err != nil {
 			slog.Error("Failed to deserialize NATS message", "error", err, "subject", msg.Subject)
 			return
 		}

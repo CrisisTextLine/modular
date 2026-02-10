@@ -30,7 +30,7 @@ func TestWithPartitionKey(t *testing.T) {
 		assert.Equal(t, "", key)
 	})
 
-	t.Run("empty string is valid", func(t *testing.T) {
+	t.Run("empty string is preserved in context", func(t *testing.T) {
 		ctx := context.Background()
 		ctx = WithPartitionKey(ctx, "")
 

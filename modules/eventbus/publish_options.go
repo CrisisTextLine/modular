@@ -12,6 +12,9 @@ type partitionKeyCtxKey struct{}
 //   - Kafka: determines which partition receives the message (using the client's default partitioner)
 //   - Memory, Redis, NATS: ignored (no partitioning concept)
 //
+// Note: an empty string key is treated as unset for Kinesis (falls back to topic)
+// but is honored as-is for Kafka.
+//
 // Use this when you want related events to be routed to the same shard/partition
 // so that broker-level ordering within that shard/partition is preserved. The
 // actual handler processing order still depends on the subscription/consumer

@@ -371,9 +371,11 @@ func (k *KinesisEventBus) readShard(shardID string) {
 					iterResp, iterErr := k.client.GetShardIterator(k.ctx, iterInput)
 					if iterErr != nil {
 						slog.Error("Failed to refresh shard iterator", "error", iterErr, "shard", shardID)
+						t := time.NewTimer(5 * time.Second)
 						select {
-						case <-time.After(5 * time.Second):
+						case <-t.C:
 						case <-k.ctx.Done():
+							t.Stop()
 							return
 						}
 						continue
@@ -382,7 +384,11 @@ func (k *KinesisEventBus) readShard(shardID string) {
 					continue
 				}
 
-				time.Sleep(1 * time.Second)
+				select {
+				case <-time.After(1 * time.Second):
+				case <-k.ctx.Done():
+					return
+				}
 				continue
 			}
 

@@ -382,7 +382,7 @@ func TestParseCloudEvent(t *testing.T) {
 			"type":        json.RawMessage(`"test"`),
 			"source":      json.RawMessage(`"src"`),
 			"id":          json.RawMessage(`"1"`),
-			"data_base64":  json.RawMessage(`12345`),
+			"data_base64": json.RawMessage(`12345`),
 		}
 		_, err := parseCloudEvent(m)
 		assert.Error(t, err)
@@ -451,6 +451,77 @@ func TestParseCloudEvent(t *testing.T) {
 		_, err := parseCloudEvent(m)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "data")
+	})
+
+	t.Run("unsupported specversion returns error", func(t *testing.T) {
+		t.Parallel()
+		m := ceMap(t, `{
+			"specversion": "99.9",
+			"type": "test.event",
+			"source": "test",
+			"id": "1"
+		}`)
+		_, err := parseCloudEvent(m)
+		assert.ErrorIs(t, err, ErrCloudEventUnsupportedSpecVersion)
+		assert.Contains(t, err.Error(), `"99.9"`)
+	})
+
+	t.Run("specversion 1.0 is accepted", func(t *testing.T) {
+		t.Parallel()
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1"
+		}`)
+		_, err := parseCloudEvent(m)
+		require.NoError(t, err)
+	})
+
+	t.Run("dataschema attribute is captured in metadata", func(t *testing.T) {
+		t.Parallel()
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1",
+			"dataschema": "https://example.com/schema/v1"
+		}`)
+		event, err := parseCloudEvent(m)
+		require.NoError(t, err)
+		assert.Equal(t, "https://example.com/schema/v1", event.Metadata["ce_dataschema"])
+	})
+
+	t.Run("dataschema is not treated as extension attribute", func(t *testing.T) {
+		t.Parallel()
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1",
+			"dataschema": "https://example.com/schema/v1",
+			"customext": "val"
+		}`)
+		event, err := parseCloudEvent(m)
+		require.NoError(t, err)
+		// dataschema should be captured explicitly, not duplicated via extension loop
+		assert.Equal(t, "https://example.com/schema/v1", event.Metadata["ce_dataschema"])
+		assert.Equal(t, "val", event.Metadata["ce_customext"])
+	})
+
+	t.Run("data null with data_base64 present uses data_base64", func(t *testing.T) {
+		t.Parallel()
+		m := ceMap(t, `{
+			"specversion": "1.0",
+			"type": "test.event",
+			"source": "test",
+			"id": "1",
+			"data": null,
+			"data_base64": "SGVsbG8="
+		}`)
+		event, err := parseCloudEvent(m)
+		require.NoError(t, err)
+		assert.Equal(t, []byte("Hello"), event.Payload)
 	})
 
 	t.Run("extension with non-JSON value falls back to string", func(t *testing.T) {

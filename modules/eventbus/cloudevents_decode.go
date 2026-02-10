@@ -12,10 +12,11 @@ import (
 
 // Sentinel errors for CloudEvent validation.
 var (
-	ErrCloudEventMissingSpecVersion = errors.New("CloudEvent missing required 'specversion' attribute")
-	ErrCloudEventMissingType        = errors.New("CloudEvent missing required 'type' attribute")
-	ErrCloudEventMissingSource      = errors.New("CloudEvent missing required 'source' attribute")
-	ErrCloudEventMissingID          = errors.New("CloudEvent missing required 'id' attribute")
+	ErrCloudEventMissingSpecVersion     = errors.New("CloudEvent missing required 'specversion' attribute")
+	ErrCloudEventUnsupportedSpecVersion = errors.New("CloudEvent has unsupported 'specversion' (expected \"1.0\")")
+	ErrCloudEventMissingType            = errors.New("CloudEvent missing required 'type' attribute")
+	ErrCloudEventMissingSource          = errors.New("CloudEvent missing required 'source' attribute")
+	ErrCloudEventMissingID              = errors.New("CloudEvent missing required 'id' attribute")
 )
 
 // knownCloudEventKeys are the CloudEvents spec-defined keys that have
@@ -27,6 +28,7 @@ var knownCloudEventKeys = map[string]bool{
 	"id":              true,
 	"time":            true,
 	"datacontenttype": true,
+	"dataschema":      true,
 	"data":            true,
 	"data_base64":     true,
 	"subject":         true,
@@ -76,6 +78,9 @@ func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
 	if !ok || specversion == "" {
 		return Event{}, ErrCloudEventMissingSpecVersion
 	}
+	if specversion != "1.0" {
+		return Event{}, fmt.Errorf("%w: got %q", ErrCloudEventUnsupportedSpecVersion, specversion)
+	}
 	ceType, ok := extractString(m, "type")
 	if !ok || ceType == "" {
 		return Event{}, ErrCloudEventMissingType
@@ -100,6 +105,14 @@ func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
 		}
 	} else {
 		createdAt = time.Now()
+	}
+
+	// Warn if both data and data_base64 are present (spec violation).
+	if rawData, hasData := m["data"]; hasData && len(rawData) > 0 && string(rawData) != "null" {
+		if rawB64, hasB64 := m["data_base64"]; hasB64 && len(rawB64) > 0 && string(rawB64) != "null" {
+			slog.Warn("CloudEvent contains both 'data' and 'data_base64' (spec violation); using 'data'",
+				"id", id, "source", source, "type", ceType)
+		}
 	}
 
 	var payload interface{}
@@ -139,6 +152,9 @@ func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
 	if subj, ok := extractString(m, "subject"); ok {
 		metadata["ce_subject"] = subj
 	}
+	if ds, ok := extractString(m, "dataschema"); ok {
+		metadata["ce_dataschema"] = ds
+	}
 
 	for key, val := range m {
 		if knownCloudEventKeys[key] {
@@ -146,6 +162,8 @@ func parseCloudEvent(m map[string]json.RawMessage) (Event, error) {
 		}
 		var extVal interface{}
 		if err := json.Unmarshal(val, &extVal); err != nil {
+			slog.Warn("CloudEvent extension attribute has non-JSON value, storing as raw string",
+				"key", key, "error", err)
 			metadata["ce_"+key] = string(val)
 		} else {
 			metadata["ce_"+key] = extVal

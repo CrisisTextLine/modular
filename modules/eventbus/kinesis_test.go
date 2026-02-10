@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -253,4 +254,307 @@ func TestKinesisPublishNotStarted(t *testing.T) {
 
 	err := bus.Publish(context.Background(), Event{Topic: "test", Payload: "data"})
 	assert.ErrorIs(t, err, ErrEventBusNotStarted)
+}
+
+// --- ReadShard integration tests: CloudEvents deserialization via mock Kinesis ---
+
+// newReadShardTestBus creates a test bus with subscriptions wired directly
+// (bypasses Subscribe to avoid starting shard reader goroutines).
+func newReadShardTestBus(t *testing.T, client KinesisClient, subs map[string]map[string]*kinesisSubscription) *KinesisEventBus {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return &KinesisEventBus{
+		config: &KinesisConfig{
+			StreamName: "test-stream",
+			ShardCount: 1,
+		},
+		client:        client,
+		subscriptions: subs,
+		ctx:           ctx,
+		cancel:        cancel,
+		isStarted:     true,
+	}
+}
+
+func TestKinesisReadShardCloudEvent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	received := make(chan Event, 1)
+	subs := map[string]map[string]*kinesisSubscription{
+		"order.placed": {
+			"test-sub": {
+				id:    "test-sub",
+				topic: "order.placed",
+				handler: func(ctx context.Context, event Event) error {
+					received <- event
+					return nil
+				},
+				done: make(chan struct{}),
+			},
+		},
+	}
+	bus := newReadShardTestBus(t, mockClient, subs)
+	subs["order.placed"]["test-sub"].bus = bus
+
+	ceJSON := []byte(`{
+		"specversion": "1.0",
+		"type": "order.placed",
+		"source": "order-service",
+		"id": "evt-001",
+		"time": "2026-02-06T12:00:00Z",
+		"data": {"orderId": "abc-123"}
+	}`)
+
+	iteratorStr := "shard-iter-1"
+	mockClient.EXPECT().
+		GetShardIterator(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetShardIteratorOutput{ShardIterator: &iteratorStr}, nil)
+
+	// Return records then nil iterator to terminate the loop.
+	mockClient.EXPECT().
+		GetRecords(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetRecordsOutput{
+			Records:           []types.Record{{Data: ceJSON}},
+			NextShardIterator: nil,
+		}, nil)
+
+	bus.readShard("shard-0")
+
+	select {
+	case event := <-received:
+		assert.Equal(t, "order.placed", event.Topic)
+		assert.Equal(t, "1.0", event.Metadata["ce_specversion"])
+		assert.Equal(t, "order-service", event.Metadata["ce_source"])
+		assert.Equal(t, "evt-001", event.Metadata["ce_id"])
+		payloadMap, ok := event.Payload.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "abc-123", payloadMap["orderId"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+}
+
+func TestKinesisReadShardNativeEvent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	received := make(chan Event, 1)
+	subs := map[string]map[string]*kinesisSubscription{
+		"user.created": {
+			"test-sub": {
+				id:    "test-sub",
+				topic: "user.created",
+				handler: func(ctx context.Context, event Event) error {
+					received <- event
+					return nil
+				},
+				done: make(chan struct{}),
+			},
+		},
+	}
+	bus := newReadShardTestBus(t, mockClient, subs)
+	subs["user.created"]["test-sub"].bus = bus
+
+	nativeJSON := []byte(`{
+		"topic": "user.created",
+		"payload": {"userId": "u-789"},
+		"metadata": {"__topic": "user.created"},
+		"createdAt": "2026-01-15T10:00:00Z"
+	}`)
+
+	iteratorStr := "shard-iter-1"
+	mockClient.EXPECT().
+		GetShardIterator(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetShardIteratorOutput{ShardIterator: &iteratorStr}, nil)
+
+	mockClient.EXPECT().
+		GetRecords(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetRecordsOutput{
+			Records:           []types.Record{{Data: nativeJSON}},
+			NextShardIterator: nil,
+		}, nil)
+
+	bus.readShard("shard-0")
+
+	select {
+	case event := <-received:
+		assert.Equal(t, "user.created", event.Topic)
+		payloadMap, ok := event.Payload.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "u-789", payloadMap["userId"])
+		assert.Equal(t, "user.created", event.Metadata["__topic"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+}
+
+func TestKinesisReadShardCloudEventBase64(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	received := make(chan Event, 1)
+	subs := map[string]map[string]*kinesisSubscription{
+		"file.uploaded": {
+			"test-sub": {
+				id:    "test-sub",
+				topic: "file.uploaded",
+				handler: func(ctx context.Context, event Event) error {
+					received <- event
+					return nil
+				},
+				done: make(chan struct{}),
+			},
+		},
+	}
+	bus := newReadShardTestBus(t, mockClient, subs)
+	subs["file.uploaded"]["test-sub"].bus = bus
+
+	// "SGVsbG8gV29ybGQ=" is base64 for "Hello World"
+	ceJSON := []byte(`{
+		"specversion": "1.0",
+		"type": "file.uploaded",
+		"source": "storage-service",
+		"id": "evt-002",
+		"data_base64": "SGVsbG8gV29ybGQ="
+	}`)
+
+	iteratorStr := "shard-iter-1"
+	mockClient.EXPECT().
+		GetShardIterator(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetShardIteratorOutput{ShardIterator: &iteratorStr}, nil)
+
+	mockClient.EXPECT().
+		GetRecords(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetRecordsOutput{
+			Records:           []types.Record{{Data: ceJSON}},
+			NextShardIterator: nil,
+		}, nil)
+
+	bus.readShard("shard-0")
+
+	select {
+	case event := <-received:
+		assert.Equal(t, "file.uploaded", event.Topic)
+		assert.Equal(t, []byte("Hello World"), event.Payload)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+}
+
+func TestKinesisReadShardRejectsInvalidSpecversion(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	handlerCalled := make(chan struct{}, 1)
+	subs := map[string]map[string]*kinesisSubscription{
+		"order.placed": {
+			"test-sub": {
+				id:    "test-sub",
+				topic: "order.placed",
+				handler: func(ctx context.Context, event Event) error {
+					handlerCalled <- struct{}{}
+					return nil
+				},
+				done: make(chan struct{}),
+			},
+		},
+	}
+	bus := newReadShardTestBus(t, mockClient, subs)
+	subs["order.placed"]["test-sub"].bus = bus
+
+	badCE := []byte(`{
+		"specversion": "99.9",
+		"type": "order.placed",
+		"source": "order-service",
+		"id": "evt-bad"
+	}`)
+
+	iteratorStr := "shard-iter-1"
+	mockClient.EXPECT().
+		GetShardIterator(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetShardIteratorOutput{ShardIterator: &iteratorStr}, nil)
+
+	mockClient.EXPECT().
+		GetRecords(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetRecordsOutput{
+			Records:           []types.Record{{Data: badCE}},
+			NextShardIterator: nil,
+		}, nil)
+
+	bus.readShard("shard-0")
+
+	// Handler should NOT have been called for invalid specversion.
+	select {
+	case <-handlerCalled:
+		t.Fatal("handler should not have been called for invalid specversion")
+	case <-time.After(100 * time.Millisecond):
+		// Success: handler was not called.
+	}
+}
+
+func TestKinesisReadShardMultipleRecords(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	orderReceived := make(chan Event, 1)
+	userReceived := make(chan Event, 1)
+	subs := map[string]map[string]*kinesisSubscription{
+		"order.placed": {
+			"order-sub": {
+				id:    "order-sub",
+				topic: "order.placed",
+				handler: func(ctx context.Context, e Event) error {
+					orderReceived <- e
+					return nil
+				},
+				done: make(chan struct{}),
+			},
+		},
+		"user.created": {
+			"user-sub": {
+				id:    "user-sub",
+				topic: "user.created",
+				handler: func(ctx context.Context, e Event) error {
+					userReceived <- e
+					return nil
+				},
+				done: make(chan struct{}),
+			},
+		},
+	}
+	bus := newReadShardTestBus(t, mockClient, subs)
+	subs["order.placed"]["order-sub"].bus = bus
+	subs["user.created"]["user-sub"].bus = bus
+
+	iteratorStr := "shard-iter-1"
+	mockClient.EXPECT().
+		GetShardIterator(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetShardIteratorOutput{ShardIterator: &iteratorStr}, nil)
+
+	mockClient.EXPECT().
+		GetRecords(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetRecordsOutput{
+			Records: []types.Record{
+				{Data: []byte(`{"specversion":"1.0","type":"order.placed","source":"orders","id":"1","data":{"orderId":"o1"}}`)},
+				{Data: []byte(`{"specversion":"1.0","type":"user.created","source":"users","id":"2","data":{"userId":"u1"}}`)},
+			},
+			NextShardIterator: nil,
+		}, nil)
+
+	bus.readShard("shard-0")
+
+	select {
+	case e := <-orderReceived:
+		assert.Equal(t, "order.placed", e.Topic)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for order event")
+	}
+	select {
+	case e := <-userReceived:
+		assert.Equal(t, "user.created", e.Topic)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for user event")
+	}
 }

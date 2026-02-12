@@ -11,6 +11,11 @@ The Reverse Proxy module functions as a versatile API gateway that can route req
 ## Key Features
 
 * **Multi-Backend Routing**: Route HTTP requests to any number of configurable backend services
+* **Map/Reduce Composite Routes**: 🆕 Advanced data aggregation patterns for combining responses from multiple backends
+  * **Sequential Pattern**: Chain backend requests - extract data from one response to query another
+  * **Parallel Pattern**: Join responses from multiple backends using common identifiers
+  * **Flexible Merge Strategies**: Nested, flat, enrich, or join merge strategies
+  * See [Map/Reduce Guide](MAPREDUCE_GUIDE.md) for detailed documentation
 * **Per-Backend Configuration**: Configure path rewriting and header rewriting for each backend service
 * **Per-Endpoint Configuration**: Override backend configuration for specific endpoints within a backend
 * **Feature Flag Support**: Control backend and route behavior using feature flags with optional alternatives
@@ -38,6 +43,7 @@ go get github.com/CrisisTextLine/modular/modules/reverseproxy@v1.0.0
 
 ## Documentation
 
+- **[Map/Reduce Composite Routes Guide](MAPREDUCE_GUIDE.md)** - 🆕 Complete guide to map/reduce data aggregation patterns
 - **[Feature Flag Migration Guide](FEATURE_FLAG_MIGRATION_GUIDE.md)** - Migration guide for the new feature flag aggregator pattern
 - **[Path Rewriting Guide](PATH_REWRITING_GUIDE.md)** - Detailed guide for configuring path transformations
 - **[Per-Backend Configuration Guide](PER_BACKEND_CONFIGURATION_GUIDE.md)** - Advanced per-backend configuration options

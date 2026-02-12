@@ -403,4 +403,88 @@ func startMockBackends() {
 			fmt.Printf("Backend server error on :9014: %v\n", err)
 		}
 	}()
+
+	// ========================================
+	// Backends for MAP/REDUCE STRATEGY demonstration
+	// ========================================
+
+	// Conversations backend (port 9015) - Returns list of conversations
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			response := map[string]interface{}{
+				"conversations": []map[string]interface{}{
+					{"id": "conv1", "title": "Customer Support Request", "status": "open", "created": "2024-01-15"},
+					{"id": "conv2", "title": "Billing Inquiry", "status": "active", "created": "2024-01-16"},
+					{"id": "conv3", "title": "Technical Issue", "status": "closed", "created": "2024-01-14"},
+					{"id": "conv4", "title": "Feature Request", "status": "open", "created": "2024-01-17"},
+					{"id": "conv5", "title": "Account Question", "status": "active", "created": "2024-01-18"},
+				},
+			}
+			json.NewEncoder(w).Encode(response)
+		})
+		fmt.Println("Starting conversations-backend (map/reduce demo) on :9015")
+		if err := http.ListenAndServe(":9015", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9015: %v\n", err)
+		}
+	}()
+
+	// Followups backend (port 9016) - Returns follow-up information for conversations
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/bulk", func(w http.ResponseWriter, r *http.Request) {
+			// Read the request body to get conversation IDs
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Failed to read request", http.StatusBadRequest)
+				return
+			}
+
+			var request map[string]interface{}
+			if err := json.Unmarshal(body, &request); err != nil {
+				http.Error(w, "Invalid JSON", http.StatusBadRequest)
+				return
+			}
+
+			// Return follow-up data (some conversations are follow-ups, some aren't)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			response := map[string]interface{}{
+				"followups": []map[string]interface{}{
+					{"conversation_id": "conv1", "is_followup": true, "parent_id": "conv_original_1", "followup_count": 2},
+					{"conversation_id": "conv3", "is_followup": false},
+					{"conversation_id": "conv4", "is_followup": true, "parent_id": "conv_original_4", "followup_count": 1},
+					// conv2 and conv5 are not in the followups data (might not be follow-ups)
+				},
+			}
+			json.NewEncoder(w).Encode(response)
+		})
+		fmt.Println("Starting followups-backend (map/reduce demo) on :9016")
+		if err := http.ListenAndServe(":9016", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9016: %v\n", err)
+		}
+	}()
+
+	// Participants backend (port 9017) - Returns participant information
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			// Returns array with participant info for some conversations
+			response := []map[string]interface{}{
+				{"id": "conv1", "participants": []string{"user123", "agent456"}, "participant_count": 2},
+				{"id": "conv2", "participants": []string{"user789"}, "participant_count": 1},
+				{"id": "conv4", "participants": []string{"user321", "agent654", "supervisor999"}, "participant_count": 3},
+				// conv3 and conv5 don't have participant data yet
+			}
+			json.NewEncoder(w).Encode(response)
+		})
+		fmt.Println("Starting participants-backend (map/reduce demo) on :9017")
+		if err := http.ListenAndServe(":9017", mux); err != nil { //nolint:gosec
+			fmt.Printf("Backend server error on :9017: %v\n", err)
+		}
+	}()
 }

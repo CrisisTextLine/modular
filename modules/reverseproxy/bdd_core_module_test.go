@@ -53,6 +53,16 @@ type ReverseProxyBDDTestContext struct {
 	unauthenticatedResponses    []*http.Response
 	authenticatedResponses      []*http.Response
 	authenticatedResponseBodies [][]byte
+	// Map/reduce testing support
+	mapReduceConfig      *MapReduceConfig
+	backendCallCount     map[string]int
+	backendLastReq       map[string]*http.Request
+	backendMu            sync.Mutex
+	sourceData           interface{}
+	targetData           interface{}
+	ancillaryData        interface{}
+	expectedData         interface{}
+	backendTestServers   map[string]*httptest.Server
 }
 
 // requestResult tracks the outcome of requests during testing scenarios

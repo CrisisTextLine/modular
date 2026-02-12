@@ -103,6 +103,10 @@ type CompositeRoute struct {
 	// AlternativeBackend specifies an alternative single backend to use when the feature flag is disabled
 	// If FeatureFlagID is specified and evaluates to false, requests will be routed to this backend instead
 	AlternativeBackend string `json:"alternative_backend" yaml:"alternative_backend" toml:"alternative_backend" env:"ALTERNATIVE_BACKEND"`
+
+	// MapReduce defines the map/reduce configuration for this composite route
+	// Only used when Strategy is "map-reduce"
+	MapReduce *MapReduceConfig `json:"map_reduce" yaml:"map_reduce" toml:"map_reduce" desc:"Map/reduce configuration for advanced data aggregation"`
 }
 
 // PathRewritingConfig defines configuration for path rewriting rules.

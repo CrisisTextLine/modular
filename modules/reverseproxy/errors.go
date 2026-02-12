@@ -44,4 +44,10 @@ var (
 	ErrServiceURLRequired   = errors.New("service URL required")
 	ErrNoBackendsConfigured = errors.New("no backends configured")
 	ErrBackendNotConfigured = errors.New("backend not configured")
+
+	// Map/reduce errors
+	ErrInvalidJSONPath          = errors.New("cannot navigate path: not an object")
+	ErrExtractedDataInvalidType = errors.New("extracted data is not an array or object")
+	ErrJoinFieldRequired        = errors.New("join field is required for join merge strategy")
+	ErrMergeResponseFailed      = errors.New("failed to merge responses")
 )

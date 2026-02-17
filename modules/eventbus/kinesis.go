@@ -20,7 +20,8 @@ import (
 
 // Static errors for Kinesis
 var (
-	ErrInvalidShardCount = errors.New("invalid shard count")
+	ErrInvalidShardCount   = errors.New("invalid shard count")
+	ErrInvalidPollInterval = errors.New("pollInterval must be positive")
 )
 
 // KinesisClient abstracts the subset of the AWS Kinesis client used by KinesisEventBus,
@@ -59,7 +60,7 @@ type KinesisConfig struct {
 	StreamName      string        `json:"streamName"`
 	AccessKeyID     string        `json:"accessKeyId"`
 	SecretAccessKey string        `json:"secretAccessKey"`
-	SessionToken    string        `json:"sessionToken"`
+	SessionToken    string        `json:"sessionToken"` //nolint:gosec // config field, not a hardcoded secret
 	ShardCount      int32         `json:"shardCount"`
 	PollInterval    time.Duration `json:"pollInterval"`
 }
@@ -139,6 +140,9 @@ func NewKinesisEventBus(config map[string]interface{}) (EventBus, error) {
 		d, err := time.ParseDuration(pollInterval)
 		if err != nil {
 			return nil, fmt.Errorf("invalid pollInterval %q: %w", pollInterval, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("%w: got %v", ErrInvalidPollInterval, d)
 		}
 		kinesisConfig.PollInterval = d
 	}
@@ -245,6 +249,12 @@ func (k *KinesisEventBus) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		return ErrEventBusShutdownTimeout
 	}
+
+	// Reset state so the bus can be restarted via Start()+Subscribe()
+	k.shardMutex.Lock()
+	k.activeShards = make(map[string]struct{})
+	k.shardMutex.Unlock()
+	k.shardScanOnce = sync.Once{}
 
 	k.isStarted = false
 	return nil
@@ -360,12 +370,22 @@ func (k *KinesisEventBus) startShardReaders() {
 					continue
 				}
 
-				// Only start a reader for shards that don't already have one
+				if resp.StreamDescription == nil {
+					slog.Error("DescribeStream returned nil StreamDescription", "stream", k.config.StreamName)
+					select {
+					case <-time.After(5 * time.Second):
+					case <-k.ctx.Done():
+						return
+					}
+					continue
+				}
+
 				k.shardMutex.Lock()
 				for _, shard := range resp.StreamDescription.Shards {
 					id := *shard.ShardId
 					if _, active := k.activeShards[id]; !active {
 						k.activeShards[id] = struct{}{}
+						k.wg.Add(1)
 						go k.readShard(id)
 					}
 				}
@@ -383,7 +403,6 @@ func (k *KinesisEventBus) startShardReaders() {
 
 // readShard reads records from a specific shard
 func (k *KinesisEventBus) readShard(shardID string) {
-	k.wg.Add(1)
 	defer k.wg.Done()
 	defer func() {
 		k.shardMutex.Lock()
@@ -498,9 +517,11 @@ func (k *KinesisEventBus) readShard(shardID string) {
 			shardIterator = resp.NextShardIterator
 
 			// Sleep to avoid hitting API limits (5 GetRecords/sec/shard)
+			pollTimer := time.NewTimer(k.config.PollInterval)
 			select {
-			case <-time.After(k.config.PollInterval):
+			case <-pollTimer.C:
 			case <-k.ctx.Done():
+				pollTimer.Stop()
 				return
 			}
 		}

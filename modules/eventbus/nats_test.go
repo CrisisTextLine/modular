@@ -492,21 +492,20 @@ func TestNatsEventBusTopics(t *testing.T) {
 	_ = bus.Unsubscribe(ctx, sub2)
 }
 
-
 // TestNatsConfigDefaults tests that default configuration values are properly set
 func TestNatsConfigDefaults(t *testing.T) {
 	config := map[string]interface{}{}
-	
+
 	bus, err := NewNatsEventBus(config)
 	if err != nil {
 		// Expected when NATS is not running, but we can still verify the error
 		assert.Contains(t, err.Error(), "failed to connect to NATS")
 		return
 	}
-	
+
 	natsBus, ok := bus.(*NatsEventBus)
 	require.True(t, ok)
-	
+
 	// Verify defaults - note that NATS may resolve localhost to 127.0.0.1
 	assert.Contains(t, natsBus.config.URL, "4222", "URL should contain port 4222")
 	assert.Equal(t, "modular-eventbus", natsBus.config.ConnectionName)
@@ -516,7 +515,7 @@ func TestNatsConfigDefaults(t *testing.T) {
 	assert.Equal(t, 20, natsBus.config.PingInterval)
 	assert.Equal(t, 2, natsBus.config.MaxPingsOut)
 	assert.Equal(t, 5, natsBus.config.SubscribeTimeout)
-	
+
 	_ = bus.Stop(context.Background())
 }
 
@@ -528,16 +527,16 @@ func TestNatsSubscriptionMethods(t *testing.T) {
 		isAsync: true,
 		done:    make(chan struct{}),
 	}
-	
+
 	assert.Equal(t, "test-id", sub.ID())
 	assert.Equal(t, "test.topic", sub.Topic())
 	assert.True(t, sub.IsAsync())
-	
+
 	// Test cancel
 	err := sub.Cancel()
 	assert.NoError(t, err)
 	assert.True(t, sub.cancelled)
-	
+
 	// Test cancel is idempotent
 	err = sub.Cancel()
 	assert.NoError(t, err)
@@ -580,19 +579,19 @@ func TestNatsConfigurationParsing(t *testing.T) {
 			expectedReconn: 5,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			bus, err := NewNatsEventBus(tt.config)
 			require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
-			
+
 			natsBus, ok := bus.(*NatsEventBus)
 			require.True(t, ok)
-			
+
 			assert.Contains(t, natsBus.config.URL, "4222", "URL should contain port 4222")
 			assert.Equal(t, tt.expectedName, natsBus.config.ConnectionName)
 			assert.Equal(t, tt.expectedReconn, natsBus.config.MaxReconnects)
-			
+
 			_ = bus.Stop(context.Background())
 		})
 	}
@@ -608,37 +607,37 @@ func TestNatsErrorCases(t *testing.T) {
 		config := map[string]interface{}{"url": "nats://localhost:4222"}
 		bus, err := NewNatsEventBus(config)
 		require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
-		
+
 		natsBus, ok := bus.(*NatsEventBus)
 		require.True(t, ok)
-		
+
 		ctx := context.Background()
-		
+
 		// Don't start the bus
-		
+
 		// Publish should fail
 		event := Event{Topic: "test", Payload: "data"}
 		err = natsBus.Publish(ctx, event)
 		assert.Error(t, err)
 		assert.Equal(t, ErrEventBusNotStarted, err)
-		
+
 		// Subscribe should fail
 		handler := func(ctx context.Context, event Event) error { return nil }
 		_, err = natsBus.Subscribe(ctx, "test", handler)
 		assert.Error(t, err)
 		assert.Equal(t, ErrEventBusNotStarted, err)
-		
+
 		// SubscribeAsync should fail
 		_, err = natsBus.SubscribeAsync(ctx, "test", handler)
 		assert.Error(t, err)
 		assert.Equal(t, ErrEventBusNotStarted, err)
-		
+
 		// Unsubscribe should fail
 		err = natsBus.Unsubscribe(ctx, &natsSubscription{})
 		assert.Error(t, err)
 		assert.Equal(t, ErrEventBusNotStarted, err)
 	})
-	
+
 	t.Run("nil handler rejected", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("Skipping NATS integration test in short mode")
@@ -648,17 +647,17 @@ func TestNatsErrorCases(t *testing.T) {
 		bus, err := NewNatsEventBus(config)
 		require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
 		defer bus.Stop(context.Background())
-		
+
 		err = bus.Start(context.Background())
 		require.NoError(t, err)
-		
+
 		ctx := context.Background()
-		
+
 		// Subscribe with nil handler should fail
 		_, err = bus.Subscribe(ctx, "test", nil)
 		assert.Error(t, err)
 		assert.Equal(t, ErrEventHandlerNil, err)
-		
+
 		// SubscribeAsync with nil handler should fail
 		_, err = bus.SubscribeAsync(ctx, "test", nil)
 		assert.Error(t, err)

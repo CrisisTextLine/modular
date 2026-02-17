@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -352,6 +353,7 @@ func TestKinesisReadShardCloudEvent(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	select {
@@ -408,6 +410,7 @@ func TestKinesisReadShardNativeEvent(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	select {
@@ -464,6 +467,7 @@ func TestKinesisReadShardCloudEventBase64(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	select {
@@ -515,6 +519,7 @@ func TestKinesisReadShardRejectsInvalidSpecversion(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	// Handler should NOT have been called for invalid specversion.
@@ -575,6 +580,7 @@ func TestKinesisReadShardMultipleRecords(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	select {
@@ -653,6 +659,7 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 				NextShardIterator: nil,
 			}, nil)
 
+		bus.wg.Add(1)
 		bus.readShard("shard-0")
 
 		select {
@@ -732,6 +739,7 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 				NextShardIterator: nil,
 			}, nil)
 
+		bus.wg.Add(1)
 		bus.readShard("shard-0")
 
 		// Should receive both events
@@ -806,6 +814,7 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 		}()
 
 		done := make(chan struct{})
+		bus.wg.Add(1)
 		go func() {
 			bus.readShard("shard-0")
 			close(done)
@@ -914,6 +923,7 @@ func TestKinesisReadShardCleansUpActiveShards(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard(shardID)
 
 	// After readShard exits, the shard should be removed from activeShards
@@ -931,15 +941,15 @@ func TestKinesisShardScanOncePreventsDuplicateScanners(t *testing.T) {
 	bus := newTestKinesisEventBus(mockClient)
 	defer bus.cancel()
 
-	describeCallCount := 0
+	describeCalled := make(chan struct{}, 3)
+	var describeCallCount int32
 
 	// DescribeStream should only be called by ONE scanner goroutine.
-	// We use AnyTimes because the single scanner loops, but we'll verify
-	// only one scanner exists by checking GetShardIterator call count.
 	mockClient.EXPECT().
 		DescribeStream(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, input *kinesis.DescribeStreamInput, optFns ...func(*kinesis.Options)) (*kinesis.DescribeStreamOutput, error) {
-			describeCallCount++
+			atomic.AddInt32(&describeCallCount, 1)
+			describeCalled <- struct{}{}
 			// Return no shards to keep things simple
 			return &kinesis.DescribeStreamOutput{
 				StreamDescription: &types.StreamDescription{
@@ -958,16 +968,21 @@ func TestKinesisShardScanOncePreventsDuplicateScanners(t *testing.T) {
 	_, err = bus.Subscribe(context.Background(), "topic.c", handler)
 	require.NoError(t, err)
 
-	// Let the scanner run briefly
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the first DescribeStream call (channel-based, not time-based)
+	select {
+	case <-describeCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not call DescribeStream")
+	}
+
+	// Give a brief window for any duplicate scanners to call DescribeStream
+	time.Sleep(50 * time.Millisecond)
 	bus.cancel()
 	bus.wg.Wait()
 
 	// With sync.Once, only one scanner goroutine should have been launched.
-	// That goroutine calls DescribeStream once per 30s cycle, so in 100ms
-	// we expect exactly 1 call. Without sync.Once, we'd see 3 calls
-	// (one per subscribe).
-	assert.Equal(t, 1, describeCallCount,
+	count := atomic.LoadInt32(&describeCallCount)
+	assert.Equal(t, int32(1), count,
 		"only one shard scanner should run regardless of subscribe count")
 }
 
@@ -1022,6 +1037,22 @@ func TestKinesisNewEventBusPollInterval(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid pollInterval")
 	})
+
+	t.Run("returns error for negative poll interval", func(t *testing.T) {
+		config := map[string]interface{}{
+			"pollInterval": "-500ms",
+		}
+		_, err := NewKinesisEventBus(config)
+		assert.ErrorIs(t, err, ErrInvalidPollInterval)
+	})
+
+	t.Run("returns error for zero poll interval", func(t *testing.T) {
+		config := map[string]interface{}{
+			"pollInterval": "0s",
+		}
+		_, err := NewKinesisEventBus(config)
+		assert.ErrorIs(t, err, ErrInvalidPollInterval)
+	})
 }
 
 func TestKinesisReadShardUsesConfiguredPollInterval(t *testing.T) {
@@ -1072,6 +1103,7 @@ func TestKinesisReadShardUsesConfiguredPollInterval(t *testing.T) {
 		}).
 		AnyTimes()
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 	close(timestamps)
 

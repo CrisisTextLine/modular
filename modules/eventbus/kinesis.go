@@ -20,7 +20,8 @@ import (
 
 // Static errors for Kinesis
 var (
-	ErrInvalidShardCount = errors.New("invalid shard count")
+	ErrInvalidShardCount   = errors.New("invalid shard count")
+	ErrInvalidPollInterval = errors.New("pollInterval must be positive")
 )
 
 // KinesisClient abstracts the subset of the AWS Kinesis client used by KinesisEventBus,
@@ -43,16 +44,25 @@ type KinesisEventBus struct {
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
 	isStarted     bool
+	shardScanOnce sync.Once
+	activeShards  map[string]struct{}
+	shardMutex    sync.Mutex
 }
+
+// DefaultKinesisPollInterval is the standard polling interval for Kinesis GetRecords.
+// AWS allows up to 5 GetRecords calls per second per shard; 1s is the industry
+// standard used by the AWS KCL and keeps well within API limits.
+const DefaultKinesisPollInterval = 1 * time.Second
 
 // KinesisConfig holds Kinesis-specific configuration
 type KinesisConfig struct {
-	Region          string `json:"region"`
-	StreamName      string `json:"streamName"`
-	AccessKeyID     string `json:"accessKeyId"`
-	SecretAccessKey string `json:"secretAccessKey"`
-	SessionToken    string `json:"sessionToken"`
-	ShardCount      int32  `json:"shardCount"`
+	Region          string        `json:"region"`
+	StreamName      string        `json:"streamName"`
+	AccessKeyID     string        `json:"accessKeyId"`
+	SecretAccessKey string        `json:"secretAccessKey"`
+	SessionToken    string        `json:"sessionToken"` //nolint:gosec // config field, not a hardcoded secret
+	ShardCount      int32         `json:"shardCount"`
+	PollInterval    time.Duration `json:"pollInterval"`
 }
 
 // kinesisSubscription represents a subscription in the Kinesis event bus
@@ -126,6 +136,20 @@ func NewKinesisEventBus(config map[string]interface{}) (EventBus, error) {
 		}
 		kinesisConfig.ShardCount = int32(shardCount)
 	}
+	if pollInterval, ok := config["pollInterval"].(string); ok {
+		d, err := time.ParseDuration(pollInterval)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pollInterval %q: %w", pollInterval, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("%w: got %v", ErrInvalidPollInterval, d)
+		}
+		kinesisConfig.PollInterval = d
+	}
+
+	if kinesisConfig.PollInterval <= 0 {
+		kinesisConfig.PollInterval = DefaultKinesisPollInterval
+	}
 
 	// Create AWS config
 	cfg, err := awsconfig.LoadDefaultConfig(context.TODO(),
@@ -141,6 +165,7 @@ func NewKinesisEventBus(config map[string]interface{}) (EventBus, error) {
 		config:        kinesisConfig,
 		client:        client,
 		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
 	}, nil
 }
 
@@ -179,6 +204,12 @@ func (k *KinesisEventBus) Start(ctx context.Context) error {
 		}
 	}
 
+	if k.activeShards == nil {
+		k.activeShards = make(map[string]struct{})
+	}
+	if k.config.PollInterval <= 0 {
+		k.config.PollInterval = DefaultKinesisPollInterval
+	}
 	k.ctx, k.cancel = context.WithCancel(ctx)
 	k.isStarted = true
 	return nil
@@ -218,6 +249,12 @@ func (k *KinesisEventBus) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		return ErrEventBusShutdownTimeout
 	}
+
+	// Reset state so the bus can be restarted via Start()+Subscribe()
+	k.shardMutex.Lock()
+	k.activeShards = make(map[string]struct{})
+	k.shardMutex.Unlock()
+	k.shardScanOnce = sync.Once{}
 
 	k.isStarted = false
 	return nil
@@ -302,38 +339,63 @@ func (k *KinesisEventBus) subscribe(ctx context.Context, topic string, handler E
 	k.subscriptions[topic][sub.id] = sub
 	k.topicMutex.Unlock()
 
-	// Start shard reader if this is the first subscription
-	k.startShardReaders()
+	// Start the shard scanner exactly once, regardless of how many subscriptions are added
+	k.shardScanOnce.Do(func() {
+		k.startShardReaders()
+	})
 
 	return sub, nil
 }
 
-// startShardReaders starts reading from all shards
+// startShardReaders periodically discovers shards and starts a reader for any
+// shard that doesn't already have one. Only one scanner goroutine runs (guarded
+// by shardScanOnce in subscribe).
 func (k *KinesisEventBus) startShardReaders() {
-	// Get stream description to find shards
 	k.wg.Go(func() {
 		for {
 			select {
 			case <-k.ctx.Done():
 				return
 			default:
-				// List shards
 				resp, err := k.client.DescribeStream(k.ctx, &kinesis.DescribeStreamInput{
 					StreamName: &k.config.StreamName,
 				})
 				if err != nil {
 					slog.Error("Failed to describe Kinesis stream", "error", err)
-					time.Sleep(5 * time.Second)
+					select {
+					case <-time.After(5 * time.Second):
+					case <-k.ctx.Done():
+						return
+					}
 					continue
 				}
 
-				// Start reader for each shard
-				for _, shard := range resp.StreamDescription.Shards {
-					go k.readShard(*shard.ShardId)
+				if resp.StreamDescription == nil {
+					slog.Error("DescribeStream returned nil StreamDescription", "stream", k.config.StreamName)
+					select {
+					case <-time.After(5 * time.Second):
+					case <-k.ctx.Done():
+						return
+					}
+					continue
 				}
 
-				// Sleep before checking for new shards
-				time.Sleep(30 * time.Second)
+				k.shardMutex.Lock()
+				for _, shard := range resp.StreamDescription.Shards {
+					id := *shard.ShardId
+					if _, active := k.activeShards[id]; !active {
+						k.activeShards[id] = struct{}{}
+						k.wg.Add(1)
+						go k.readShard(id)
+					}
+				}
+				k.shardMutex.Unlock()
+
+				select {
+				case <-time.After(30 * time.Second):
+				case <-k.ctx.Done():
+					return
+				}
 			}
 		}
 	})
@@ -341,8 +403,12 @@ func (k *KinesisEventBus) startShardReaders() {
 
 // readShard reads records from a specific shard
 func (k *KinesisEventBus) readShard(shardID string) {
-	k.wg.Add(1)
 	defer k.wg.Done()
+	defer func() {
+		k.shardMutex.Lock()
+		delete(k.activeShards, shardID)
+		k.shardMutex.Unlock()
+	}()
 
 	// Get shard iterator
 	iterResp, err := k.client.GetShardIterator(k.ctx, &kinesis.GetShardIteratorInput{
@@ -450,8 +516,14 @@ func (k *KinesisEventBus) readShard(shardID string) {
 			// Update shard iterator
 			shardIterator = resp.NextShardIterator
 
-			// Sleep to avoid hitting API limits
-			time.Sleep(1 * time.Second)
+			// Sleep to avoid hitting API limits (5 GetRecords/sec/shard)
+			pollTimer := time.NewTimer(k.config.PollInterval)
+			select {
+			case <-pollTimer.C:
+			case <-k.ctx.Done():
+				pollTimer.Stop()
+				return
+			}
 		}
 	}
 }

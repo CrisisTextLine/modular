@@ -291,13 +291,13 @@ type testConsumerGroupSession struct {
 	markedMsgs []*sarama.ConsumerMessage
 }
 
-func (s *testConsumerGroupSession) Claims() map[string][]int32                                   { return nil }
-func (s *testConsumerGroupSession) MemberID() string                                             { return "test-member" }
-func (s *testConsumerGroupSession) GenerationID() int32                                          { return 1 }
-func (s *testConsumerGroupSession) MarkOffset(_ string, _ int32, _ int64, _ string)              {}
-func (s *testConsumerGroupSession) Commit()                                                      {}
-func (s *testConsumerGroupSession) ResetOffset(_ string, _ int32, _ int64, _ string)             {}
-func (s *testConsumerGroupSession) Context() context.Context                                     { return s.ctx }
+func (s *testConsumerGroupSession) Claims() map[string][]int32                       { return nil }
+func (s *testConsumerGroupSession) MemberID() string                                 { return "test-member" }
+func (s *testConsumerGroupSession) GenerationID() int32                              { return 1 }
+func (s *testConsumerGroupSession) MarkOffset(_ string, _ int32, _ int64, _ string)  {}
+func (s *testConsumerGroupSession) Commit()                                          {}
+func (s *testConsumerGroupSession) ResetOffset(_ string, _ int32, _ int64, _ string) {}
+func (s *testConsumerGroupSession) Context() context.Context                         { return s.ctx }
 func (s *testConsumerGroupSession) MarkMessage(msg *sarama.ConsumerMessage, _ string) {
 	s.markedMsgs = append(s.markedMsgs, msg)
 }

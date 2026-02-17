@@ -30,7 +30,7 @@ type RedisConfig struct {
 	URL      string `json:"url"`
 	DB       int    `json:"db"`
 	Username string `json:"username"`
-	Password string `json:"password"`
+	Password string `json:"password"` //nolint:gosec // config field, not a hardcoded secret
 	PoolSize int    `json:"poolSize"`
 }
 

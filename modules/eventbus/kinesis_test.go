@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,11 +23,13 @@ func newTestKinesisEventBus(client KinesisClient) *KinesisEventBus {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &KinesisEventBus{
 		config: &KinesisConfig{
-			StreamName: "test-stream",
-			ShardCount: 1,
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: DefaultKinesisPollInterval,
 		},
 		client:        client,
 		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
 		ctx:           ctx,
 		cancel:        cancel,
 		isStarted:     true,
@@ -294,11 +297,13 @@ func newReadShardTestBus(t *testing.T, client KinesisClient, subs map[string]map
 	t.Cleanup(cancel)
 	return &KinesisEventBus{
 		config: &KinesisConfig{
-			StreamName: "test-stream",
-			ShardCount: 1,
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: DefaultKinesisPollInterval,
 		},
 		client:        client,
 		subscriptions: subs,
+		activeShards:  make(map[string]struct{}),
 		ctx:           ctx,
 		cancel:        cancel,
 		isStarted:     true,
@@ -348,6 +353,7 @@ func TestKinesisReadShardCloudEvent(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	select {
@@ -404,6 +410,7 @@ func TestKinesisReadShardNativeEvent(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	select {
@@ -460,6 +467,7 @@ func TestKinesisReadShardCloudEventBase64(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	select {
@@ -511,6 +519,7 @@ func TestKinesisReadShardRejectsInvalidSpecversion(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	// Handler should NOT have been called for invalid specversion.
@@ -571,6 +580,7 @@ func TestKinesisReadShardMultipleRecords(t *testing.T) {
 			NextShardIterator: nil,
 		}, nil)
 
+	bus.wg.Add(1)
 	bus.readShard("shard-0")
 
 	select {
@@ -649,6 +659,7 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 				NextShardIterator: nil,
 			}, nil)
 
+		bus.wg.Add(1)
 		bus.readShard("shard-0")
 
 		select {
@@ -728,6 +739,7 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 				NextShardIterator: nil,
 			}, nil)
 
+		bus.wg.Add(1)
 		bus.readShard("shard-0")
 
 		// Should receive both events
@@ -764,11 +776,13 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		bus := &KinesisEventBus{
 			config: &KinesisConfig{
-				StreamName: "test-stream",
-				ShardCount: 1,
+				StreamName:   "test-stream",
+				ShardCount:   1,
+				PollInterval: DefaultKinesisPollInterval,
 			},
 			client:        mockClient,
 			subscriptions: subs,
+			activeShards:  make(map[string]struct{}),
 			ctx:           ctx,
 			cancel:        cancel,
 			isStarted:     true,
@@ -800,6 +814,7 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 		}()
 
 		done := make(chan struct{})
+		bus.wg.Add(1)
 		go func() {
 			bus.readShard("shard-0")
 			close(done)
@@ -812,4 +827,451 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 			t.Fatal("readShard did not exit after context cancellation during refresh backoff")
 		}
 	})
+}
+
+// --- Shard tracking and deduplication tests ---
+
+func TestKinesisStartShardReadersSkipsActiveShards(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bus := &KinesisEventBus{
+		config: &KinesisConfig{
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: 10 * time.Millisecond,
+		},
+		client:        mockClient,
+		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		isStarted:     true,
+	}
+
+	shardID := "shardId-000000000000"
+
+	// Pre-mark the shard as active (simulating an already-running reader)
+	bus.shardMutex.Lock()
+	bus.activeShards[shardID] = struct{}{}
+	bus.shardMutex.Unlock()
+
+	describeCalled := make(chan struct{}, 1)
+
+	// DescribeStream returns the same shard that's already active
+	mockClient.EXPECT().
+		DescribeStream(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, input *kinesis.DescribeStreamInput, optFns ...func(*kinesis.Options)) (*kinesis.DescribeStreamOutput, error) {
+			describeCalled <- struct{}{}
+			return &kinesis.DescribeStreamOutput{
+				StreamDescription: &types.StreamDescription{
+					Shards: []types.Shard{{ShardId: &shardID}},
+				},
+			}, nil
+		}).
+		AnyTimes()
+
+	// GetShardIterator should NEVER be called — the shard is already active
+	// (gomock will fail the test if this is unexpectedly called)
+
+	bus.startShardReaders()
+
+	// Wait for scanner to complete its first DescribeStream call
+	select {
+	case <-describeCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not call DescribeStream")
+	}
+
+	// Give a moment for any (incorrect) goroutine spawn to happen
+	time.Sleep(50 * time.Millisecond)
+
+	cancel()
+	bus.wg.Wait()
+
+	// If startShardReaders had spawned a duplicate reader, gomock would fail
+	// due to an unexpected GetShardIterator call.
+}
+
+func TestKinesisStartShardReadersDescribeStreamError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bus := &KinesisEventBus{
+		config: &KinesisConfig{
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: DefaultKinesisPollInterval,
+		},
+		client:        mockClient,
+		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		isStarted:     true,
+	}
+
+	describeCalled := make(chan struct{}, 1)
+
+	// DescribeStream returns an error — scanner should retry after backoff
+	mockClient.EXPECT().
+		DescribeStream(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, input *kinesis.DescribeStreamInput, optFns ...func(*kinesis.Options)) (*kinesis.DescribeStreamOutput, error) {
+			describeCalled <- struct{}{}
+			return nil, fmt.Errorf("access denied")
+		}).
+		AnyTimes()
+
+	bus.startShardReaders()
+
+	// Wait for the first DescribeStream call
+	select {
+	case <-describeCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not call DescribeStream")
+	}
+
+	// Cancel during the 5s error backoff — should exit promptly
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		bus.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not exit promptly after context cancellation during error backoff")
+	}
+}
+
+func TestKinesisStartShardReadersNilStreamDescription(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bus := &KinesisEventBus{
+		config: &KinesisConfig{
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: DefaultKinesisPollInterval,
+		},
+		client:        mockClient,
+		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		isStarted:     true,
+	}
+
+	describeCalled := make(chan struct{}, 1)
+
+	// DescribeStream succeeds but returns nil StreamDescription
+	mockClient.EXPECT().
+		DescribeStream(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, input *kinesis.DescribeStreamInput, optFns ...func(*kinesis.Options)) (*kinesis.DescribeStreamOutput, error) {
+			describeCalled <- struct{}{}
+			return &kinesis.DescribeStreamOutput{StreamDescription: nil}, nil
+		}).
+		AnyTimes()
+
+	bus.startShardReaders()
+
+	// Wait for the first DescribeStream call
+	select {
+	case <-describeCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not call DescribeStream")
+	}
+
+	// Cancel during the 5s nil-description backoff — should exit promptly
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		bus.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not exit promptly after context cancellation during nil description backoff")
+	}
+}
+
+func TestKinesisStartShardReadersExitsOnContextCancel(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	bus := &KinesisEventBus{
+		config: &KinesisConfig{
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: DefaultKinesisPollInterval,
+		},
+		client:        mockClient,
+		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		isStarted:     true,
+	}
+
+	// Cancel immediately before scanner can call DescribeStream
+	cancel()
+
+	bus.startShardReaders()
+
+	done := make(chan struct{})
+	go func() {
+		bus.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not exit on pre-cancelled context")
+	}
+}
+
+func TestKinesisReadShardCleansUpActiveShards(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	bus := newTestKinesisEventBus(mockClient)
+	defer bus.cancel()
+
+	shardID := "shard-0"
+
+	// Pre-register the shard as active (simulating what startShardReaders does)
+	bus.shardMutex.Lock()
+	bus.activeShards[shardID] = struct{}{}
+	bus.shardMutex.Unlock()
+
+	iterStr := "shard-iter-1"
+	mockClient.EXPECT().
+		GetShardIterator(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetShardIteratorOutput{ShardIterator: &iterStr}, nil)
+
+	// Return nil NextShardIterator to make readShard exit immediately
+	mockClient.EXPECT().
+		GetRecords(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetRecordsOutput{
+			Records:           []types.Record{},
+			NextShardIterator: nil,
+		}, nil)
+
+	bus.wg.Add(1)
+	bus.readShard(shardID)
+
+	// After readShard exits, the shard should be removed from activeShards
+	bus.shardMutex.Lock()
+	_, stillActive := bus.activeShards[shardID]
+	bus.shardMutex.Unlock()
+
+	assert.False(t, stillActive, "shard should be removed from activeShards after readShard exits")
+}
+
+func TestKinesisShardScanOncePreventsDuplicateScanners(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	bus := newTestKinesisEventBus(mockClient)
+	defer bus.cancel()
+
+	describeCalled := make(chan struct{}, 3)
+	var describeCallCount int32
+
+	// DescribeStream should only be called by ONE scanner goroutine.
+	mockClient.EXPECT().
+		DescribeStream(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, input *kinesis.DescribeStreamInput, optFns ...func(*kinesis.Options)) (*kinesis.DescribeStreamOutput, error) {
+			atomic.AddInt32(&describeCallCount, 1)
+			describeCalled <- struct{}{}
+			// Return no shards to keep things simple
+			return &kinesis.DescribeStreamOutput{
+				StreamDescription: &types.StreamDescription{
+					Shards: []types.Shard{},
+				},
+			}, nil
+		}).
+		AnyTimes()
+
+	// Subscribe three times — each triggers shardScanOnce.Do
+	handler := func(ctx context.Context, event Event) error { return nil }
+	_, err := bus.Subscribe(context.Background(), "topic.a", handler)
+	require.NoError(t, err)
+	_, err = bus.Subscribe(context.Background(), "topic.b", handler)
+	require.NoError(t, err)
+	_, err = bus.Subscribe(context.Background(), "topic.c", handler)
+	require.NoError(t, err)
+
+	// Wait for the first DescribeStream call (channel-based, not time-based)
+	select {
+	case <-describeCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not call DescribeStream")
+	}
+
+	// Give a brief window for any duplicate scanners to call DescribeStream
+	time.Sleep(50 * time.Millisecond)
+	bus.cancel()
+	bus.wg.Wait()
+
+	// With sync.Once, only one scanner goroutine should have been launched.
+	count := atomic.LoadInt32(&describeCallCount)
+	assert.Equal(t, int32(1), count,
+		"only one shard scanner should run regardless of subscribe count")
+}
+
+func TestKinesisStartInitializesActiveShards(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	m := mocks.NewMockKinesisClient(ctrl)
+	bus := &KinesisEventBus{
+		config:        &KinesisConfig{StreamName: "my-stream", ShardCount: 1},
+		client:        m,
+		subscriptions: make(map[string]map[string]*kinesisSubscription),
+	}
+
+	m.EXPECT().
+		DescribeStream(gomock.Any(), gomock.Any()).
+		Return(&kinesis.DescribeStreamOutput{}, nil)
+
+	err := bus.Start(context.Background())
+	require.NoError(t, err)
+	defer bus.cancel()
+
+	assert.NotNil(t, bus.activeShards, "Start should initialize activeShards map")
+	assert.Equal(t, DefaultKinesisPollInterval, bus.config.PollInterval,
+		"Start should set default PollInterval when not configured")
+}
+
+func TestKinesisNewEventBusPollInterval(t *testing.T) {
+	t.Run("parses valid poll interval", func(t *testing.T) {
+		config := map[string]interface{}{
+			"pollInterval": "500ms",
+		}
+		bus, err := NewKinesisEventBus(config)
+		require.NoError(t, err)
+
+		kBus := bus.(*KinesisEventBus)
+		assert.Equal(t, 500*time.Millisecond, kBus.config.PollInterval)
+	})
+
+	t.Run("defaults to 1s when not set", func(t *testing.T) {
+		config := map[string]interface{}{}
+		bus, err := NewKinesisEventBus(config)
+		require.NoError(t, err)
+
+		kBus := bus.(*KinesisEventBus)
+		assert.Equal(t, DefaultKinesisPollInterval, kBus.config.PollInterval)
+	})
+
+	t.Run("returns error for invalid poll interval", func(t *testing.T) {
+		config := map[string]interface{}{
+			"pollInterval": "not-a-duration",
+		}
+		_, err := NewKinesisEventBus(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid pollInterval")
+	})
+
+	t.Run("returns error for negative poll interval", func(t *testing.T) {
+		config := map[string]interface{}{
+			"pollInterval": "-500ms",
+		}
+		_, err := NewKinesisEventBus(config)
+		assert.ErrorIs(t, err, ErrInvalidPollInterval)
+	})
+
+	t.Run("returns error for zero poll interval", func(t *testing.T) {
+		config := map[string]interface{}{
+			"pollInterval": "0s",
+		}
+		_, err := NewKinesisEventBus(config)
+		assert.ErrorIs(t, err, ErrInvalidPollInterval)
+	})
+}
+
+func TestKinesisReadShardUsesConfiguredPollInterval(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bus := &KinesisEventBus{
+		config: &KinesisConfig{
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: 50 * time.Millisecond,
+		},
+		client:        mockClient,
+		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		isStarted:     true,
+	}
+
+	iterStr := "shard-iter-1"
+	mockClient.EXPECT().
+		GetShardIterator(gomock.Any(), gomock.Any()).
+		Return(&kinesis.GetShardIteratorOutput{ShardIterator: &iterStr}, nil)
+
+	timestamps := make(chan time.Time, 5)
+	callCount := 0
+	mockClient.EXPECT().
+		GetRecords(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, input *kinesis.GetRecordsInput, optFns ...func(*kinesis.Options)) (*kinesis.GetRecordsOutput, error) {
+			timestamps <- time.Now()
+			callCount++
+			if callCount >= 4 {
+				cancel()
+				return &kinesis.GetRecordsOutput{
+					Records:           []types.Record{},
+					NextShardIterator: nil,
+				}, nil
+			}
+			nextIter := fmt.Sprintf("shard-iter-%d", callCount+1)
+			return &kinesis.GetRecordsOutput{
+				Records:           []types.Record{},
+				NextShardIterator: &nextIter,
+			}, nil
+		}).
+		AnyTimes()
+
+	bus.wg.Add(1)
+	bus.readShard("shard-0")
+	close(timestamps)
+
+	// Collect timestamps and verify intervals are approximately 50ms
+	var times []time.Time
+	for ts := range timestamps {
+		times = append(times, ts)
+	}
+
+	require.GreaterOrEqual(t, len(times), 3, "should have at least 3 poll cycles")
+
+	for i := 1; i < len(times)-1; i++ {
+		interval := times[i].Sub(times[i-1])
+		assert.GreaterOrEqual(t, interval, 40*time.Millisecond,
+			"poll interval %d should be at least ~50ms (got %v)", i, interval)
+		assert.LessOrEqual(t, interval, 200*time.Millisecond,
+			"poll interval %d should not be excessively long (got %v)", i, interval)
+	}
 }

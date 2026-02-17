@@ -29,7 +29,7 @@ type NatsEventBus struct {
 type NatsConfig struct {
 	URL              string `json:"url"`
 	Username         string `json:"username"`
-	Password         string `json:"password"`
+	Password         string `json:"password"` //nolint:gosec // config field, not a hardcoded secret
 	Token            string `json:"token"`
 	MaxReconnects    int    `json:"maxReconnects"`
 	ReconnectWait    int    `json:"reconnectWait"`

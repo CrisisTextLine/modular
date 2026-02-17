@@ -896,6 +896,158 @@ func TestKinesisStartShardReadersSkipsActiveShards(t *testing.T) {
 	// due to an unexpected GetShardIterator call.
 }
 
+func TestKinesisStartShardReadersDescribeStreamError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bus := &KinesisEventBus{
+		config: &KinesisConfig{
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: DefaultKinesisPollInterval,
+		},
+		client:        mockClient,
+		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		isStarted:     true,
+	}
+
+	describeCalled := make(chan struct{}, 1)
+
+	// DescribeStream returns an error — scanner should retry after backoff
+	mockClient.EXPECT().
+		DescribeStream(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, input *kinesis.DescribeStreamInput, optFns ...func(*kinesis.Options)) (*kinesis.DescribeStreamOutput, error) {
+			describeCalled <- struct{}{}
+			return nil, fmt.Errorf("access denied")
+		}).
+		AnyTimes()
+
+	bus.startShardReaders()
+
+	// Wait for the first DescribeStream call
+	select {
+	case <-describeCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not call DescribeStream")
+	}
+
+	// Cancel during the 5s error backoff — should exit promptly
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		bus.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not exit promptly after context cancellation during error backoff")
+	}
+}
+
+func TestKinesisStartShardReadersNilStreamDescription(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bus := &KinesisEventBus{
+		config: &KinesisConfig{
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: DefaultKinesisPollInterval,
+		},
+		client:        mockClient,
+		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		isStarted:     true,
+	}
+
+	describeCalled := make(chan struct{}, 1)
+
+	// DescribeStream succeeds but returns nil StreamDescription
+	mockClient.EXPECT().
+		DescribeStream(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, input *kinesis.DescribeStreamInput, optFns ...func(*kinesis.Options)) (*kinesis.DescribeStreamOutput, error) {
+			describeCalled <- struct{}{}
+			return &kinesis.DescribeStreamOutput{StreamDescription: nil}, nil
+		}).
+		AnyTimes()
+
+	bus.startShardReaders()
+
+	// Wait for the first DescribeStream call
+	select {
+	case <-describeCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not call DescribeStream")
+	}
+
+	// Cancel during the 5s nil-description backoff — should exit promptly
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		bus.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not exit promptly after context cancellation during nil description backoff")
+	}
+}
+
+func TestKinesisStartShardReadersExitsOnContextCancel(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := mocks.NewMockKinesisClient(ctrl)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	bus := &KinesisEventBus{
+		config: &KinesisConfig{
+			StreamName:   "test-stream",
+			ShardCount:   1,
+			PollInterval: DefaultKinesisPollInterval,
+		},
+		client:        mockClient,
+		subscriptions: make(map[string]map[string]*kinesisSubscription),
+		activeShards:  make(map[string]struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		isStarted:     true,
+	}
+
+	// Cancel immediately before scanner can call DescribeStream
+	cancel()
+
+	bus.startShardReaders()
+
+	done := make(chan struct{})
+	go func() {
+		bus.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanner did not exit on pre-cancelled context")
+	}
+}
+
 func TestKinesisReadShardCleansUpActiveShards(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockClient := mocks.NewMockKinesisClient(ctrl)

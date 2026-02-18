@@ -87,8 +87,10 @@ func TestPublishWithPartitionKey(t *testing.T) {
 
 		select {
 		case event := <-eventReceived:
-			assert.Equal(t, "test-payload", event.Payload)
-			assert.Equal(t, "test.partitioned", event.Topic)
+			var payload string
+			require.NoError(t, event.DataAs(&payload))
+			assert.Equal(t, "test-payload", payload)
+			assert.Equal(t, "test.partitioned", event.Type())
 		case <-time.After(2 * time.Second):
 			t.Fatal("Event not received within timeout")
 		}
@@ -129,7 +131,9 @@ func TestPublishWithPartitionKey(t *testing.T) {
 
 		select {
 		case event := <-eventReceived:
-			assert.Equal(t, "basic-payload", event.Payload)
+			var payload string
+			require.NoError(t, event.DataAs(&payload))
+			assert.Equal(t, "basic-payload", payload)
 		case <-time.After(2 * time.Second):
 			t.Fatal("Event not received within timeout")
 		}

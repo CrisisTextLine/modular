@@ -82,10 +82,7 @@ func TestNatsIntegrationPubSub(t *testing.T) {
 
 	// Publish an event
 	testPayload := map[string]string{"message": "hello"}
-	event := Event{
-		Topic:   "test.topic",
-		Payload: testPayload,
-	}
+	event := newTestCloudEvent("test.topic", testPayload)
 
 	err = bus.Publish(ctx, event)
 	require.NoError(t, err)
@@ -93,8 +90,8 @@ func TestNatsIntegrationPubSub(t *testing.T) {
 	// Wait for event to be received
 	select {
 	case receivedEvent := <-eventReceived:
-		assert.Equal(t, "test.topic", receivedEvent.Topic)
-		assert.NotNil(t, receivedEvent.Payload)
+		assert.Equal(t, "test.topic", receivedEvent.Type())
+		assert.NotNil(t, receivedEvent.Data())
 	case <-time.After(2 * time.Second):
 		t.Fatal("Timeout waiting for event")
 	}
@@ -142,10 +139,7 @@ func TestNatsIntegrationWildcards(t *testing.T) {
 	// Publish multiple events
 	events := []string{"user.created", "user.updated", "user.deleted"}
 	for _, topic := range events {
-		event := Event{
-			Topic:   topic,
-			Payload: map[string]string{"topic": topic},
-		}
+		event := newTestCloudEvent(topic, map[string]string{"topic": topic})
 		err = bus.Publish(ctx, event)
 		require.NoError(t, err)
 	}
@@ -208,10 +202,7 @@ func TestNatsIntegrationAsync(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Publish an event
-	event := Event{
-		Topic:   "async.test",
-		Payload: map[string]string{"message": "async test"},
-	}
+	event := newTestCloudEvent("async.test", map[string]string{"message": "async test"})
 
 	startTime := time.Now()
 	err = bus.Publish(ctx, event)

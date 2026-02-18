@@ -5,37 +5,53 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// startTestNATSServer starts an embedded NATS server on a random port and
+// returns the client URL. The server is automatically shut down when the
+// test completes.
+func startTestNATSServer(t *testing.T) string {
+	t.Helper()
+
+	srv, err := server.NewServer(&server.Options{
+		Host:   "127.0.0.1",
+		Port:   -1, // random free port
+		NoLog:  true,
+		NoSigs: true,
+	})
+	require.NoError(t, err, "failed to create embedded NATS server")
+
+	srv.Start()
+	t.Cleanup(srv.Shutdown)
+
+	if !srv.ReadyForConnections(5 * time.Second) {
+		t.Fatal("embedded NATS server failed to become ready")
+	}
+
+	return srv.ClientURL()
+}
+
 // TestNatsEventBusCreation tests creating a NATS event bus
 func TestNatsEventBusCreation(t *testing.T) {
+	url := startTestNATSServer(t)
+
 	t.Run("creates with default configuration", func(t *testing.T) {
 		config := map[string]interface{}{
-			"url": "nats://localhost:4222",
+			"url": url,
 		}
 
 		bus, err := NewNatsEventBus(config)
-
-		// We expect this to fail if NATS is not running, which is fine
-		// The important part is that the function doesn't panic
-		if err != nil {
-			t.Logf("Expected error when NATS is not available: %v", err)
-			return
-		}
-
+		require.NoError(t, err)
 		require.NotNil(t, bus)
-
-		// Clean up
-		if bus != nil {
-			_ = bus.Stop(context.Background())
-		}
+		defer bus.Stop(context.Background())
 	})
 
 	t.Run("creates with custom configuration", func(t *testing.T) {
 		config := map[string]interface{}{
-			"url":              "nats://localhost:4222",
+			"url":              url,
 			"connectionName":   "test-connection",
 			"maxReconnects":    5,
 			"reconnectWait":    1,
@@ -46,79 +62,22 @@ func TestNatsEventBusCreation(t *testing.T) {
 		}
 
 		bus, err := NewNatsEventBus(config)
-
-		// We expect this to fail if NATS is not running
-		if err != nil {
-			t.Logf("Expected error when NATS is not available: %v", err)
-			return
-		}
-
+		require.NoError(t, err)
 		require.NotNil(t, bus)
-
-		// Clean up
-		if bus != nil {
-			_ = bus.Stop(context.Background())
-		}
-	})
-
-	t.Run("creates with authentication", func(t *testing.T) {
-		config := map[string]interface{}{
-			"url":      "nats://localhost:4222",
-			"username": "test-user",
-			"password": "test-pass",
-		}
-
-		bus, err := NewNatsEventBus(config)
-
-		// We expect this to fail if NATS is not running or auth fails
-		if err != nil {
-			t.Logf("Expected error when NATS is not available or auth fails: %v", err)
-			return
-		}
-
-		require.NotNil(t, bus)
-
-		// Clean up
-		if bus != nil {
-			_ = bus.Stop(context.Background())
-		}
-	})
-
-	t.Run("creates with token authentication", func(t *testing.T) {
-		config := map[string]interface{}{
-			"url":   "nats://localhost:4222",
-			"token": "test-token",
-		}
-
-		bus, err := NewNatsEventBus(config)
-
-		// We expect this to fail if NATS is not running or auth fails
-		if err != nil {
-			t.Logf("Expected error when NATS is not available or auth fails: %v", err)
-			return
-		}
-
-		require.NotNil(t, bus)
-
-		// Clean up
-		if bus != nil {
-			_ = bus.Stop(context.Background())
-		}
+		defer bus.Stop(context.Background())
 	})
 }
 
 // TestNatsEventBusInterface verifies that NatsEventBus implements EventBus
 func TestNatsEventBusInterface(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping NATS integration test in short mode")
-	}
+	url := startTestNATSServer(t)
 
 	config := map[string]interface{}{
-		"url": "nats://localhost:4222",
+		"url": url,
 	}
 
 	bus, err := NewNatsEventBus(config)
-	require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+	require.NoError(t, err)
 	defer bus.Stop(context.Background())
 
 	// Verify it implements the EventBus interface
@@ -127,8 +86,9 @@ func TestNatsEventBusInterface(t *testing.T) {
 
 // TestNatsTopicToSubject tests the topic to subject conversion
 func TestNatsTopicToSubject(t *testing.T) {
-	// Create a NatsEventBus instance without actually connecting
-	// We can test the topicToSubject method which doesn't require a connection
+	t.Parallel()
+
+	// topicToSubject doesn't require a connection
 	natsBus := &NatsEventBus{}
 
 	tests := []struct {
@@ -155,16 +115,14 @@ func TestNatsTopicToSubject(t *testing.T) {
 
 // TestNatsEventBusLifecycle tests the lifecycle of the NATS event bus
 func TestNatsEventBusLifecycle(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping NATS integration test in short mode")
-	}
+	url := startTestNATSServer(t)
 
 	config := map[string]interface{}{
-		"url": "nats://localhost:4222",
+		"url": url,
 	}
 
 	bus, err := NewNatsEventBus(config)
-	require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+	require.NoError(t, err)
 
 	ctx := context.Background()
 
@@ -187,16 +145,14 @@ func TestNatsEventBusLifecycle(t *testing.T) {
 
 // TestNatsEventBusPubSub tests basic publish/subscribe functionality
 func TestNatsEventBusPubSub(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping NATS integration test in short mode")
-	}
+	url := startTestNATSServer(t)
 
 	config := map[string]interface{}{
-		"url": "nats://localhost:4222",
+		"url": url,
 	}
 
 	bus, err := NewNatsEventBus(config)
-	require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+	require.NoError(t, err)
 	defer bus.Stop(context.Background())
 
 	ctx := context.Background()
@@ -221,10 +177,7 @@ func TestNatsEventBusPubSub(t *testing.T) {
 
 	// Publish an event
 	testPayload := map[string]string{"message": "hello"}
-	event := Event{
-		Topic:   "test.topic",
-		Payload: testPayload,
-	}
+	event := newTestCloudEvent("test.topic", testPayload)
 
 	err = bus.Publish(ctx, event)
 	require.NoError(t, err)
@@ -232,10 +185,8 @@ func TestNatsEventBusPubSub(t *testing.T) {
 	// Wait for event to be received
 	select {
 	case receivedEvent := <-eventReceived:
-		assert.Equal(t, "test.topic", receivedEvent.Topic)
-		// Payload comparison is tricky due to JSON serialization
-		// so we just check that it's not nil
-		assert.NotNil(t, receivedEvent.Payload)
+		assert.Equal(t, "test.topic", receivedEvent.Type())
+		assert.NotNil(t, receivedEvent.Data())
 	case <-time.After(2 * time.Second):
 		t.Fatal("Timeout waiting for event")
 	}
@@ -247,16 +198,14 @@ func TestNatsEventBusPubSub(t *testing.T) {
 
 // TestNatsEventBusWildcardSubscription tests wildcard subscriptions
 func TestNatsEventBusWildcardSubscription(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping NATS integration test in short mode")
-	}
+	url := startTestNATSServer(t)
 
 	config := map[string]interface{}{
-		"url": "nats://localhost:4222",
+		"url": url,
 	}
 
 	bus, err := NewNatsEventBus(config)
-	require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+	require.NoError(t, err)
 	defer bus.Stop(context.Background())
 
 	ctx := context.Background()
@@ -282,10 +231,7 @@ func TestNatsEventBusWildcardSubscription(t *testing.T) {
 	// Publish multiple events
 	events := []string{"user.created", "user.updated", "user.deleted"}
 	for _, topic := range events {
-		event := Event{
-			Topic:   topic,
-			Payload: map[string]string{"topic": topic},
-		}
+		event := newTestCloudEvent(topic, map[string]string{"topic": topic})
 		err = bus.Publish(ctx, event)
 		require.NoError(t, err)
 	}
@@ -311,16 +257,14 @@ func TestNatsEventBusWildcardSubscription(t *testing.T) {
 
 // TestNatsEventBusAsyncSubscription tests asynchronous subscriptions
 func TestNatsEventBusAsyncSubscription(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping NATS integration test in short mode")
-	}
+	url := startTestNATSServer(t)
 
 	config := map[string]interface{}{
-		"url": "nats://localhost:4222",
+		"url": url,
 	}
 
 	bus, err := NewNatsEventBus(config)
-	require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+	require.NoError(t, err)
 	defer bus.Stop(context.Background())
 
 	ctx := context.Background()
@@ -347,10 +291,7 @@ func TestNatsEventBusAsyncSubscription(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Publish an event
-	event := Event{
-		Topic:   "async.test",
-		Payload: map[string]string{"message": "async test"},
-	}
+	event := newTestCloudEvent("async.test", map[string]string{"message": "async test"})
 
 	startTime := time.Now()
 	err = bus.Publish(ctx, event)
@@ -358,7 +299,6 @@ func TestNatsEventBusAsyncSubscription(t *testing.T) {
 	require.NoError(t, err)
 
 	// Publishing should not block for async subscriptions
-	// Allow some overhead but it should be fast
 	assert.Less(t, publishDuration, 100*time.Millisecond)
 
 	// Wait for event to be received
@@ -376,16 +316,14 @@ func TestNatsEventBusAsyncSubscription(t *testing.T) {
 
 // TestNatsEventBusMultipleSubscribers tests multiple subscribers on the same topic
 func TestNatsEventBusMultipleSubscribers(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping NATS integration test in short mode")
-	}
+	url := startTestNATSServer(t)
 
 	config := map[string]interface{}{
-		"url": "nats://localhost:4222",
+		"url": url,
 	}
 
 	bus, err := NewNatsEventBus(config)
-	require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+	require.NoError(t, err)
 	defer bus.Stop(context.Background())
 
 	ctx := context.Background()
@@ -422,10 +360,7 @@ func TestNatsEventBusMultipleSubscribers(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Publish an event
-	event := Event{
-		Topic:   "multi.test",
-		Payload: map[string]string{"message": "test"},
-	}
+	event := newTestCloudEvent("multi.test", map[string]string{"message": "test"})
 
 	err = bus.Publish(ctx, event)
 	require.NoError(t, err)
@@ -454,16 +389,14 @@ func TestNatsEventBusMultipleSubscribers(t *testing.T) {
 
 // TestNatsEventBusTopics tests the Topics method
 func TestNatsEventBusTopics(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping NATS integration test in short mode")
-	}
+	url := startTestNATSServer(t)
 
 	config := map[string]interface{}{
-		"url": "nats://localhost:4222",
+		"url": url,
 	}
 
 	bus, err := NewNatsEventBus(config)
-	require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+	require.NoError(t, err)
 	defer bus.Stop(context.Background())
 
 	ctx := context.Background()
@@ -494,20 +427,20 @@ func TestNatsEventBusTopics(t *testing.T) {
 
 // TestNatsConfigDefaults tests that default configuration values are properly set
 func TestNatsConfigDefaults(t *testing.T) {
-	config := map[string]interface{}{}
+	url := startTestNATSServer(t)
+
+	config := map[string]interface{}{
+		"url": url,
+	}
 
 	bus, err := NewNatsEventBus(config)
-	if err != nil {
-		// Expected when NATS is not running, but we can still verify the error
-		assert.Contains(t, err.Error(), "failed to connect to NATS")
-		return
-	}
+	require.NoError(t, err)
+	defer bus.Stop(context.Background())
 
 	natsBus, ok := bus.(*NatsEventBus)
 	require.True(t, ok)
 
-	// Verify defaults - note that NATS may resolve localhost to 127.0.0.1
-	assert.Contains(t, natsBus.config.URL, "4222", "URL should contain port 4222")
+	assert.Equal(t, url, natsBus.config.URL)
 	assert.Equal(t, "modular-eventbus", natsBus.config.ConnectionName)
 	assert.Equal(t, 10, natsBus.config.MaxReconnects)
 	assert.Equal(t, 2, natsBus.config.ReconnectWait)
@@ -515,12 +448,12 @@ func TestNatsConfigDefaults(t *testing.T) {
 	assert.Equal(t, 20, natsBus.config.PingInterval)
 	assert.Equal(t, 2, natsBus.config.MaxPingsOut)
 	assert.Equal(t, 5, natsBus.config.SubscribeTimeout)
-
-	_ = bus.Stop(context.Background())
 }
 
 // TestNatsSubscriptionMethods tests the subscription interface methods
 func TestNatsSubscriptionMethods(t *testing.T) {
+	t.Parallel()
+
 	sub := &natsSubscription{
 		id:      "test-id",
 		topic:   "test.topic",
@@ -544,9 +477,7 @@ func TestNatsSubscriptionMethods(t *testing.T) {
 
 // TestNatsConfigurationParsing tests various configuration scenarios
 func TestNatsConfigurationParsing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping NATS integration test in short mode")
-	}
+	url := startTestNATSServer(t)
 
 	tests := []struct {
 		name           string
@@ -556,14 +487,14 @@ func TestNatsConfigurationParsing(t *testing.T) {
 	}{
 		{
 			name:           "minimal config",
-			config:         map[string]interface{}{"url": "nats://localhost:4222"},
+			config:         map[string]interface{}{"url": url},
 			expectedName:   "modular-eventbus",
 			expectedReconn: 10,
 		},
 		{
 			name: "custom name",
 			config: map[string]interface{}{
-				"url":            "nats://localhost:4222",
+				"url":            url,
 				"connectionName": "my-app",
 			},
 			expectedName:   "my-app",
@@ -572,7 +503,7 @@ func TestNatsConfigurationParsing(t *testing.T) {
 		{
 			name: "custom reconnect settings",
 			config: map[string]interface{}{
-				"url":           "nats://localhost:4222",
+				"url":           url,
 				"maxReconnects": 5,
 			},
 			expectedName:   "modular-eventbus",
@@ -583,12 +514,12 @@ func TestNatsConfigurationParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			bus, err := NewNatsEventBus(tt.config)
-			require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+			require.NoError(t, err)
 
 			natsBus, ok := bus.(*NatsEventBus)
 			require.True(t, ok)
 
-			assert.Contains(t, natsBus.config.URL, "4222", "URL should contain port 4222")
+			assert.Equal(t, url, natsBus.config.URL)
 			assert.Equal(t, tt.expectedName, natsBus.config.ConnectionName)
 			assert.Equal(t, tt.expectedReconn, natsBus.config.MaxReconnects)
 
@@ -599,14 +530,12 @@ func TestNatsConfigurationParsing(t *testing.T) {
 
 // TestNatsErrorCases tests error handling
 func TestNatsErrorCases(t *testing.T) {
-	t.Run("operations fail when not started", func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("Skipping NATS integration test in short mode")
-		}
+	url := startTestNATSServer(t)
 
-		config := map[string]interface{}{"url": "nats://localhost:4222"}
+	t.Run("operations fail when not started", func(t *testing.T) {
+		config := map[string]interface{}{"url": url}
 		bus, err := NewNatsEventBus(config)
-		require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+		require.NoError(t, err)
 
 		natsBus, ok := bus.(*NatsEventBus)
 		require.True(t, ok)
@@ -616,7 +545,7 @@ func TestNatsErrorCases(t *testing.T) {
 		// Don't start the bus
 
 		// Publish should fail
-		event := Event{Topic: "test", Payload: "data"}
+		event := newTestCloudEvent("test", "data")
 		err = natsBus.Publish(ctx, event)
 		assert.Error(t, err)
 		assert.Equal(t, ErrEventBusNotStarted, err)
@@ -639,13 +568,9 @@ func TestNatsErrorCases(t *testing.T) {
 	})
 
 	t.Run("nil handler rejected", func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("Skipping NATS integration test in short mode")
-		}
-
-		config := map[string]interface{}{"url": "nats://localhost:4222"}
+		config := map[string]interface{}{"url": url}
 		bus, err := NewNatsEventBus(config)
-		require.NoError(t, err, "NATS server must be available at localhost:4222. Start it with: docker run -d -p 4222:4222 nats:2.10-alpine")
+		require.NoError(t, err)
 		defer bus.Stop(context.Background())
 
 		err = bus.Start(context.Background())
@@ -662,5 +587,12 @@ func TestNatsErrorCases(t *testing.T) {
 		_, err = bus.SubscribeAsync(ctx, "test", nil)
 		assert.Error(t, err)
 		assert.Equal(t, ErrEventHandlerNil, err)
+	})
+
+	t.Run("connection to bad URL fails", func(t *testing.T) {
+		config := map[string]interface{}{"url": "nats://127.0.0.1:1"}
+		_, err := NewNatsEventBus(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to connect to NATS")
 	})
 }

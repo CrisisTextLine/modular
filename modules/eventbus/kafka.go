@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/IBM/sarama"
 	"github.com/google/uuid"
@@ -118,7 +117,8 @@ func (h *KafkaConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSes
 			h.mutex.RUnlock()
 
 			// Deserialize once per message, reuse for all matching subscriptions
-			event, err := parseRecord(msg.Value)
+			var event Event
+			err := json.Unmarshal(msg.Value, &event)
 			if err != nil {
 				slog.Error("Failed to deserialize Kafka message", "error", err, "topic", msg.Topic)
 				session.MarkMessage(msg, "")
@@ -293,13 +293,6 @@ func (k *KafkaEventBus) Publish(ctx context.Context, event Event) error {
 		return ErrEventBusNotStarted
 	}
 
-	// Fill in event metadata
-	event.CreatedAt = time.Now()
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]interface{})
-	}
-
-	// Serialize event to JSON
 	eventData, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to serialize event: %w", err)
@@ -307,7 +300,7 @@ func (k *KafkaEventBus) Publish(ctx context.Context, event Event) error {
 
 	// Create Kafka message
 	message := &sarama.ProducerMessage{
-		Topic: event.Topic,
+		Topic: event.Type(),
 		Value: sarama.StringEncoder(eventData),
 	}
 
@@ -463,19 +456,9 @@ func (k *KafkaEventBus) SubscriberCount(topic string) int {
 
 // processEvent processes an event synchronously
 func (k *KafkaEventBus) processEvent(sub *kafkaSubscription, event Event) {
-	now := time.Now()
-	event.ProcessingStarted = &now
-
-	// Process the event
 	err := sub.handler(k.ctx, event)
-
-	// Record completion
-	completed := time.Now()
-	event.ProcessingCompleted = &completed
-
 	if err != nil {
-		// Log error but continue processing
-		slog.Error("Kafka event handler failed", "error", err, "topic", event.Topic)
+		slog.Error("Kafka event handler failed", "error", err, "topic", event.Type())
 	}
 }
 

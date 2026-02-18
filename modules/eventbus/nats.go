@@ -230,20 +230,13 @@ func (n *NatsEventBus) Publish(ctx context.Context, event Event) error {
 		return ErrEventBusNotStarted
 	}
 
-	// Fill in event metadata
-	event.CreatedAt = time.Now()
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]interface{})
-	}
-
-	// Serialize event to JSON
 	eventData, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to serialize event: %w", err)
 	}
 
 	// Convert topic to NATS subject (replace wildcards if needed)
-	subject := n.topicToSubject(event.Topic)
+	subject := n.topicToSubject(event.Type())
 
 	// Publish to NATS
 	err = n.conn.Publish(subject, eventData)
@@ -299,7 +292,8 @@ func (n *NatsEventBus) subscribe(ctx context.Context, topic string, handler Even
 		sub.mutex.RUnlock()
 
 		// Deserialize event
-		event, err := parseRecord(msg.Data)
+		var event Event
+		err := json.Unmarshal(msg.Data, &event)
 		if err != nil {
 			slog.Error("Failed to deserialize NATS message", "error", err, "subject", msg.Subject)
 			return
@@ -394,19 +388,9 @@ func (n *NatsEventBus) SubscriberCount(topic string) int {
 
 // processEvent processes an event synchronously
 func (n *NatsEventBus) processEvent(sub *natsSubscription, event Event) {
-	now := time.Now()
-	event.ProcessingStarted = &now
-
-	// Process the event
 	err := sub.handler(n.ctx, event)
-
-	// Record completion
-	completed := time.Now()
-	event.ProcessingCompleted = &completed
-
 	if err != nil {
-		// Log error but continue processing
-		slog.Error("NATS event handler failed", "error", err, "topic", event.Topic)
+		slog.Error("NATS event handler failed", "error", err, "topic", event.Type())
 	}
 }
 

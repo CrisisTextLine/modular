@@ -3,7 +3,8 @@ package eventbus
 import (
 	"context"
 	"errors"
-	"time"
+
+	cloudevents "github.com/cloudevents/sdk-go/v2/event"
 )
 
 // EventBus errors
@@ -14,44 +15,15 @@ var (
 	ErrInvalidSubscriptionType = errors.New("invalid subscription type")
 )
 
-// Event represents a message in the event bus.
-// Events are the core data structure used for communication between
-// publishers and subscribers. They contain the message data along with
-// metadata for tracking and processing.
-type Event struct {
-	// Topic is the channel or subject of the event.
-	// Topics are used for routing events to the appropriate subscribers.
-	// Topic names can use hierarchical patterns like "user.created" or "order.payment.failed".
-	Topic string `json:"topic"`
-
-	// Payload is the data associated with the event.
-	// This can be any serializable data structure that represents
-	// the event's information. The payload type should be consistent
-	// for events within the same topic.
-	Payload interface{} `json:"payload"`
-
-	// Metadata contains additional information about the event.
-	// This can include source information, correlation IDs, version numbers,
-	// or any other contextual data that doesn't belong in the main payload.
-	// Optional field that can be nil if no metadata is needed.
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-
-	// CreatedAt is when the event was created.
-	// This timestamp is set automatically when the event is published
-	// and can be used for event ordering, TTL calculations, and debugging.
-	CreatedAt time.Time `json:"createdAt"`
-
-	// ProcessingStarted is when the event processing started.
-	// This field is set when an event handler begins processing the event.
-	// Used for performance monitoring and timeout detection.
-	ProcessingStarted *time.Time `json:"processingStarted,omitempty"`
-
-	// ProcessingCompleted is when the event processing completed.
-	// This field is set when an event handler finishes processing the event,
-	// whether successfully or with an error. Used for performance monitoring
-	// and event lifecycle tracking.
-	ProcessingCompleted *time.Time `json:"processingCompleted,omitempty"`
-}
+// Event is a CloudEvents SDK event. All events in the eventbus module are
+// CloudEvents 1.0 compliant. Use cloudevents.NewEvent() to create one:
+//
+//	e := cloudevents.NewEvent()
+//	e.SetType("user.created")
+//	e.SetSource("user-service")
+//	e.SetID(uuid.New().String())
+//	e.SetData(cloudevents.ApplicationJSON, payload)
+type Event = cloudevents.Event
 
 // EventHandler is a function that handles an event.
 // Event handlers are called when an event matching their subscription
@@ -62,10 +34,16 @@ type Event struct {
 // request-scoped values. Handlers should respect context cancellation
 // and return promptly when the context is cancelled.
 //
+// The event's Type() corresponds to the topic, Data() holds the payload,
+// and Extensions() contains any additional attributes.
+//
 // Example handler:
 //
 //	func userCreatedHandler(ctx context.Context, event Event) error {
-//	    user := event.Payload.(UserData)
+//	    var user UserData
+//	    if err := event.DataAs(&user); err != nil {
+//	        return err
+//	    }
 //	    return sendWelcomeEmail(ctx, user.Email)
 //	}
 type EventHandler func(ctx context.Context, event Event) error

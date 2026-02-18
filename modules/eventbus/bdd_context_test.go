@@ -6,7 +6,23 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	cevent "github.com/cloudevents/sdk-go/v2/event"
+	"github.com/google/uuid"
 )
+
+// newTestCloudEvent creates a CloudEvents event for testing. It sets the type
+// (used as the topic), source, a random ID, and optionally marshals data into
+// the event payload.
+func newTestCloudEvent(eventType string, data interface{}) cevent.Event {
+	e := cevent.New()
+	e.SetType(eventType)
+	e.SetSource("test")
+	e.SetID(uuid.New().String())
+	if data != nil {
+		_ = e.SetData("application/json", data)
+	}
+	return e
+}
 
 // ==============================================================================
 // TEST CONTEXT AND SETUP

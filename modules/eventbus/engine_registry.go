@@ -133,10 +133,10 @@ func (r *EngineRouter) Stop(ctx context.Context) error {
 
 // Publish publishes an event to the appropriate engine based on routing rules.
 func (r *EngineRouter) Publish(ctx context.Context, event Event) error {
-	engineName := r.getEngineForTopic(event.Topic)
+	engineName := r.getEngineForTopic(event.Type())
 	engine, exists := r.engines[engineName]
 	if !exists {
-		return fmt.Errorf("%w for topic %s: %s", ErrEngineNotFound, event.Topic, engineName)
+		return fmt.Errorf("%w for topic %s: %s", ErrEngineNotFound, event.Type(), engineName)
 	}
 
 	if err := engine.Publish(ctx, event); err != nil {

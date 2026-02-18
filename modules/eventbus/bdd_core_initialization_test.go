@@ -287,8 +287,16 @@ func (ctx *EventBusBDDTestContext) thePayloadShouldMatch(expectedPayload string)
 	}
 
 	lastEvent := ctx.receivedEvents[len(ctx.receivedEvents)-1]
-	if lastEvent.Payload != expectedPayload {
-		return fmt.Errorf("payload mismatch: expected %s, got %v", expectedPayload, lastEvent.Payload)
+	var actual string
+	if err := lastEvent.DataAs(&actual); err != nil {
+		// Try raw bytes comparison
+		if string(lastEvent.Data()) != expectedPayload {
+			return fmt.Errorf("payload mismatch: expected %s, got %s", expectedPayload, string(lastEvent.Data()))
+		}
+		return nil
+	}
+	if actual != expectedPayload {
+		return fmt.Errorf("payload mismatch: expected %s, got %s", expectedPayload, actual)
 	}
 
 	return nil

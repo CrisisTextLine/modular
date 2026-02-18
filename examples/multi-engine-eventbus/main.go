@@ -79,6 +79,7 @@ func main() {
 	// Create eventbus configuration with Redis as primary external service
 	// and simplified multi-engine setup
 	eventbusConfig := &eventbus.EventBusConfig{
+		Source: "multi-engine-eventbus-example",
 		Engines: []eventbus.EngineConfig{
 			{
 				Name: "memory-fast",
@@ -210,42 +211,60 @@ func setupEventHandlers(ctx context.Context, eventBus *eventbus.EventBusModule) 
 
 	// User event handlers (routed to memory-fast engine)
 	eventBus.Subscribe(ctx, "user.registered", func(ctx context.Context, event eventbus.Event) error {
-		userEvent := event.Payload.(UserEvent)
+		var userEvent UserEvent
+		if err := event.DataAs(&userEvent); err != nil {
+			return fmt.Errorf("failed to unmarshal user event: %w", err)
+		}
 		fmt.Printf("📨 [CONSUMED] User registered: %s (action: %s) → memory-fast engine\n",
 			userEvent.UserID, userEvent.Action)
 		return nil
 	})
 
 	eventBus.Subscribe(ctx, "user.login", func(ctx context.Context, event eventbus.Event) error {
-		userEvent := event.Payload.(UserEvent)
+		var userEvent UserEvent
+		if err := event.DataAs(&userEvent); err != nil {
+			return fmt.Errorf("failed to unmarshal user event: %w", err)
+		}
 		fmt.Printf("📨 [CONSUMED] User login: %s at %s → memory-fast engine\n",
 			userEvent.UserID, userEvent.Timestamp.Format("15:04:05"))
 		return nil
 	})
 
 	eventBus.Subscribe(ctx, "auth.failed", func(ctx context.Context, event eventbus.Event) error {
-		userEvent := event.Payload.(UserEvent)
+		var userEvent UserEvent
+		if err := event.DataAs(&userEvent); err != nil {
+			return fmt.Errorf("failed to unmarshal user event: %w", err)
+		}
 		fmt.Printf("📨 [CONSUMED] Auth failed for user: %s → memory-fast engine\n", userEvent.UserID)
 		return nil
 	})
 
 	// System event handlers (routed to redis-primary engine)
 	eventBus.Subscribe(ctx, "system.health", func(ctx context.Context, event eventbus.Event) error {
-		systemEvent := event.Payload.(SystemEvent)
+		var systemEvent SystemEvent
+		if err := event.DataAs(&systemEvent); err != nil {
+			return fmt.Errorf("failed to unmarshal system event: %w", err)
+		}
 		fmt.Printf("📨 [CONSUMED] System %s: %s - %s → redis-primary engine\n",
 			systemEvent.Level, systemEvent.Component, systemEvent.Message)
 		return nil
 	})
 
 	eventBus.Subscribe(ctx, "health.check", func(ctx context.Context, event eventbus.Event) error {
-		systemEvent := event.Payload.(SystemEvent)
+		var systemEvent SystemEvent
+		if err := event.DataAs(&systemEvent); err != nil {
+			return fmt.Errorf("failed to unmarshal system event: %w", err)
+		}
 		fmt.Printf("📨 [CONSUMED] Health check: %s - %s → redis-primary engine\n",
 			systemEvent.Component, systemEvent.Message)
 		return nil
 	})
 
 	eventBus.Subscribe(ctx, "notifications.alert", func(ctx context.Context, event eventbus.Event) error {
-		notificationEvent := event.Payload.(NotificationEvent)
+		var notificationEvent NotificationEvent
+		if err := event.DataAs(&notificationEvent); err != nil {
+			return fmt.Errorf("failed to unmarshal notification event: %w", err)
+		}
 		fmt.Printf("📨 [CONSUMED] Notification alert: %s - %s → redis-primary engine\n",
 			notificationEvent.Type, notificationEvent.Message)
 		return nil

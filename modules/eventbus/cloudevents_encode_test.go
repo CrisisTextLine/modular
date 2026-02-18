@@ -136,6 +136,21 @@ func TestIsCloudEventsPayload(t *testing.T) {
 			},
 			expected: true,
 		},
+		{
+			name:     "unmarshalable payload returns false",
+			payload:  make(chan int),
+			expected: false,
+		},
+		{
+			name:     "numeric payload",
+			payload:  42,
+			expected: false,
+		},
+		{
+			name:     "slice payload",
+			payload:  []string{"a", "b"},
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -143,4 +158,107 @@ func TestIsCloudEventsPayload(t *testing.T) {
 			assert.Equal(t, tt.expected, isCloudEventsPayload(tt.payload))
 		})
 	}
+}
+
+func TestMarshalEventData_UnmarshalablePayload(t *testing.T) {
+	event := Event{
+		Topic:   "test.topic",
+		Payload: make(chan int),
+	}
+
+	_, err := marshalEventData(event)
+	assert.Error(t, err, "unmarshalable payload should return an error")
+}
+
+func TestMarshalEventData_StructPayloadWithSpecversion(t *testing.T) {
+	type CloudEvent struct {
+		SpecVersion string      `json:"specversion"`
+		Type        string      `json:"type"`
+		Source      string      `json:"source"`
+		ID          string      `json:"id"`
+		Data        interface{} `json:"data"`
+	}
+
+	event := Event{
+		Topic: "test.topic",
+		Payload: CloudEvent{
+			SpecVersion: "1.0",
+			Type:        "test.event",
+			Source:      "/test",
+			ID:          "abc-123",
+			Data:        map[string]string{"key": "value"},
+		},
+	}
+
+	data, err := marshalEventData(event)
+	require.NoError(t, err)
+
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &m))
+
+	assert.Contains(t, m, "specversion", "struct CE payload should serialize as flat CloudEvents")
+	assert.NotContains(t, m, "topic", "should not contain Event wrapper fields")
+}
+
+func TestMarshalEventData_NumericPayload(t *testing.T) {
+	event := Event{
+		Topic:   "test.topic",
+		Payload: 12345,
+	}
+
+	data, err := marshalEventData(event)
+	require.NoError(t, err)
+
+	// Numeric payload can't unmarshal to map, so falls through to legacy wrapping.
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &m))
+
+	assert.Contains(t, m, "topic", "numeric payload should produce legacy Event envelope")
+	assert.Contains(t, m, "payload")
+}
+
+func TestMarshalEventData_BoolPayload(t *testing.T) {
+	event := Event{
+		Topic:   "test.topic",
+		Payload: true,
+	}
+
+	data, err := marshalEventData(event)
+	require.NoError(t, err)
+
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &m))
+
+	assert.Contains(t, m, "topic", "bool payload should produce legacy Event envelope")
+}
+
+func TestMarshalEventData_ArrayPayload(t *testing.T) {
+	event := Event{
+		Topic:   "test.topic",
+		Payload: []string{"a", "b", "c"},
+	}
+
+	data, err := marshalEventData(event)
+	require.NoError(t, err)
+
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &m))
+
+	assert.Contains(t, m, "topic", "array payload should produce legacy Event envelope")
+}
+
+func TestMarshalEventData_EmptyMapPayload(t *testing.T) {
+	event := Event{
+		Topic:   "test.topic",
+		Payload: map[string]interface{}{},
+	}
+
+	data, err := marshalEventData(event)
+	require.NoError(t, err)
+
+	// Empty map has no specversion, so should use legacy wrapping.
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &m))
+
+	assert.Contains(t, m, "topic", "empty map payload should produce legacy Event envelope")
 }

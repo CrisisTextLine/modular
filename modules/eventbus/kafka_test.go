@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -104,6 +105,75 @@ func TestKafkaPublishPartitionKey(t *testing.T) {
 		err := bus.Publish(context.Background(), Event{Topic: "test", Payload: "data"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "broker unavailable")
+	})
+}
+
+func TestKafkaPublishCloudEventsWireFormat(t *testing.T) {
+	t.Run("CloudEvents payload is serialized flat", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		m := mocks.NewMockSyncProducer(ctrl)
+		bus := newTestKafkaEventBus(m)
+		defer bus.cancel()
+
+		m.EXPECT().
+			SendMessage(gomock.Any()).
+			DoAndReturn(func(msg *sarama.ProducerMessage) (int32, int64, error) {
+				valueBytes, err := msg.Value.Encode()
+				require.NoError(t, err)
+
+				var wire map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(valueBytes, &wire))
+
+				assert.Contains(t, wire, "specversion", "wire format should have specversion at top level")
+				assert.Contains(t, wire, "type")
+				assert.Contains(t, wire, "source")
+				assert.NotContains(t, wire, "topic", "wire format should NOT have Event.Topic wrapper")
+				assert.NotContains(t, wire, "payload", "wire format should NOT have Event.Payload wrapper")
+				return 0, 0, nil
+			})
+
+		cePayload := map[string]interface{}{
+			"specversion":     "1.0",
+			"type":            "messaging.texter-message.received",
+			"source":          "/chimera/messaging",
+			"id":              "evt-123",
+			"datacontenttype": "application/json",
+			"data":            map[string]interface{}{"messageId": "msg-456"},
+		}
+
+		err := bus.Publish(context.Background(), Event{
+			Topic:   "messaging.texter-message.received",
+			Payload: cePayload,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("native payload is serialized in Event envelope", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		m := mocks.NewMockSyncProducer(ctrl)
+		bus := newTestKafkaEventBus(m)
+		defer bus.cancel()
+
+		m.EXPECT().
+			SendMessage(gomock.Any()).
+			DoAndReturn(func(msg *sarama.ProducerMessage) (int32, int64, error) {
+				valueBytes, err := msg.Value.Encode()
+				require.NoError(t, err)
+
+				var wire map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(valueBytes, &wire))
+
+				assert.Contains(t, wire, "topic", "wire format should have Event.Topic")
+				assert.Contains(t, wire, "payload", "wire format should have Event.Payload")
+				assert.NotContains(t, wire, "specversion")
+				return 0, 0, nil
+			})
+
+		err := bus.Publish(context.Background(), Event{
+			Topic:   "user.created",
+			Payload: map[string]interface{}{"username": "alice"},
+		})
+		require.NoError(t, err)
 	})
 }
 

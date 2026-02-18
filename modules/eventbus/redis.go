@@ -2,7 +2,6 @@ package eventbus
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -196,14 +195,17 @@ func (r *RedisEventBus) Publish(ctx context.Context, event Event) error {
 		return ErrEventBusNotStarted
 	}
 
-	// Fill in event metadata
-	event.CreatedAt = time.Now()
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]interface{})
+	// Skip envelope metadata for CloudEvents payloads — they already carry
+	// their own type/time attributes.
+	if !isCloudEventsPayload(event.Payload) {
+		event.CreatedAt = time.Now()
+		if event.Metadata == nil {
+			event.Metadata = make(map[string]interface{})
+		}
 	}
 
-	// Serialize event to JSON
-	eventData, err := json.Marshal(event)
+	// Serialize: CloudEvents payloads are written flat, others use the Event envelope.
+	eventData, err := marshalEventData(event)
 	if err != nil {
 		return fmt.Errorf("failed to serialize event: %w", err)
 	}

@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -105,6 +106,76 @@ func TestKinesisPublishPartitionKey(t *testing.T) {
 		err := bus.Publish(context.Background(), Event{Topic: "test", Payload: "data"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "throttled")
+	})
+}
+
+func TestKinesisPublishCloudEventsWireFormat(t *testing.T) {
+	t.Run("CloudEvents payload is serialized flat", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		m := mocks.NewMockKinesisClient(ctrl)
+		bus := newTestKinesisEventBus(m)
+		defer bus.cancel()
+
+		m.EXPECT().
+			PutRecord(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, input *kinesis.PutRecordInput, optFns ...func(*kinesis.Options)) (*kinesis.PutRecordOutput, error) {
+				var wire map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(input.Data, &wire))
+
+				assert.Contains(t, wire, "specversion", "wire format should have specversion at top level")
+				assert.Contains(t, wire, "type", "wire format should have type at top level")
+				assert.Contains(t, wire, "source", "wire format should have source at top level")
+				assert.NotContains(t, wire, "topic", "wire format should NOT have Event.Topic wrapper")
+				assert.NotContains(t, wire, "payload", "wire format should NOT have Event.Payload wrapper")
+				assert.NotContains(t, wire, "metadata", "wire format should NOT have Event.Metadata wrapper")
+				return &kinesis.PutRecordOutput{}, nil
+			})
+
+		cePayload := map[string]interface{}{
+			"specversion":     "1.0",
+			"type":            "messaging.texter-message.received",
+			"source":          "/chimera/messaging",
+			"id":              "evt-123",
+			"datacontenttype": "application/json",
+			"data":            map[string]interface{}{"messageId": "msg-456"},
+		}
+
+		err := bus.Publish(context.Background(), Event{
+			Topic:   "messaging.texter-message.received",
+			Payload: cePayload,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("native payload is serialized in Event envelope", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		m := mocks.NewMockKinesisClient(ctrl)
+		bus := newTestKinesisEventBus(m)
+		defer bus.cancel()
+
+		m.EXPECT().
+			PutRecord(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, input *kinesis.PutRecordInput, optFns ...func(*kinesis.Options)) (*kinesis.PutRecordOutput, error) {
+				var wire map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(input.Data, &wire))
+
+				assert.Contains(t, wire, "topic", "wire format should have Event.Topic")
+				assert.Contains(t, wire, "payload", "wire format should have Event.Payload")
+				assert.Contains(t, wire, "metadata", "wire format should have Event.Metadata")
+				assert.NotContains(t, wire, "specversion", "wire format should NOT have specversion at top level")
+
+				// Verify __topic metadata was set
+				var metadata map[string]interface{}
+				require.NoError(t, json.Unmarshal(wire["metadata"], &metadata))
+				assert.Equal(t, "user.created", metadata["__topic"])
+				return &kinesis.PutRecordOutput{}, nil
+			})
+
+		err := bus.Publish(context.Background(), Event{
+			Topic:   "user.created",
+			Payload: map[string]interface{}{"username": "alice"},
+		})
+		require.NoError(t, err)
 	})
 }
 

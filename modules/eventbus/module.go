@@ -441,7 +441,10 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 	event.SetType(topic)
 	event.SetSource(m.config.Source)
 	event.SetID(uuid.New().String())
-	_ = event.SetData("application/json", payload)
+	event.SetTime(time.Now())
+	if err := event.SetData("application/json", payload); err != nil {
+		return fmt.Errorf("failed to set event data: %w", err)
+	}
 	startTime := time.Now()
 	err := m.router.Publish(ctx, event)
 	duration := time.Since(startTime)

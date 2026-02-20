@@ -11,7 +11,7 @@
 //   - Synchronous and asynchronous event processing
 //   - Multiple engine support (memory, Redis, Kafka)
 //   - Configurable worker pools for async processing
-//   - Event metadata and lifecycle tracking
+//   - CloudEvents 1.0 compliant event model with extensions
 //   - Subscription management with unique identifiers
 //   - Event TTL and retention policies
 //
@@ -100,8 +100,10 @@
 //
 // Currently supported engines:
 //   - **memory**: In-process event bus using Go channels
-//   - **redis**: Distributed event bus using Redis pub/sub (planned)
-//   - **kafka**: Enterprise event bus using Apache Kafka (planned)
+//   - **redis**: Distributed event bus using Redis pub/sub
+//   - **kafka**: Enterprise event bus using Apache Kafka
+//   - **nats**: Cloud-native event bus using NATS
+//   - **kinesis**: AWS Kinesis stream-based event bus
 package eventbus
 
 import (
@@ -478,7 +480,10 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 // Example:
 //
 //	subscription, err := eventBus.Subscribe(ctx, "user.login", func(ctx context.Context, event Event) error {
-//	    user := event.Payload.(UserData)
+//	    var user UserData
+//	    if err := event.DataAs(&user); err != nil {
+//	        return err
+//	    }
 //	    return updateLastLoginTime(user.ID)
 //	})
 func (m *EventBusModule) Subscribe(ctx context.Context, topic string, handler EventHandler) (Subscription, error) {
@@ -513,7 +518,10 @@ func (m *EventBusModule) Subscribe(ctx context.Context, topic string, handler Ev
 // Example:
 //
 //	subscription, err := eventBus.SubscribeAsync(ctx, "image.uploaded", func(ctx context.Context, event Event) error {
-//	    imageData := event.Payload.(ImageData)
+//	    var imageData ImageData
+//	    if err := event.DataAs(&imageData); err != nil {
+//	        return err
+//	    }
 //	    return generateThumbnails(imageData)
 //	})
 func (m *EventBusModule) SubscribeAsync(ctx context.Context, topic string, handler EventHandler) (Subscription, error) {

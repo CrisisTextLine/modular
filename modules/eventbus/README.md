@@ -281,7 +281,10 @@ if err != nil {
 
 // Subscribe to events
 subscription, err := eventBus.Subscribe(ctx, "user.created", func(ctx context.Context, event eventbus.Event) error {
-    user := event.Payload.(UserData)
+    var user UserData
+    if err := event.DataAs(&user); err != nil {
+        return err
+    }
     fmt.Printf("User created: %s\n", user.Name)
     return nil
 })

@@ -1,4 +1,4 @@
-module github.com/CrisisTextLine/modular/modules/eventbus
+module github.com/CrisisTextLine/modular/modules/eventbus/v2
 
 go 1.25
 
@@ -6,6 +6,7 @@ toolchain go1.25.0
 
 require (
 	github.com/CrisisTextLine/modular v1.11.11
+	github.com/CrisisTextLine/modular/modules/eventbus v1.7.0
 	github.com/DataDog/datadog-go/v5 v5.4.0
 	github.com/IBM/sarama v1.45.2
 	github.com/aws/aws-sdk-go-v2/config v1.31.0

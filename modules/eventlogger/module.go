@@ -134,9 +134,9 @@ const ModuleName = "eventlogger"
 const ServiceName = "eventlogger.observer"
 
 // EventLoggerModule provides structured logging for Observer pattern events.
-// It implements both Observer and CloudEventObserver interfaces to receive events
-// and log them to configured output targets. Supports both traditional ObserverEvents
-// and CloudEvents for standardized event handling.
+// It implements the Observer interface to receive events and log them to
+// configured output targets. Supports both ObserverEvents and CloudEvents
+// for standardized event handling.
 type EventLoggerModule struct {
 	name         string
 	config       *EventLoggerConfig

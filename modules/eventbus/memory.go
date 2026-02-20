@@ -186,10 +186,9 @@ func (m *MemoryEventBus) Publish(ctx context.Context, event Event) error {
 		return ErrEventBusNotStarted
 	}
 
-	// Fill in event metadata
-	event.CreatedAt = time.Now()
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]interface{})
+	// Set event time if not already set
+	if event.Time().IsZero() {
+		event.SetTime(time.Now())
 	}
 
 	// Store in event history
@@ -201,7 +200,7 @@ func (m *MemoryEventBus) Publish(ctx context.Context, event Event) error {
 
 	// Check all subscription topics to find matches
 	for subscriptionTopic, subsMap := range m.subscriptions {
-		if matchesTopic(event.Topic, subscriptionTopic) {
+		if matchesTopic(event.Type(), subscriptionTopic) {
 			for _, sub := range subsMap {
 				allMatchingSubs = append(allMatchingSubs, sub)
 			}
@@ -451,22 +450,18 @@ func (m *MemoryEventBus) handleEvents(sub *memorySubscription) {
 				m.queueEventHandler(sub, event)
 				continue
 			}
-			now := time.Now()
-			event.ProcessingStarted = &now
 			m.emitEvent(m.ctx, EventTypeMessageReceived, "memory-eventbus", map[string]interface{}{
-				"topic":           event.Topic,
+				"topic":           event.Type(),
 				"subscription_id": sub.id,
 			})
 			err := sub.handler(m.ctx, event)
-			completed := time.Now()
-			event.ProcessingCompleted = &completed
 			if err != nil {
 				m.emitEvent(m.ctx, EventTypeMessageFailed, "memory-eventbus", map[string]interface{}{
-					"topic":           event.Topic,
+					"topic":           event.Type(),
 					"subscription_id": sub.id,
 					"error":           err.Error(),
 				})
-				slog.Error("Event handler failed", "error", err, "topic", event.Topic)
+				slog.Error("Event handler failed", "error", err, "topic", event.Type())
 			}
 			atomic.AddUint64(&m.deliveredCount, 1)
 		}
@@ -477,31 +472,24 @@ func (m *MemoryEventBus) handleEvents(sub *memorySubscription) {
 func (m *MemoryEventBus) queueEventHandler(sub *memorySubscription, event Event) {
 	select {
 	case m.workerPool <- func() {
-		now := time.Now()
-		event.ProcessingStarted = &now
-
 		// Emit message received event
 		m.emitEvent(m.ctx, EventTypeMessageReceived, "memory-eventbus", map[string]interface{}{
-			"topic":           event.Topic,
+			"topic":           event.Type(),
 			"subscription_id": sub.id,
 		})
 
 		// Process the event
 		err := sub.handler(m.ctx, event)
 
-		// Record completion
-		completed := time.Now()
-		event.ProcessingCompleted = &completed
-
 		if err != nil {
 			// Emit message failed event for handler errors
 			m.emitEvent(m.ctx, EventTypeMessageFailed, "memory-eventbus", map[string]interface{}{
-				"topic":           event.Topic,
+				"topic":           event.Type(),
 				"subscription_id": sub.id,
 				"error":           err.Error(),
 			})
 			// Log error but continue processing
-			slog.Error("Event handler failed", "error", err, "topic", event.Topic)
+			slog.Error("Event handler failed", "error", err, "topic", event.Type())
 		}
 		// Count as delivered after processing (success or failure)
 		atomic.AddUint64(&m.deliveredCount, 1)
@@ -537,12 +525,12 @@ func (m *MemoryEventBus) storeEventHistory(event Event) {
 	m.historyMutex.Lock()
 	defer m.historyMutex.Unlock()
 
-	if _, ok := m.eventHistory[event.Topic]; !ok {
-		m.eventHistory[event.Topic] = make([]Event, 0)
+	if _, ok := m.eventHistory[event.Type()]; !ok {
+		m.eventHistory[event.Type()] = make([]Event, 0)
 	}
 
 	// Add the event to history
-	m.eventHistory[event.Topic] = append(m.eventHistory[event.Topic], event)
+	m.eventHistory[event.Type()] = append(m.eventHistory[event.Type()], event)
 }
 
 // startRetentionTimer starts a timer to clean up old events
@@ -568,7 +556,7 @@ func (m *MemoryEventBus) cleanupOldEvents() {
 	for topic, events := range m.eventHistory {
 		filtered := make([]Event, 0, len(events))
 		for _, event := range events {
-			if event.CreatedAt.After(cutoff) {
+			if event.Time().After(cutoff) {
 				filtered = append(filtered, event)
 			}
 		}

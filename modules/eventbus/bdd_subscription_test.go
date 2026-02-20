@@ -22,11 +22,10 @@ func (ctx *EventBusBDDTestContext) iSubscribeToTopicWithHandler(topic, handlerNa
 		ctx.mutex.Lock()
 		defer ctx.mutex.Unlock()
 
-		// Tag event with handler name
-		event.Metadata = map[string]interface{}{
-			"handler": handlerName,
-		}
-		ctx.receivedEvents = append(ctx.receivedEvents, event)
+		// Clone and tag event with handler name to avoid shared state
+		clone := event.Clone()
+		clone.SetExtension("handler", handlerName)
+		ctx.receivedEvents = append(ctx.receivedEvents, clone)
 		return nil
 	}
 
@@ -56,7 +55,7 @@ func (ctx *EventBusBDDTestContext) bothHandlersShouldReceiveTheEvent() error {
 	// Check that both handlers received events
 	handlerNames := make(map[string]bool)
 	for _, event := range ctx.receivedEvents {
-		if metadata, ok := event.Metadata["handler"].(string); ok {
+		if metadata, ok := event.Extensions()["handler"].(string); ok {
 			handlerNames[metadata] = true
 		}
 	}
@@ -91,7 +90,12 @@ func (ctx *EventBusBDDTestContext) thePayloadsShouldMatchAnd(payload1, payload2 
 	recentEvents := ctx.receivedEvents[len(ctx.receivedEvents)-2:]
 	payloads := make([]string, len(recentEvents))
 	for i, event := range recentEvents {
-		payloads[i] = event.Payload.(string)
+		var s string
+		if err := event.DataAs(&s); err != nil {
+			payloads[i] = string(event.Data())
+		} else {
+			payloads[i] = s
+		}
 	}
 
 	if !(contains(payloads, payload1) && contains(payloads, payload2)) {

@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -196,20 +195,13 @@ func (r *RedisEventBus) Publish(ctx context.Context, event Event) error {
 		return ErrEventBusNotStarted
 	}
 
-	// Fill in event metadata
-	event.CreatedAt = time.Now()
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]interface{})
-	}
-
-	// Serialize event to JSON
 	eventData, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to serialize event: %w", err)
 	}
 
 	// Publish to Redis
-	err = r.client.Publish(ctx, event.Topic, eventData).Err()
+	err = r.client.Publish(ctx, event.Type(), eventData).Err()
 	if err != nil {
 		return fmt.Errorf("failed to publish to Redis: %w", err)
 	}
@@ -350,7 +342,8 @@ func (r *RedisEventBus) handleMessages(sub *redisSubscription) {
 			}
 
 			// Deserialize event
-			event, err := parseRecord([]byte(msg.Payload))
+			var event Event
+			err := json.Unmarshal([]byte(msg.Payload), &event)
 			if err != nil {
 				slog.Error("Failed to deserialize Redis message", "error", err, "topic", msg.Channel)
 				continue
@@ -370,19 +363,9 @@ func (r *RedisEventBus) handleMessages(sub *redisSubscription) {
 
 // processEvent processes an event synchronously
 func (r *RedisEventBus) processEvent(sub *redisSubscription, event Event) {
-	now := time.Now()
-	event.ProcessingStarted = &now
-
-	// Process the event
 	err := sub.handler(r.ctx, event)
-
-	// Record completion
-	completed := time.Now()
-	event.ProcessingCompleted = &completed
-
 	if err != nil {
-		// Log error but continue processing
-		slog.Error("Redis event handler failed", "error", err, "topic", event.Topic)
+		slog.Error("Redis event handler failed", "error", err, "topic", event.Type())
 	}
 }
 

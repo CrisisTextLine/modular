@@ -67,6 +67,12 @@ type RoutingRule struct {
 //	  - topics: ["*"]
 //	    engine: "redis"
 type EventBusConfig struct {
+	// Source is the CloudEvents source identifier for this service.
+	// Used by NewEvent to automatically populate the source field.
+	// If empty, defaults to "eventbus" during validation.
+	// Example: "order-service", "user-service"
+	Source string `json:"source,omitempty" yaml:"source,omitempty" env:"SOURCE" default:"" desc:"CloudEvents source identifier for this service (e.g. order-service)"`
+
 	// --- Single Engine Configuration (Legacy Support) ---
 
 	// Engine specifies the event bus engine to use for single-engine mode.
@@ -214,6 +220,11 @@ func (c *EventBusConfig) ValidateConfig() error {
 		if c.EventTTL == 0 {
 			c.EventTTL = time.Hour // Default value
 		}
+	}
+
+	// Default source if not specified
+	if c.Source == "" {
+		c.Source = "eventbus"
 	}
 
 	return nil

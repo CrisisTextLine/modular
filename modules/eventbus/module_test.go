@@ -199,8 +199,10 @@ func TestEventBusOperations(t *testing.T) {
 
 		// Subscribe to an event
 		subscription, err := module.Subscribe(ctx, "test.event", func(ctx context.Context, event Event) error {
-			assert.Equal(t, "test.event", event.Topic)
-			assert.Equal(t, testData, event.Payload)
+			assert.Equal(t, "test.event", event.Type())
+			var received map[string]interface{}
+			require.NoError(t, event.DataAs(&received))
+			assert.Equal(t, testData, received)
 			eventReceived <- true
 			return nil
 		})
@@ -303,8 +305,10 @@ func TestEventBusOperations(t *testing.T) {
 
 		// Subscribe async to an event
 		subscription, err := module.SubscribeAsync(ctx, "async.event", func(ctx context.Context, event Event) error {
-			assert.Equal(t, "async.event", event.Topic)
-			assert.Equal(t, testData, event.Payload)
+			assert.Equal(t, "async.event", event.Type())
+			var received map[string]interface{}
+			require.NoError(t, event.DataAs(&received))
+			assert.Equal(t, testData, received)
 			eventReceived <- true
 			return nil
 		})

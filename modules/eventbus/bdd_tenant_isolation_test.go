@@ -80,7 +80,8 @@ func (ctx *EventBusBDDTestContext) tenantShouldNotReceiveOtherTenantEvents(tenan
 	// Check that tenant1 did not receive any events meant for tenant2
 	tenant1Events := ctx.tenantReceivedEvents[tenant1]
 	for _, event := range tenant1Events {
-		if eventData, ok := event.Payload.(map[string]interface{}); ok {
+		var eventData map[string]interface{}
+		if err := event.DataAs(&eventData); err == nil {
 			if eventTenant, ok := eventData["tenant"].(string); ok && eventTenant == tenant2 {
 				return fmt.Errorf("tenant %s received event meant for tenant %s", tenant1, tenant2)
 			}
@@ -90,7 +91,8 @@ func (ctx *EventBusBDDTestContext) tenantShouldNotReceiveOtherTenantEvents(tenan
 	// Check that tenant2 did not receive any events meant for tenant1
 	tenant2Events := ctx.tenantReceivedEvents[tenant2]
 	for _, event := range tenant2Events {
-		if eventData, ok := event.Payload.(map[string]interface{}); ok {
+		var eventData map[string]interface{}
+		if err := event.DataAs(&eventData); err == nil {
 			if eventTenant, ok := eventData["tenant"].(string); ok && eventTenant == tenant1 {
 				return fmt.Errorf("tenant %s received event meant for tenant %s", tenant2, tenant1)
 			}
@@ -107,16 +109,16 @@ func (ctx *EventBusBDDTestContext) eventIsolationShouldBeMaintainedBetweenTenant
 	// Verify that each tenant only received their own events
 	for tenant, events := range ctx.tenantReceivedEvents {
 		for _, event := range events {
-			if eventData, ok := event.Payload.(map[string]interface{}); ok {
-				if eventTenant, ok := eventData["tenant"].(string); ok {
-					if eventTenant != tenant {
-						return fmt.Errorf("event isolation violated: tenant %s received event for tenant %s", tenant, eventTenant)
-					}
-				} else {
-					return fmt.Errorf("event missing tenant information")
+			var eventData map[string]interface{}
+			if err := event.DataAs(&eventData); err != nil {
+				return fmt.Errorf("event payload not in expected format: %w", err)
+			}
+			if eventTenant, ok := eventData["tenant"].(string); ok {
+				if eventTenant != tenant {
+					return fmt.Errorf("event isolation violated: tenant %s received event for tenant %s", tenant, eventTenant)
 				}
 			} else {
-				return fmt.Errorf("event payload not in expected format")
+				return fmt.Errorf("event missing tenant information")
 			}
 		}
 	}
@@ -237,7 +239,8 @@ func (ctx *EventBusBDDTestContext) eventsFromEachTenantShouldUseAssignedEngine()
 		select {
 		case event := <-received:
 			// Verify the event was received and contains correct tenant information
-			if eventData, ok := event.Payload.(map[string]interface{}); ok {
+			var eventData map[string]interface{}
+			if err := event.DataAs(&eventData); err == nil {
 				if eventTenant, exists := eventData["tenant"]; !exists || eventTenant != tenant {
 					_ = subscription.Cancel()
 					return fmt.Errorf("event for tenant %s was not properly routed (tenant mismatch)", tenant)
@@ -274,7 +277,8 @@ func (ctx *EventBusBDDTestContext) tenantConfigurationsShouldNotInterfere() erro
 				// Check that tenant1's events don't leak to tenant2
 				tenant2Events := ctx.tenantReceivedEvents[tenant2]
 				for _, event := range tenant2Events {
-					if eventData, ok := event.Payload.(map[string]interface{}); ok {
+					var eventData map[string]interface{}
+					if err := event.DataAs(&eventData); err == nil {
 						if eventTenant, ok := eventData["tenant"].(string); ok && eventTenant == tenant1 {
 							return fmt.Errorf("configuration interference detected: tenant %s received events from tenant %s", tenant2, tenant1)
 						}

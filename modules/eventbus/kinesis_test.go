@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -52,7 +53,7 @@ func TestKinesisPublishPartitionKey(t *testing.T) {
 			})
 
 		ctx := WithPartitionKey(context.Background(), "user-42")
-		err := bus.Publish(ctx, Event{Topic: "orders.created", Payload: "data"})
+		err := bus.Publish(ctx, newTestCloudEvent("orders.created", "data"))
 		require.NoError(t, err)
 	})
 
@@ -69,7 +70,7 @@ func TestKinesisPublishPartitionKey(t *testing.T) {
 				return &kinesis.PutRecordOutput{}, nil
 			})
 
-		err := bus.Publish(context.Background(), Event{Topic: "orders.created", Payload: "data"})
+		err := bus.Publish(context.Background(), newTestCloudEvent("orders.created", "data"))
 		require.NoError(t, err)
 	})
 
@@ -88,7 +89,7 @@ func TestKinesisPublishPartitionKey(t *testing.T) {
 			})
 
 		ctx := WithPartitionKey(context.Background(), "")
-		err := bus.Publish(ctx, Event{Topic: "orders.created", Payload: "data"})
+		err := bus.Publish(ctx, newTestCloudEvent("orders.created", "data"))
 		require.NoError(t, err)
 	})
 
@@ -102,10 +103,39 @@ func TestKinesisPublishPartitionKey(t *testing.T) {
 			PutRecord(gomock.Any(), gomock.Any()).
 			Return(nil, fmt.Errorf("throttled"))
 
-		err := bus.Publish(context.Background(), Event{Topic: "test", Payload: "data"})
+		err := bus.Publish(context.Background(), newTestCloudEvent("test", "data"))
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "throttled")
 	})
+}
+
+func TestKinesisPublishCloudEventsWireFormat(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	m := mocks.NewMockKinesisClient(ctrl)
+	bus := newTestKinesisEventBus(m)
+	defer bus.cancel()
+
+	m.EXPECT().
+		PutRecord(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, input *kinesis.PutRecordInput, optFns ...func(*kinesis.Options)) (*kinesis.PutRecordOutput, error) {
+			var wire map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(input.Data, &wire))
+
+			assert.Contains(t, wire, "specversion", "wire format should have specversion at top level")
+			assert.Contains(t, wire, "type", "wire format should have type at top level")
+			assert.Contains(t, wire, "source", "wire format should have source at top level")
+			assert.NotContains(t, wire, "topic", "wire format should NOT have Event.Topic wrapper")
+			assert.NotContains(t, wire, "payload", "wire format should NOT have Event.Payload wrapper")
+			assert.NotContains(t, wire, "metadata", "wire format should NOT have Event.Metadata wrapper")
+			return &kinesis.PutRecordOutput{}, nil
+		})
+
+	e := newTestCloudEvent("messaging.texter-message.received", map[string]interface{}{"messageId": "msg-456"})
+	e.SetSource("/chimera/messaging")
+	e.SetID("evt-123")
+
+	err := bus.Publish(context.Background(), e)
+	require.NoError(t, err)
 }
 
 func TestKinesisStart(t *testing.T) {
@@ -256,7 +286,7 @@ func TestKinesisPublishNotStarted(t *testing.T) {
 		subscriptions: make(map[string]map[string]*kinesisSubscription),
 	}
 
-	err := bus.Publish(context.Background(), Event{Topic: "test", Payload: "data"})
+	err := bus.Publish(context.Background(), newTestCloudEvent("test", "data"))
 	assert.ErrorIs(t, err, ErrEventBusNotStarted)
 }
 
@@ -358,68 +388,13 @@ func TestKinesisReadShardCloudEvent(t *testing.T) {
 
 	select {
 	case event := <-received:
-		assert.Equal(t, "order.placed", event.Topic)
-		assert.Equal(t, "1.0", event.Metadata["ce_specversion"])
-		assert.Equal(t, "order-service", event.Metadata["ce_source"])
-		assert.Equal(t, "evt-001", event.Metadata["ce_id"])
-		payloadMap, ok := event.Payload.(map[string]interface{})
-		require.True(t, ok)
+		assert.Equal(t, "order.placed", event.Type())
+		assert.Equal(t, "1.0", event.SpecVersion())
+		assert.Equal(t, "order-service", event.Source())
+		assert.Equal(t, "evt-001", event.ID())
+		var payloadMap map[string]interface{}
+		require.NoError(t, event.DataAs(&payloadMap))
 		assert.Equal(t, "abc-123", payloadMap["orderId"])
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for event")
-	}
-}
-
-func TestKinesisReadShardNativeEvent(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	mockClient := mocks.NewMockKinesisClient(ctrl)
-
-	received := make(chan Event, 1)
-	subs := map[string]map[string]*kinesisSubscription{
-		"user.created": {
-			"test-sub": {
-				id:    "test-sub",
-				topic: "user.created",
-				handler: func(ctx context.Context, event Event) error {
-					received <- event
-					return nil
-				},
-				done: make(chan struct{}),
-			},
-		},
-	}
-	bus := newReadShardTestBus(t, mockClient, subs)
-	subs["user.created"]["test-sub"].bus = bus
-
-	nativeJSON := []byte(`{
-		"topic": "user.created",
-		"payload": {"userId": "u-789"},
-		"metadata": {"__topic": "user.created"},
-		"createdAt": "2026-01-15T10:00:00Z"
-	}`)
-
-	iteratorStr := "shard-iter-1"
-	mockClient.EXPECT().
-		GetShardIterator(gomock.Any(), gomock.Any()).
-		Return(&kinesis.GetShardIteratorOutput{ShardIterator: &iteratorStr}, nil)
-
-	mockClient.EXPECT().
-		GetRecords(gomock.Any(), gomock.Any()).
-		Return(&kinesis.GetRecordsOutput{
-			Records:           []types.Record{{Data: nativeJSON}},
-			NextShardIterator: nil,
-		}, nil)
-
-	bus.wg.Add(1)
-	bus.readShard("shard-0")
-
-	select {
-	case event := <-received:
-		assert.Equal(t, "user.created", event.Topic)
-		payloadMap, ok := event.Payload.(map[string]interface{})
-		require.True(t, ok)
-		assert.Equal(t, "u-789", payloadMap["userId"])
-		assert.Equal(t, "user.created", event.Metadata["__topic"])
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for event")
 	}
@@ -447,13 +422,7 @@ func TestKinesisReadShardCloudEventBase64(t *testing.T) {
 	subs["file.uploaded"]["test-sub"].bus = bus
 
 	// "SGVsbG8gV29ybGQ=" is base64 for "Hello World"
-	ceJSON := []byte(`{
-		"specversion": "1.0",
-		"type": "file.uploaded",
-		"source": "storage-service",
-		"id": "evt-002",
-		"data_base64": "SGVsbG8gV29ybGQ="
-	}`)
+	ceJSON := []byte(`{"specversion":"1.0","type":"file.uploaded","source":"storage-service","id":"evt-002","data_base64":"SGVsbG8gV29ybGQ="}`)
 
 	iteratorStr := "shard-iter-1"
 	mockClient.EXPECT().
@@ -472,8 +441,8 @@ func TestKinesisReadShardCloudEventBase64(t *testing.T) {
 
 	select {
 	case event := <-received:
-		assert.Equal(t, "file.uploaded", event.Topic)
-		assert.Equal(t, []byte("Hello World"), event.Payload)
+		assert.Equal(t, "file.uploaded", event.Type())
+		assert.Equal(t, []byte("Hello World"), event.Data())
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for event")
 	}
@@ -585,13 +554,13 @@ func TestKinesisReadShardMultipleRecords(t *testing.T) {
 
 	select {
 	case e := <-orderReceived:
-		assert.Equal(t, "order.placed", e.Topic)
+		assert.Equal(t, "order.placed", e.Type())
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for order event")
 	}
 	select {
 	case e := <-userReceived:
-		assert.Equal(t, "user.created", e.Topic)
+		assert.Equal(t, "user.created", e.Type())
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for user event")
 	}
@@ -664,9 +633,9 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 
 		select {
 		case event := <-received:
-			assert.Equal(t, "order.placed", event.Topic)
-			payloadMap, ok := event.Payload.(map[string]interface{})
-			require.True(t, ok)
+			assert.Equal(t, "order.placed", event.Type())
+			var payloadMap map[string]interface{}
+			require.NoError(t, event.DataAs(&payloadMap))
 			assert.Equal(t, "recovered", payloadMap["orderId"])
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for event after iterator recovery")
@@ -746,9 +715,9 @@ func TestKinesisReadShardExpiredIteratorRecovery(t *testing.T) {
 		for i, expectedID := range []string{"first", "second"} {
 			select {
 			case event := <-received:
-				assert.Equal(t, "order.placed", event.Topic)
-				payloadMap, ok := event.Payload.(map[string]interface{})
-				require.True(t, ok, "event %d payload should be a map", i)
+				assert.Equal(t, "order.placed", event.Type())
+				var payloadMap map[string]interface{}
+				require.NoError(t, event.DataAs(&payloadMap), "event %d payload should be a map", i)
 				assert.Equal(t, expectedID, payloadMap["orderId"])
 			case <-time.After(2 * time.Second):
 				t.Fatalf("timed out waiting for event %d", i)

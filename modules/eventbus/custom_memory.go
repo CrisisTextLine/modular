@@ -60,7 +60,7 @@ func (f *TopicPrefixFilter) ShouldProcess(event Event) bool {
 	}
 
 	for _, prefix := range f.AllowedPrefixes {
-		if len(event.Topic) >= len(prefix) && event.Topic[:len(prefix)] == prefix {
+		if len(event.Type()) >= len(prefix) && event.Type()[:len(prefix)] == prefix {
 			return true
 		}
 	}
@@ -243,23 +243,22 @@ func (c *CustomMemoryEventBus) Publish(ctx context.Context, event Event) error {
 	// Apply event filters
 	for _, filter := range c.eventFilters {
 		if !filter.ShouldProcess(event) {
-			slog.Debug("Event filtered out", "topic", event.Topic, "filter", filter.Name())
+			slog.Debug("Event filtered out", "topic", event.Type(), "filter", filter.Name())
 			return nil // Event filtered out
 		}
 	}
 
-	// Fill in event metadata
-	event.CreatedAt = time.Now()
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]interface{})
+	// Set event time if not already set
+	if event.Time().IsZero() {
+		event.SetTime(time.Now())
 	}
-	event.Metadata["engine"] = "custom-memory"
+	event.SetExtension("engine", "custom-memory")
 
 	// Update metrics
 	if c.config.EnableMetrics {
 		c.eventMetrics.mutex.Lock()
 		c.eventMetrics.TotalEvents++
-		c.eventMetrics.EventsPerTopic[event.Topic]++
+		c.eventMetrics.EventsPerTopic[event.Type()]++
 		c.eventMetrics.mutex.Unlock()
 	}
 
@@ -268,7 +267,7 @@ func (c *CustomMemoryEventBus) Publish(ctx context.Context, event Event) error {
 	var allMatchingSubs []*customMemorySubscription
 
 	for subscriptionTopic, subsMap := range c.subscriptions {
-		if c.matchesTopic(event.Topic, subscriptionTopic) {
+		if c.matchesTopic(event.Type(), subscriptionTopic) {
 			for _, sub := range subsMap {
 				allMatchingSubs = append(allMatchingSubs, sub)
 			}
@@ -291,7 +290,7 @@ func (c *CustomMemoryEventBus) Publish(ctx context.Context, event Event) error {
 		default:
 			// Channel is full, log warning
 			slog.Warn("Subscription channel full, dropping event",
-				"topic", event.Topic, "subscriptionID", sub.id)
+				"topic", event.Type(), "subscriptionID", sub.id)
 		}
 	}
 
@@ -435,15 +434,12 @@ func (c *CustomMemoryEventBus) handleEvents(sub *customMemorySubscription) {
 			return
 		case event := <-sub.eventCh:
 			startTime := time.Now()
-			event.ProcessingStarted = &startTime
 
 			// Process the event
 			err := sub.handler(c.ctx, event)
 
 			// Record completion and metrics
-			completedTime := time.Now()
-			event.ProcessingCompleted = &completedTime
-			processingDuration := completedTime.Sub(startTime)
+			processingDuration := time.Since(startTime)
 
 			// Update subscription metrics
 			sub.mutex.Lock()
@@ -462,7 +458,7 @@ func (c *CustomMemoryEventBus) handleEvents(sub *customMemorySubscription) {
 			if err != nil {
 				slog.Error("Custom memory event handler failed",
 					"error", err,
-					"topic", event.Topic,
+					"topic", event.Type(),
 					"subscriptionID", sub.id,
 					"processingDuration", processingDuration)
 			}

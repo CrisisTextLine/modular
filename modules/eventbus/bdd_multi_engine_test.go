@@ -241,7 +241,7 @@ func (ctx *EventBusBDDTestContext) eventsShouldBeHandledByCustomImplementation()
 	received := make(chan bool, 1)
 	_, err = ctx.service.Subscribe(context.Background(), "test.topic", func(ctx context.Context, event Event) error {
 		// Check if event has custom engine metadata
-		if metadata, ok := event.Metadata["engine"]; ok && metadata == "custom-memory" {
+		if metadata, ok := event.Extensions()["engine"]; ok && metadata == "custom-memory" {
 			received <- true
 		}
 		return nil

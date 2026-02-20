@@ -11,7 +11,7 @@
 //   - Synchronous and asynchronous event processing
 //   - Multiple engine support (memory, Redis, Kafka)
 //   - Configurable worker pools for async processing
-//   - Event metadata and lifecycle tracking
+//   - CloudEvents 1.0 compliant event model with extensions
 //   - Subscription management with unique identifiers
 //   - Event TTL and retention policies
 //
@@ -48,31 +48,25 @@
 //
 // Basic event publishing:
 //
-//	// Publish a simple event
 //	err := eventBus.Publish(ctx, "order.placed", orderData)
-//
-//	// Publish with custom metadata
-//	event := Event{
-//	    Topic:   "payment.processed",
-//	    Payload: paymentData,
-//	    Metadata: map[string]interface{}{
-//	        "source": "payment-service",
-//	        "version": "1.2.0",
-//	    },
-//	}
-//	err := eventBus.Publish(ctx, event.Topic, event.Payload)
 //
 // Event subscription patterns:
 //
 //	// Synchronous subscription
 //	subscription, err := eventBus.Subscribe(ctx, "user.updated", func(ctx context.Context, event Event) error {
-//	    user := event.Payload.(UserData)
+//	    var user UserData
+//	    if err := event.DataAs(&user); err != nil {
+//	        return err
+//	    }
 //	    return updateUserCache(user)
 //	})
 //
 //	// Asynchronous subscription for heavy processing
 //	asyncSub, err := eventBus.SubscribeAsync(ctx, "image.uploaded", func(ctx context.Context, event Event) error {
-//	    imageData := event.Payload.(ImageData)
+//	    var imageData ImageData
+//	    if err := event.DataAs(&imageData); err != nil {
+//	        return err
+//	    }
 //	    return processImageThumbnails(imageData)
 //	})
 //
@@ -106,8 +100,10 @@
 //
 // Currently supported engines:
 //   - **memory**: In-process event bus using Go channels
-//   - **redis**: Distributed event bus using Redis pub/sub (planned)
-//   - **kafka**: Enterprise event bus using Apache Kafka (planned)
+//   - **redis**: Distributed event bus using Redis pub/sub
+//   - **kafka**: Enterprise event bus using Apache Kafka
+//   - **nats**: Cloud-native event bus using NATS
+//   - **kinesis**: AWS Kinesis stream-based event bus
 package eventbus
 
 import (
@@ -119,6 +115,8 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	cevent "github.com/cloudevents/sdk-go/v2/event"
+	"github.com/google/uuid"
 )
 
 // ModuleName is the unique identifier for the eventbus module.
@@ -426,11 +424,11 @@ func (m *EventBusModule) Constructor() modular.ModuleConstructor {
 }
 
 // Publish publishes an event to the event bus.
-// Creates an Event struct with the provided topic and payload, then
+// Creates an Event struct with the provided type and payload, then
 // sends it through the event bus for processing by subscribers.
 //
 // The event will be delivered to all active subscribers of the topic.
-// Topic patterns and wildcards may be supported depending on the engine.
+// Type patterns and wildcards may be supported depending on the engine.
 // With multiple engines, the event is routed to the appropriate engine
 // based on the configured routing rules.
 //
@@ -439,9 +437,13 @@ func (m *EventBusModule) Constructor() modular.ModuleConstructor {
 //	err := eventBus.Publish(ctx, "user.created", userData)
 //	err := eventBus.Publish(ctx, "order.payment.failed", paymentData)
 func (m *EventBusModule) Publish(ctx context.Context, topic string, payload interface{}) error {
-	event := Event{
-		Topic:   topic,
-		Payload: payload,
+	event := cevent.New()
+	event.SetType(topic)
+	event.SetSource(m.config.Source)
+	event.SetID(uuid.New().String())
+	event.SetTime(time.Now())
+	if err := event.SetData("application/json", payload); err != nil {
+		return fmt.Errorf("failed to set event data: %w", err)
 	}
 	startTime := time.Now()
 	err := m.router.Publish(ctx, event)
@@ -481,7 +483,10 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 // Example:
 //
 //	subscription, err := eventBus.Subscribe(ctx, "user.login", func(ctx context.Context, event Event) error {
-//	    user := event.Payload.(UserData)
+//	    var user UserData
+//	    if err := event.DataAs(&user); err != nil {
+//	        return err
+//	    }
 //	    return updateLastLoginTime(user.ID)
 //	})
 func (m *EventBusModule) Subscribe(ctx context.Context, topic string, handler EventHandler) (Subscription, error) {
@@ -516,7 +521,10 @@ func (m *EventBusModule) Subscribe(ctx context.Context, topic string, handler Ev
 // Example:
 //
 //	subscription, err := eventBus.SubscribeAsync(ctx, "image.uploaded", func(ctx context.Context, event Event) error {
-//	    imageData := event.Payload.(ImageData)
+//	    var imageData ImageData
+//	    if err := event.DataAs(&imageData); err != nil {
+//	        return err
+//	    }
 //	    return generateThumbnails(imageData)
 //	})
 func (m *EventBusModule) SubscribeAsync(ctx context.Context, topic string, handler EventHandler) (Subscription, error) {

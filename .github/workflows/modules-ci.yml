@@ -115,15 +115,6 @@ jobs:
           go mod download
           go mod verify
 
-      - name: Start NATS for eventbus module
-        if: matrix.module == 'eventbus'
-        run: |
-          docker run -d --name nats-test -p 4222:4222 nats:2.10-alpine
-          # Wait for NATS to be ready
-          sleep 3
-          # Verify NATS is running
-          docker ps | grep nats-test
-
       - name: Run tests for ${{ matrix.module }}
         id: test
         working-directory: modules/${{ matrix.module }}
@@ -139,12 +130,6 @@ jobs:
             echo "::error title=Test Result for ${{ matrix.module }}::Tests failed"
             exit 1
           fi
-
-      - name: Stop NATS
-        if: matrix.module == 'eventbus' && always()
-        run: |
-          docker stop nats-test || true
-          docker rm nats-test || true
 
   # BDD tests moved to dedicated module-bdd matrix job
 

@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ func TestKafkaPublishPartitionKey(t *testing.T) {
 			})
 
 		ctx := WithPartitionKey(context.Background(), "user-42")
-		err := bus.Publish(ctx, Event{Topic: "orders.created", Payload: "data"})
+		err := bus.Publish(ctx, newTestCloudEvent("orders.created", "data"))
 		require.NoError(t, err)
 	})
 
@@ -66,7 +67,7 @@ func TestKafkaPublishPartitionKey(t *testing.T) {
 				return 0, 0, nil
 			})
 
-		err := bus.Publish(context.Background(), Event{Topic: "orders.created", Payload: "data"})
+		err := bus.Publish(context.Background(), newTestCloudEvent("orders.created", "data"))
 		require.NoError(t, err)
 	})
 
@@ -87,7 +88,7 @@ func TestKafkaPublishPartitionKey(t *testing.T) {
 			})
 
 		ctx := WithPartitionKey(context.Background(), "")
-		err := bus.Publish(ctx, Event{Topic: "orders.created", Payload: "data"})
+		err := bus.Publish(ctx, newTestCloudEvent("orders.created", "data"))
 		require.NoError(t, err)
 	})
 
@@ -101,10 +102,41 @@ func TestKafkaPublishPartitionKey(t *testing.T) {
 			SendMessage(gomock.Any()).
 			Return(int32(0), int64(0), fmt.Errorf("broker unavailable"))
 
-		err := bus.Publish(context.Background(), Event{Topic: "test", Payload: "data"})
+		err := bus.Publish(context.Background(), newTestCloudEvent("test", "data"))
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "broker unavailable")
 	})
+}
+
+func TestKafkaPublishCloudEventsWireFormat(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	m := mocks.NewMockSyncProducer(ctrl)
+	bus := newTestKafkaEventBus(m)
+	defer bus.cancel()
+
+	m.EXPECT().
+		SendMessage(gomock.Any()).
+		DoAndReturn(func(msg *sarama.ProducerMessage) (int32, int64, error) {
+			valueBytes, err := msg.Value.Encode()
+			require.NoError(t, err)
+
+			var wire map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(valueBytes, &wire))
+
+			assert.Contains(t, wire, "specversion", "wire format should have specversion at top level")
+			assert.Contains(t, wire, "type")
+			assert.Contains(t, wire, "source")
+			assert.NotContains(t, wire, "topic", "wire format should NOT have Event.Topic wrapper")
+			assert.NotContains(t, wire, "payload", "wire format should NOT have Event.Payload wrapper")
+			return 0, 0, nil
+		})
+
+	e := newTestCloudEvent("messaging.texter-message.received", map[string]interface{}{"messageId": "msg-456"})
+	e.SetSource("/chimera/messaging")
+	e.SetID("evt-123")
+
+	err := bus.Publish(context.Background(), e)
+	require.NoError(t, err)
 }
 
 func TestKafkaStart(t *testing.T) {
@@ -279,7 +311,7 @@ func TestKafkaPublishNotStarted(t *testing.T) {
 		subscriptions: make(map[string]map[string]*kafkaSubscription),
 	}
 
-	err := bus.Publish(context.Background(), Event{Topic: "test", Payload: "data"})
+	err := bus.Publish(context.Background(), newTestCloudEvent("test", "data"))
 	assert.ErrorIs(t, err, ErrEventBusNotStarted)
 }
 
@@ -351,61 +383,12 @@ func TestKafkaConsumeClaimCloudEvent(t *testing.T) {
 
 	select {
 	case event := <-received:
-		assert.Equal(t, "order.placed", event.Topic)
-		assert.Equal(t, "1.0", event.Metadata["ce_specversion"])
-		assert.Equal(t, "order-svc", event.Metadata["ce_source"])
-		payloadMap, ok := event.Payload.(map[string]interface{})
-		require.True(t, ok)
+		assert.Equal(t, "order.placed", event.Type())
+		assert.Equal(t, "1.0", event.SpecVersion())
+		assert.Equal(t, "order-svc", event.Source())
+		var payloadMap map[string]interface{}
+		require.NoError(t, event.DataAs(&payloadMap))
 		assert.Equal(t, "42", payloadMap["orderId"])
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for event")
-	}
-
-	assert.Len(t, session.markedMsgs, 1)
-}
-
-func TestKafkaConsumeClaimNativeEvent(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	producer := mocks.NewMockSyncProducer(ctrl)
-	bus := newTestKafkaEventBus(producer)
-	defer bus.cancel()
-
-	received := make(chan Event, 1)
-	handler := &KafkaConsumerGroupHandler{
-		eventBus: bus,
-		subscriptions: map[string]*kafkaSubscription{
-			"sub-1": {
-				id:    "sub-1",
-				topic: "user.created",
-				handler: func(ctx context.Context, event Event) error {
-					received <- event
-					return nil
-				},
-				done: make(chan struct{}),
-				bus:  bus,
-			},
-		},
-	}
-
-	messages := make(chan *sarama.ConsumerMessage, 1)
-	messages <- &sarama.ConsumerMessage{
-		Topic: "user.created",
-		Value: []byte(`{"topic":"user.created","payload":{"userId":"u-789"},"metadata":{"__topic":"user.created"},"createdAt":"2026-01-15T10:00:00Z"}`),
-	}
-	close(messages)
-
-	session := &testConsumerGroupSession{ctx: context.Background()}
-	claim := &testConsumerGroupClaim{messages: messages}
-
-	err := handler.ConsumeClaim(session, claim)
-	require.NoError(t, err)
-
-	select {
-	case event := <-received:
-		assert.Equal(t, "user.created", event.Topic)
-		payloadMap, ok := event.Payload.(map[string]interface{})
-		require.True(t, ok)
-		assert.Equal(t, "u-789", payloadMap["userId"])
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for event")
 	}
@@ -514,13 +497,13 @@ func TestKafkaConsumeClaimMultipleMessages(t *testing.T) {
 
 	select {
 	case e := <-orderReceived:
-		assert.Equal(t, "order.placed", e.Topic)
+		assert.Equal(t, "order.placed", e.Type())
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for order event")
 	}
 	select {
 	case e := <-userReceived:
-		assert.Equal(t, "user.created", e.Topic)
+		assert.Equal(t, "user.created", e.Type())
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for user event")
 	}

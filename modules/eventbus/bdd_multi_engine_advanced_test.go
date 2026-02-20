@@ -95,8 +95,8 @@ func (ctx *EventBusBDDTestContext) engineBehaviorShouldReflectSettings() error {
 		received := make(chan bool, 1)
 		subscription, err := ctx.service.Subscribe(context.Background(), topic, func(ctx context.Context, event Event) error {
 			// Verify event data
-			if event.Topic != topic {
-				return fmt.Errorf("received event with wrong topic: %s (expected %s)", event.Topic, topic)
+			if event.Type() != topic {
+				return fmt.Errorf("received event with wrong topic: %s (expected %s)", event.Type(), topic)
 			}
 			select {
 			case received <- true:

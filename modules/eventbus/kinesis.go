@@ -266,23 +266,13 @@ func (k *KinesisEventBus) Publish(ctx context.Context, event Event) error {
 		return ErrEventBusNotStarted
 	}
 
-	// Fill in event metadata
-	event.CreatedAt = time.Now()
-	if event.Metadata == nil {
-		event.Metadata = make(map[string]interface{})
-	}
-
-	// Add topic to metadata for filtering
-	event.Metadata["__topic"] = event.Topic
-
-	// Serialize event to JSON
 	eventData, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to serialize event: %w", err)
 	}
 
 	// Determine partition key: use context hint if set and non-empty, otherwise default to topic
-	partitionKey := event.Topic
+	partitionKey := event.Type()
 	if key, ok := PartitionKeyFromContext(ctx); ok && key != "" {
 		partitionKey = key
 	}
@@ -478,7 +468,8 @@ func (k *KinesisEventBus) readShard(shardID string) {
 
 			// Process records
 			for _, record := range resp.Records {
-				event, err := parseRecord(record.Data)
+				var event Event
+				err := json.Unmarshal(record.Data, &event)
 				if err != nil {
 					slog.Error("Failed to deserialize Kinesis record", "error", err)
 					continue
@@ -489,7 +480,7 @@ func (k *KinesisEventBus) readShard(shardID string) {
 				subs := make([]*kinesisSubscription, 0)
 				for _, subsMap := range k.subscriptions {
 					for _, sub := range subsMap {
-						if k.topicMatches(event.Topic, sub.topic) {
+						if k.topicMatches(event.Type(), sub.topic) {
 							subs = append(subs, sub)
 						}
 					}
@@ -606,19 +597,9 @@ func (k *KinesisEventBus) SubscriberCount(topic string) int {
 
 // processEvent processes an event synchronously
 func (k *KinesisEventBus) processEvent(sub *kinesisSubscription, event Event) {
-	now := time.Now()
-	event.ProcessingStarted = &now
-
-	// Process the event
 	err := sub.handler(k.ctx, event)
-
-	// Record completion
-	completed := time.Now()
-	event.ProcessingCompleted = &completed
-
 	if err != nil {
-		// Log error but continue processing
-		slog.Error("Kinesis event handler failed", "error", err, "topic", event.Topic)
+		slog.Error("Kinesis event handler failed", "error", err, "topic", event.Type())
 	}
 }
 

@@ -144,6 +144,7 @@ func main() {
 
 	// Create eventbus configuration with NATS engine
 	eventbusConfig := &eventbus.EventBusConfig{
+		Source: "nats-eventbus-example",
 		Engines: []eventbus.EngineConfig{
 			{
 				Name: "nats-primary",
@@ -367,18 +368,13 @@ func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule
 
 	// Subscribe to order events
 	orderSub, err := eventBus.Subscribe(ctx, "order.*", func(ctx context.Context, event eventbus.Event) error {
-		// Payload can be either a map (from NATS) or the original struct (from memory)
-		var orderID interface{}
-		if payloadMap, ok := event.Payload.(map[string]interface{}); ok {
-			orderID = payloadMap["orderId"]
-		} else if orderEvent, ok := event.Payload.(OrderEvent); ok {
-			orderID = orderEvent.OrderID
+		var orderEvent OrderEvent
+		if err := event.DataAs(&orderEvent); err == nil && orderEvent.OrderID != "" {
+			fmt.Printf("📨 [ORDER SERVICE] Processing order: %s\n", orderEvent.OrderID)
+			tracker.ConsumedOrder()
 		} else {
-			fmt.Printf("📨 [ORDER SERVICE] Unknown payload type: %T\n", event.Payload)
-			return nil
+			fmt.Printf("📨 [ORDER SERVICE] Could not parse order event data\n")
 		}
-		fmt.Printf("📨 [ORDER SERVICE] Processing order: %v\n", orderID)
-		tracker.ConsumedOrder()
 		return nil
 	})
 	if err != nil {
@@ -389,18 +385,13 @@ func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule
 
 	// Subscribe to analytics events asynchronously
 	analyticsSub, err := eventBus.SubscribeAsync(ctx, "analytics.*", func(ctx context.Context, event eventbus.Event) error {
-		// Payload can be either a map (from NATS) or the original struct (from memory)
-		var eventType interface{}
-		if payloadMap, ok := event.Payload.(map[string]interface{}); ok {
-			eventType = payloadMap["eventType"]
-		} else if analyticsEvent, ok := event.Payload.(AnalyticsEvent); ok {
-			eventType = analyticsEvent.EventType
+		var analyticsEvent AnalyticsEvent
+		if err := event.DataAs(&analyticsEvent); err == nil && analyticsEvent.EventType != "" {
+			fmt.Printf("📨 [ANALYTICS SERVICE] Recording event: %s\n", analyticsEvent.EventType)
+			tracker.ConsumedAnalytics()
 		} else {
-			fmt.Printf("📨 [ANALYTICS SERVICE] Unknown payload type: %T\n", event.Payload)
-			return nil
+			fmt.Printf("📨 [ANALYTICS SERVICE] Could not parse analytics event data\n")
 		}
-		fmt.Printf("📨 [ANALYTICS SERVICE] Recording event: %v\n", eventType)
-		tracker.ConsumedAnalytics()
 		// Simulate some processing time
 		time.Sleep(500 * time.Millisecond)
 		return nil
@@ -413,18 +404,13 @@ func runSubscriberService(ctx context.Context, eventBus *eventbus.EventBusModule
 
 	// Subscribe to notification events
 	notifSub, err := eventBus.Subscribe(ctx, "notification.*", func(ctx context.Context, event eventbus.Event) error {
-		// Payload can be either a map (from NATS) or the original struct (from memory)
-		var message interface{}
-		if payloadMap, ok := event.Payload.(map[string]interface{}); ok {
-			message = payloadMap["message"]
-		} else if notifEvent, ok := event.Payload.(NotificationEvent); ok {
-			message = notifEvent.Message
+		var notifEvent NotificationEvent
+		if err := event.DataAs(&notifEvent); err == nil && notifEvent.Message != "" {
+			fmt.Printf("📨 [NOTIFICATION SERVICE] Sending notification: %s\n", notifEvent.Message)
+			tracker.ConsumedNotif()
 		} else {
-			fmt.Printf("📨 [NOTIFICATION SERVICE] Unknown payload type: %T\n", event.Payload)
-			return nil
+			fmt.Printf("📨 [NOTIFICATION SERVICE] Could not parse notification event data\n")
 		}
-		fmt.Printf("📨 [NOTIFICATION SERVICE] Sending notification: %v\n", message)
-		tracker.ConsumedNotif()
 		return nil
 	})
 	if err != nil {

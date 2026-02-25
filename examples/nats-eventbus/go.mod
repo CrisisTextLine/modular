@@ -10,7 +10,7 @@ replace github.com/CrisisTextLine/modular/modules/eventbus => ../../modules/even
 
 require (
 	github.com/CrisisTextLine/modular v1.11.11
-	github.com/CrisisTextLine/modular/modules/eventbus v1.5.5
+	github.com/CrisisTextLine/modular/modules/eventbus v1.7.0
 )
 
 require (

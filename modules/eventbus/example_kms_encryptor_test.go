@@ -1,4 +1,4 @@
-package eventbus_test
+package eventbus
 
 import (
 	"context"
@@ -6,10 +6,14 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
+	"testing"
+	"time"
 
-	"github.com/CrisisTextLine/modular/modules/eventbus/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // KMSClient is the subset of the AWS KMS API needed for envelope encryption.
@@ -21,7 +25,7 @@ type KMSClient interface {
 	GenerateDataKey(ctx context.Context, keyID string, encCtx map[string]string) (plaintext, ciphertextBlob []byte, err error)
 }
 
-// KMSFieldEncryptor implements eventbus.FieldEncryptor using AWS KMS envelope
+// KMSFieldEncryptor implements FieldEncryptor using AWS KMS envelope
 // encryption. For each call it generates a fresh data encryption key (DEK),
 // encrypts the requested fields locally with AES-256-GCM, and returns the
 // KMS-wrapped DEK so consumers can call KMS Decrypt to recover it.
@@ -42,7 +46,7 @@ type KMSFieldEncryptor struct {
 	AffiliateID string // tenant/affiliate identifier
 }
 
-// EncryptFields implements eventbus.FieldEncryptor.
+// EncryptFields implements FieldEncryptor.
 //
 // The flow is:
 //  1. Build the encryption context (bound to the event's source and type via AAD).
@@ -51,7 +55,7 @@ type KMSFieldEncryptor struct {
 //     using the plaintext DEK, then replace the field with an EncryptedFieldValue.
 //  4. Return the wrapped DEK and metadata so PublishEncrypted can set the
 //     CloudEvents extensions.
-func (e *KMSFieldEncryptor) EncryptFields(ctx context.Context, data map[string]interface{}, fields []string) (*eventbus.EncryptionResult, error) {
+func (e *KMSFieldEncryptor) EncryptFields(ctx context.Context, data map[string]interface{}, fields []string) (*EncryptionResult, error) {
 	encCtx := map[string]string{
 		"purpose":     "event-encryption",
 		"eventSource": "messaging",
@@ -106,7 +110,7 @@ func (e *KMSFieldEncryptor) EncryptFields(ctx context.Context, data map[string]i
 		ct := ciphertextWithTag[:len(ciphertextWithTag)-tagSize]
 		tag := ciphertextWithTag[len(ciphertextWithTag)-tagSize:]
 
-		out[f] = eventbus.EncryptedFieldValue{
+		out[f] = EncryptedFieldValue{
 			IV:         base64.StdEncoding.EncodeToString(nonce),
 			Ciphertext: base64.StdEncoding.EncodeToString(ct),
 			AuthTag:    base64.StdEncoding.EncodeToString(tag),
@@ -114,7 +118,7 @@ func (e *KMSFieldEncryptor) EncryptFields(ctx context.Context, data map[string]i
 		encrypted = append(encrypted, f)
 	}
 
-	return &eventbus.EncryptionResult{
+	return &EncryptionResult{
 		Data:            out,
 		Algorithm:       "aes-256-gcm",
 		KeyID:           e.CMKArn,
@@ -124,7 +128,7 @@ func (e *KMSFieldEncryptor) EncryptFields(ctx context.Context, data map[string]i
 	}, nil
 }
 
-// --- Fake KMS client for the example (simulates GenerateDataKey) ---
+// --- Fake KMS client for testing (simulates GenerateDataKey) ---
 
 type fakeKMSClient struct{}
 
@@ -143,10 +147,9 @@ func (f *fakeKMSClient) GenerateDataKey(_ context.Context, _ string, _ map[strin
 	return plaintext, wrapped, nil
 }
 
-// Example_kmsFieldEncryptor demonstrates how to wire up KMS envelope encryption
-// with the eventbus module to produce an ADR-010 compliant encrypted event.
-//
-// The resulting event matches this shape:
+// TestPublishEncrypted_KMSEnvelopeEncryption demonstrates end-to-end usage of
+// KMS envelope encryption with PublishEncrypted. It publishes an event that
+// matches the ADR-010 shape:
 //
 //	{
 //	  "type": "messaging.texter-message.received",
@@ -161,7 +164,17 @@ func (f *fakeKMSClient) GenerateDataKey(_ context.Context, _ string, _ map[strin
 //	    "texterId": "d9b6fcf6-..."
 //	  }
 //	}
-func Example_kmsFieldEncryptor() {
+func TestPublishEncrypted_KMSEnvelopeEncryption(t *testing.T) {
+	module, ctx := newTestModule(t)
+
+	received := make(chan Event, 1)
+	_, err := module.Subscribe(ctx, "messaging.texter-message.received", func(_ context.Context, event Event) error {
+		received <- event
+		return nil
+	})
+	require.NoError(t, err)
+
+	// --- Build the encryptor (swap fakeKMSClient for real *kms.Client in prod) ---
 	enc := &KMSFieldEncryptor{
 		Client:      &fakeKMSClient{},
 		CMKArn:      "arn:aws:kms:us-east-1:123456789:key/abc-123",
@@ -175,40 +188,55 @@ func Example_kmsFieldEncryptor() {
 		"texterId":    "d9b6fcf6-89ff-48aa-8c9f-4e0287be31c8",
 	}
 
-	result, err := enc.EncryptFields(context.Background(), payload, []string{"messageBody"})
-	if err != nil {
-		fmt.Printf("encryption failed: %v\n", err)
-		return
+	err = module.PublishEncrypted(ctx, "messaging.texter-message.received", payload, enc, []string{"messageBody"})
+	require.NoError(t, err)
+
+	select {
+	case event := <-received:
+		// --- CloudEvents extensions ---
+		assert.Equal(t, "aes-256-gcm", event.Extensions()["encryption"])
+		assert.Equal(t, "arn:aws:kms:us-east-1:123456789:key/abc-123", event.Extensions()["keyid"])
+		assert.Equal(t, `["messageBody"]`, event.Extensions()["encryptedfields"])
+
+		// Wrapped DEK is present and base64-decodable.
+		dekStr, ok := event.Extensions()["encrypteddek"].(string)
+		require.True(t, ok)
+		dekBytes, err := base64.StdEncoding.DecodeString(dekStr)
+		require.NoError(t, err)
+		assert.Len(t, dekBytes, 64, "fake KMS returns 64-byte wrapped DEK")
+
+		// Encryption context contains all expected keys.
+		var encCtx map[string]string
+		require.NoError(t, json.Unmarshal([]byte(event.Extensions()["encryptioncontext"].(string)), &encCtx))
+		assert.Equal(t, "event-encryption", encCtx["purpose"])
+		assert.Equal(t, "messaging", encCtx["eventSource"])
+		assert.Equal(t, "messaging.texter-message.received", encCtx["eventType"])
+		assert.Equal(t, "prod", encCtx["environment"])
+		assert.Equal(t, "ctl", encCtx["affiliateId"])
+
+		// --- Data payload ---
+		var data map[string]interface{}
+		require.NoError(t, event.DataAs(&data))
+
+		// Unencrypted fields pass through unchanged.
+		assert.Equal(t, "8665e36c-2638-46ed-ae8f-bf97fb354133", data["messageId"])
+		assert.Equal(t, "d9b6fcf6-89ff-48aa-8c9f-4e0287be31c8", data["texterId"])
+
+		// messageBody is now a structured {iv, ciphertext, auth_tag} object.
+		body, ok := data["messageBody"].(map[string]interface{})
+		require.True(t, ok, "messageBody should be a JSON object, got %T", data["messageBody"])
+
+		// Each component is a non-empty base64 string.
+		for _, key := range []string{"iv", "ciphertext", "auth_tag"} {
+			val, exists := body[key]
+			require.True(t, exists, "messageBody.%s must be present", key)
+			str, ok := val.(string)
+			require.True(t, ok, "messageBody.%s must be a string", key)
+			_, err := base64.StdEncoding.DecodeString(str)
+			assert.NoError(t, err, "messageBody.%s must be valid base64", key)
+		}
+
+	case <-time.After(2 * time.Second):
+		t.Fatal("Event not received within timeout")
 	}
-
-	// Verify the shape matches ADR-010.
-	fmt.Printf("algorithm: %s\n", result.Algorithm)
-	fmt.Printf("keyid: %s\n", result.KeyID)
-	fmt.Printf("encrypted_fields: %v\n", result.EncryptedFields)
-	fmt.Printf("has_wrapped_dek: %v\n", len(result.WrappedDEK) > 0)
-	fmt.Printf("context_purpose: %s\n", result.Context["purpose"])
-
-	// The messageBody field is now an EncryptedFieldValue struct.
-	efv, ok := result.Data["messageBody"].(eventbus.EncryptedFieldValue)
-	fmt.Printf("messageBody_is_encrypted: %v\n", ok)
-	fmt.Printf("has_iv: %v\n", len(efv.IV) > 0)
-	fmt.Printf("has_ciphertext: %v\n", len(efv.Ciphertext) > 0)
-	fmt.Printf("has_auth_tag: %v\n", len(efv.AuthTag) > 0)
-
-	// Unencrypted fields are untouched.
-	fmt.Printf("messageId: %s\n", result.Data["messageId"])
-	fmt.Printf("texterId: %s\n", result.Data["texterId"])
-
-	// Output:
-	// algorithm: aes-256-gcm
-	// keyid: arn:aws:kms:us-east-1:123456789:key/abc-123
-	// encrypted_fields: [messageBody]
-	// has_wrapped_dek: true
-	// context_purpose: event-encryption
-	// messageBody_is_encrypted: true
-	// has_iv: true
-	// has_ciphertext: true
-	// has_auth_tag: true
-	// messageId: 8665e36c-2638-46ed-ae8f-bf97fb354133
-	// texterId: d9b6fcf6-89ff-48aa-8c9f-4e0287be31c8
 }

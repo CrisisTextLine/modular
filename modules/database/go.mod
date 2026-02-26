@@ -2,6 +2,10 @@ module github.com/CrisisTextLine/modular/modules/database/v2
 
 go 1.25
 
+// Replace filippo.io/edwards25519 with a stdlib-based stub: the MariaDB
+// client_ed25519 auth plugin (the only consumer of this library) is not used.
+replace filippo.io/edwards25519 => ../../internal/edwards25519
+
 require (
 	github.com/CrisisTextLine/modular v1.11.11
 	github.com/aws/aws-sdk-go-v2/config v1.31.0

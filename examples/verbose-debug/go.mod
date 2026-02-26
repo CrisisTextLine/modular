@@ -70,3 +70,7 @@ replace github.com/CrisisTextLine/modular => ../..
 
 // Use local database module for development
 replace github.com/CrisisTextLine/modular/modules/database => ../../modules/database
+
+// Replace filippo.io/edwards25519 with a stdlib-based stub: the MariaDB
+// client_ed25519 auth plugin (the only consumer of this library) is not used.
+replace filippo.io/edwards25519 => ../../internal/edwards25519

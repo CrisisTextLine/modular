@@ -111,7 +111,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -447,6 +446,7 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 	if err := event.SetData("application/json", payload); err != nil {
 		return fmt.Errorf("failed to set event data: %w", err)
 	}
+	event.SetExtension("encryptedfields", "[]")
 	startTime := time.Now()
 	err := m.router.Publish(ctx, event)
 	duration := time.Since(startTime)
@@ -479,7 +479,7 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 // the specified fields. The resulting event includes these extensions:
 //   - encryption: the algorithm used (e.g., "AES-256-GCM")
 //   - keyid: identifier for the encryption key
-//   - encryptedfields: comma-separated list of encrypted field names
+//   - encryptedfields: JSON array of encrypted field names (e.g., ["email","ssn"])
 //   - encrypteddek: the wrapped data encryption key (base64)
 //   - encryptioncontext: JSON-encoded encryption context map
 //
@@ -514,15 +514,17 @@ func (m *EventBusModule) PublishEncrypted(ctx context.Context, topic string, pay
 	// Set encryption metadata as CloudEvents extensions.
 	event.SetExtension("encryption", result.Algorithm)
 	event.SetExtension("keyid", result.KeyID)
-	event.SetExtension("encryptedfields", strings.Join(result.EncryptedFields, ","))
-	event.SetExtension("encrypteddek", result.WrappedDEK)
-	if len(result.Context) > 0 {
-		encCtx, err := json.Marshal(result.Context)
-		if err != nil {
-			return fmt.Errorf("marshaling encryption context: %w", err)
-		}
-		event.SetExtension("encryptioncontext", string(encCtx))
+	fieldsJSON, err := json.Marshal(result.EncryptedFields)
+	if err != nil {
+		return fmt.Errorf("marshaling encrypted fields list: %w", err)
 	}
+	event.SetExtension("encryptedfields", string(fieldsJSON))
+	event.SetExtension("encrypteddek", result.WrappedDEK)
+	encCtxJSON, err := json.Marshal(result.Context)
+	if err != nil {
+		return fmt.Errorf("marshaling encryption context: %w", err)
+	}
+	event.SetExtension("encryptioncontext", string(encCtxJSON))
 
 	startTime := time.Now()
 	err = m.router.Publish(ctx, event)

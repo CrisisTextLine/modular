@@ -837,7 +837,7 @@ func (m *ReverseProxyModule) createTenantProxies(ctx context.Context) {
 				if _, exists := m.backendProxies[backendID]; !exists {
 					if m.app != nil && m.app.Logger() != nil {
 						m.app.Logger().Debug("Using tenant-specific backend URL as global",
-							"tenant", tenantID, "backend", backendID, "url", serviceURL)
+							"tenant_hash", obfuscateTenantID(tenantID), "backend", backendID, "url", serviceURL)
 					}
 					m.backendProxies[backendID] = proxy
 					backendWasAdded = true
@@ -2353,7 +2353,7 @@ func (w *bufferingResponseWriter) flushTo(target http.ResponseWriter) error {
 
 	// Write body
 	if len(w.body) > 0 {
-		_, err := target.Write(w.body)
+		_, err := target.Write(w.body) //nolint:gosec // G705: reverse proxy transparently forwards upstream response body
 		if err != nil {
 			return fmt.Errorf("failed to write response body: %w", err)
 		}
@@ -2567,7 +2567,7 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 
 				// Use timeout-aware proxy directly to ensure real timeout behavior
 				cbResp, cbErr = cb.Execute(proxyReq, func(req *http.Request) (*http.Response, error) { //nolint:bodyclose // synthetic response carries no body and is explicitly closed after execution
-					proxyCopy.ServeHTTP(sw, req)
+					proxyCopy.ServeHTTP(sw, req) //nolint:gosec // G704: reverse proxy intentionally forwards requests to configured backends
 
 					// Create response with captured status
 					resp := &http.Response{StatusCode: sw.status, Body: http.NoBody}
@@ -2784,7 +2784,7 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 
 				// Create a request with the proxy context to ensure proper cancellation
 				proxyReq := r.WithContext(proxyCtx)
-				proxyForRequest.ServeHTTP(sw, proxyReq)
+				proxyForRequest.ServeHTTP(sw, proxyReq) //nolint:gosec // G704: reverse proxy intentionally forwards requests to configured backends
 			}()
 
 			// Wait for either completion or timeout
@@ -2996,7 +2996,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 				}
 
 				// Serve the request
-				proxyCopy.ServeHTTP(recorder, req)
+				proxyCopy.ServeHTTP(recorder, req) //nolint:gosec // G704: reverse proxy intentionally forwards requests to configured backends
 
 				// Convert recorder to response
 				return recorder.Result(), nil
@@ -3073,7 +3073,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 		} else {
 			// No circuit breaker, use the proxy directly but capture status
 			sw := &statusCapturingResponseWriter{ResponseWriter: w, status: http.StatusOK}
-			proxy.ServeHTTP(sw, r)
+			proxy.ServeHTTP(sw, r) //nolint:gosec // G704: reverse proxy intentionally forwards requests to configured backends
 
 			// Emit success or failure event based on status code
 			if sw.status >= 400 {
@@ -3302,7 +3302,7 @@ func (m *ReverseProxyModule) RegisterCustomEndpoint(pattern string, mapping Endp
 			}
 
 			// Execute the request
-			resp, err := m.httpClient.Do(req) //nolint:bodyclose // Response body is closed in defer cleanup
+			resp, err := m.httpClient.Do(req) //nolint:bodyclose,gosec // bodyclose: body is closed in defer cleanup; G704: reverse proxy intentionally forwards requests to configured backends
 			if err != nil {
 				m.app.Logger().Error("Failed to execute request", "backend", endpoint.Backend, "error", err)
 				continue
@@ -3333,7 +3333,7 @@ func (m *ReverseProxyModule) RegisterCustomEndpoint(pattern string, mapping Endp
 
 		// Write status code and body
 		w.WriteHeader(result.StatusCode)
-		if _, err := w.Write(result.Body); err != nil {
+		if _, err := w.Write(result.Body); err != nil { //nolint:gosec // G705: reverse proxy transparently forwards composite backend response body
 			if m.app != nil && m.app.Logger() != nil {
 				m.app.Logger().Error("Failed to write response body", "error", err)
 			}
@@ -4039,7 +4039,7 @@ func (m *ReverseProxyModule) withCache(handler http.HandlerFunc, backend string)
 			copyResponseHeaders(cachedResp.Headers, w.Header())
 			w.Header().Set("X-Cache", "HIT")
 			w.WriteHeader(cachedResp.StatusCode)
-			if _, err := w.Write(cachedResp.Body); err != nil {
+			if _, err := w.Write(cachedResp.Body); err != nil { //nolint:gosec // G705: reverse proxy transparently forwards upstream cached response body
 				if m.app != nil && m.app.Logger() != nil {
 					m.app.Logger().Error("Failed to write cached response body", "error", err)
 				}

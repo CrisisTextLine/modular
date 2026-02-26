@@ -21,7 +21,7 @@ type DebugEndpointsConfig struct {
 	RequireAuth bool `json:"require_auth" yaml:"require_auth" toml:"require_auth" env:"DEBUG_REQUIRE_AUTH" default:"false"`
 
 	// AuthToken is the token required for debug endpoint access (if RequireAuth is true)
-	AuthToken string `json:"auth_token" yaml:"auth_token" toml:"auth_token" env:"DEBUG_AUTH_TOKEN"`
+	AuthToken string `json:"auth_token" yaml:"auth_token" toml:"auth_token" env:"DEBUG_AUTH_TOKEN"` //nolint:gosec // G117: auth_token is a debug endpoint configuration field, not a credential
 }
 
 // DebugInfo represents debugging information about the reverse proxy state.

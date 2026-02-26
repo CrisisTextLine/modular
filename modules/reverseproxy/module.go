@@ -2633,7 +2633,7 @@ func (m *ReverseProxyModule) createBackendProxyHandler(backend string) http.Hand
 					// Circuit is open
 					if m.app != nil && m.app.Logger() != nil {
 						m.app.Logger().Warn("Circuit breaker open, denying request",
-							"backend", finalBackend, "tenant", tenantID, "path", r.URL.Path)
+							"backend", finalBackend, "tenant_hash", obfuscateTenantID(tenantID), "path", sanitizeForLogging(r.URL.Path))
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusServiceUnavailable)
@@ -3006,7 +3006,7 @@ func (m *ReverseProxyModule) createBackendProxyHandlerForTenant(tenantID modular
 				// Circuit is open, return service unavailable
 				if m.app != nil && m.app.Logger() != nil {
 					m.app.Logger().Warn("Circuit breaker open, denying request",
-						"backend", backend, "tenant", tenantID, "path", r.URL.Path)
+						"backend", backend, "tenant_hash", obfuscateTenantID(tenantID), "path", sanitizeForLogging(r.URL.Path))
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusServiceUnavailable)
@@ -3109,17 +3109,17 @@ func (m *ReverseProxyModule) getProxyForBackendAndTenant(backendID string, tenan
 		if tenantExists {
 			if proxy, exists := tenantProxies[backendID]; exists && proxy != nil {
 				if m.app != nil && m.app.Logger() != nil {
-					m.app.Logger().Debug("Using tenant-specific proxy", "tenant", tenantID, "backend", backendID)
+					m.app.Logger().Debug("Using tenant-specific proxy", "tenant_hash", obfuscateTenantID(tenantID), "backend", backendID)
 				}
 				return proxy, true
 			} else {
 				if m.app != nil && m.app.Logger() != nil {
-					m.app.Logger().Debug("No tenant-specific proxy found", "tenant", tenantID, "backend", backendID, "tenantProxiesExist", true, "proxyExistsForBackend", exists)
+					m.app.Logger().Debug("No tenant-specific proxy found", "tenant_hash", obfuscateTenantID(tenantID), "backend", backendID, "tenantProxiesExist", true, "proxyExistsForBackend", exists)
 				}
 			}
 		} else {
 			if m.app != nil && m.app.Logger() != nil {
-				m.app.Logger().Debug("No tenant proxies found", "tenant", tenantID, "backend", backendID)
+				m.app.Logger().Debug("No tenant proxies found", "tenant_hash", obfuscateTenantID(tenantID), "backend", backendID)
 			}
 		}
 	}
@@ -3129,7 +3129,7 @@ func (m *ReverseProxyModule) getProxyForBackendAndTenant(backendID string, tenan
 	proxy, exists := m.backendProxies[backendID]
 	m.backendProxiesMutex.RUnlock()
 	if m.app != nil && m.app.Logger() != nil {
-		m.app.Logger().Debug("Using global proxy", "backend", backendID, "exists", exists, "tenant", tenantID)
+		m.app.Logger().Debug("Using global proxy", "backend", backendID, "exists", exists, "tenant_hash", obfuscateTenantID(tenantID))
 	}
 	return proxy, exists
 }
@@ -3783,7 +3783,7 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 		// Check if there's a global route for this path
 		if backendID, ok := m.config.Routes[path]; ok {
 			if m.app != nil && m.app.Logger() != nil {
-				m.app.Logger().Debug("Using global route", "path", path, "backend", backendID, "tenant", tenantIDStr)
+				m.app.Logger().Debug("Using global route", "path", path, "backend", backendID, "tenant_hash", obfuscateTenantID(modular.TenantID(tenantIDStr)))
 			}
 			m.backendProxiesMutex.RLock()
 			_, exists := m.backendProxies[backendID]
@@ -3799,7 +3799,7 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 			}
 		} else {
 			if m.app != nil && m.app.Logger() != nil {
-				m.app.Logger().Debug("No global route found", "path", path, "tenant", tenantIDStr)
+				m.app.Logger().Debug("No global route found", "path", path, "tenant_hash", obfuscateTenantID(modular.TenantID(tenantIDStr)))
 			}
 		}
 
@@ -3831,7 +3831,7 @@ func (m *ReverseProxyModule) createTenantAwareHandler(path string) http.HandlerF
 				if hasTenant {
 					// Even for global default backend, use tenant-aware handler to get proper tenant proxy
 					if m.app != nil && m.app.Logger() != nil {
-						m.app.Logger().Debug("Using tenant-aware global default backend", "backend", m.defaultBackend, "tenant", tenantIDStr)
+						m.app.Logger().Debug("Using tenant-aware global default backend", "backend", m.defaultBackend, "tenant_hash", obfuscateTenantID(modular.TenantID(tenantIDStr)))
 					}
 					handler := m.createBackendProxyHandlerForTenant(modular.TenantID(tenantIDStr), m.defaultBackend) //nolint:contextcheck // handler obtains context from incoming request
 					handler(w, r)
@@ -3867,7 +3867,7 @@ func (m *ReverseProxyModule) createTenantAwareCatchAllHandler() http.HandlerFunc
 		if hasTenant {
 			tenantID := modular.TenantID(tenantIDStr)
 			if m.app != nil && m.app.Logger() != nil {
-				m.app.Logger().Debug("Processing tenant request", "tenant", tenantID, "path", r.URL.Path)
+				m.app.Logger().Debug("Processing tenant request", "tenant_hash", obfuscateTenantID(tenantID), "path", sanitizeForLogging(r.URL.Path))
 			}
 
 			// Check if we have a tenant-specific configuration
@@ -3875,7 +3875,7 @@ func (m *ReverseProxyModule) createTenantAwareCatchAllHandler() http.HandlerFunc
 				// Check if tenant has a default backend (use it regardless of global default)
 				if tenantCfg.DefaultBackend != "" {
 					if m.app != nil && m.app.Logger() != nil {
-						m.app.Logger().Debug("Using tenant default backend", "tenant", tenantID, "backend", tenantCfg.DefaultBackend)
+						m.app.Logger().Debug("Using tenant default backend", "tenant_hash", obfuscateTenantID(tenantID), "backend", tenantCfg.DefaultBackend)
 					}
 					handler := m.createBackendProxyHandlerForTenant(tenantID, tenantCfg.DefaultBackend) //nolint:contextcheck // tenant default handler reuses request context
 					handler(w, r)

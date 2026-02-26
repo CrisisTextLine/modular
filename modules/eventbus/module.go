@@ -108,8 +108,10 @@ package eventbus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -462,6 +464,82 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 	// Emit message published event
 	go m.emitEvent(ctx, EventTypeMessagePublished, map[string]interface{}{
 		"topic":       topic,
+		"duration_ms": duration.Milliseconds(),
+	})
+
+	return nil
+}
+
+// PublishEncrypted publishes an event with field-level encryption.
+// The provided FieldEncryptor handles the actual encryption of the specified fields
+// within the payload. Encryption metadata is stored as CloudEvents extensions so
+// that consumers can identify and decrypt the encrypted fields.
+//
+// The payload is first marshaled to a map, then the encryptor is called to encrypt
+// the specified fields. The resulting event includes these extensions:
+//   - encryption: the algorithm used (e.g., "AES-256-GCM")
+//   - keyid: identifier for the encryption key
+//   - encryptedfields: comma-separated list of encrypted field names
+//   - encrypteddek: the wrapped data encryption key (base64)
+//   - encryptioncontext: JSON-encoded encryption context map
+//
+// Example:
+//
+//	err := eventBus.PublishEncrypted(ctx, "user.created", userData, myEncryptor, []string{"email", "ssn"})
+func (m *EventBusModule) PublishEncrypted(ctx context.Context, topic string, payload interface{}, encryptor FieldEncryptor, fields []string) error {
+	// Marshal the payload into a map for field-level encryption.
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshaling payload for encryption: %w", err)
+	}
+	var dataMap map[string]interface{}
+	if err := json.Unmarshal(raw, &dataMap); err != nil {
+		return fmt.Errorf("unmarshaling payload to map for encryption: %w", err)
+	}
+
+	result, err := encryptor.EncryptFields(ctx, dataMap, fields)
+	if err != nil {
+		return fmt.Errorf("encrypting fields: %w", err)
+	}
+
+	event := cevent.New()
+	event.SetType(topic)
+	event.SetSource(m.config.Source)
+	event.SetID(uuid.New().String())
+	event.SetTime(time.Now())
+	if err := event.SetData("application/json", result.Data); err != nil {
+		return fmt.Errorf("failed to set encrypted event data: %w", err)
+	}
+
+	// Set encryption metadata as CloudEvents extensions.
+	event.SetExtension("encryption", result.Algorithm)
+	event.SetExtension("keyid", result.KeyID)
+	event.SetExtension("encryptedfields", strings.Join(result.EncryptedFields, ","))
+	event.SetExtension("encrypteddek", result.WrappedDEK)
+	if len(result.Context) > 0 {
+		encCtx, err := json.Marshal(result.Context)
+		if err != nil {
+			return fmt.Errorf("marshaling encryption context: %w", err)
+		}
+		event.SetExtension("encryptioncontext", string(encCtx))
+	}
+
+	startTime := time.Now()
+	err = m.router.Publish(ctx, event)
+	duration := time.Since(startTime)
+	if err != nil {
+		go m.emitEvent(ctx, EventTypeMessageFailed, map[string]interface{}{
+			"topic":       topic,
+			"encrypted":   true,
+			"error":       err.Error(),
+			"duration_ms": duration.Milliseconds(),
+		})
+		return fmt.Errorf("publishing encrypted event to topic %s: %w", topic, err)
+	}
+
+	go m.emitEvent(ctx, EventTypeMessagePublished, map[string]interface{}{
+		"topic":       topic,
+		"encrypted":   true,
 		"duration_ms": duration.Milliseconds(),
 	})
 

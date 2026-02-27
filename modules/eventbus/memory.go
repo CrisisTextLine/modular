@@ -115,8 +115,10 @@ func (m *MemoryEventBus) Start(ctx context.Context) error {
 
 	m.ctx, m.cancel = context.WithCancel(ctx)
 
-	// Initialize worker pool for async event handling
-	m.workerPool = make(chan func(), m.config.WorkerCount)
+	// Initialize worker pool for async event handling.
+	// Buffer size is MaxEventQueueSize so the task queue can absorb bursts
+	// without dropping events just because workers are momentarily busy.
+	m.workerPool = make(chan func(), m.config.MaxEventQueueSize)
 	for i := 0; i < m.config.WorkerCount; i++ {
 		m.wg.Add(1)
 		go m.worker()
@@ -290,6 +292,10 @@ func (m *MemoryEventBus) Publish(ctx context.Context, event Event) error {
 		// Only count drops at publish time; successful sends accounted when processed.
 		if !sent {
 			atomic.AddUint64(&m.droppedCount, 1)
+			slog.Warn("Subscriber channel full, dropping event",
+				"topic", event.Type(),
+				"subscription_id", sub.id,
+				"delivery_mode", mode)
 		}
 	}
 
@@ -496,8 +502,11 @@ func (m *MemoryEventBus) queueEventHandler(sub *memorySubscription, event Event)
 	}:
 		// Successfully queued; delivered count increment deferred until post-processing
 	default:
-		// Worker pool is full, drop async processing (count as dropped)
+		// Worker pool task queue is full, drop async processing (count as dropped)
 		atomic.AddUint64(&m.droppedCount, 1)
+		slog.Warn("Worker pool task queue full, dropping async event",
+			"topic", event.Type(),
+			"subscription_id", sub.id)
 	}
 }
 
@@ -520,17 +529,20 @@ func (m *MemoryEventBus) Stats() (delivered uint64, dropped uint64) {
 	return atomic.LoadUint64(&m.deliveredCount), atomic.LoadUint64(&m.droppedCount)
 }
 
-// storeEventHistory adds an event to the history
+// storeEventHistory adds an event to the history, capping per-topic history to
+// MaxEventQueueSize entries to prevent unbounded memory growth under high volume.
 func (m *MemoryEventBus) storeEventHistory(event Event) {
 	m.historyMutex.Lock()
 	defer m.historyMutex.Unlock()
 
-	if _, ok := m.eventHistory[event.Type()]; !ok {
-		m.eventHistory[event.Type()] = make([]Event, 0)
+	history := m.eventHistory[event.Type()]
+
+	// Evict oldest entry when at capacity (sliding-window / ring-buffer behaviour)
+	if len(history) >= m.config.MaxEventQueueSize {
+		history = history[len(history)-m.config.MaxEventQueueSize+1:]
 	}
 
-	// Add the event to history
-	m.eventHistory[event.Type()] = append(m.eventHistory[event.Type()], event)
+	m.eventHistory[event.Type()] = append(history, event)
 }
 
 // startRetentionTimer starts a timer to clean up old events
@@ -539,8 +551,13 @@ func (m *MemoryEventBus) startRetentionTimer() {
 	m.retentionTimer = time.AfterFunc(duration, func() {
 		m.cleanupOldEvents()
 
-		// Restart timer
-		if m.isStarted {
+		// Restart timer only if the bus context is still live.
+		// Using the context avoids a data race on m.isStarted (which is not
+		// guarded by an atomic inside the timer callback goroutine).
+		select {
+		case <-m.ctx.Done():
+			// Bus is stopping; do not reschedule.
+		default:
 			m.startRetentionTimer()
 		}
 	})

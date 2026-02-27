@@ -20,8 +20,8 @@ type EngineConfig struct {
 	Name string `json:"name" yaml:"name" validate:"required"`
 
 	// Type specifies the engine implementation to use.
-	// Supported values: "memory", "redis", "kafka", "kinesis", "custom"
-	Type string `json:"type" yaml:"type" validate:"required,oneof=memory redis kafka kinesis custom"`
+	// Supported values: "memory", "redis", "kafka", "kinesis", "nats", "custom", "durable-memory"
+	Type string `json:"type" yaml:"type" validate:"required,oneof=memory redis kafka kinesis nats custom durable-memory"`
 
 	// Config contains engine-specific configuration as a map.
 	// The structure depends on the engine type.
@@ -76,10 +76,10 @@ type EventBusConfig struct {
 	// --- Single Engine Configuration (Legacy Support) ---
 
 	// Engine specifies the event bus engine to use for single-engine mode.
-	// Supported values: "memory", "redis", "kafka", "kinesis"
+	// Supported values: "memory", "redis", "kafka", "kinesis", "nats", "custom", "durable-memory"
 	// Default: "memory"
 	// Note: This field is used only when Engines is empty (legacy mode)
-	Engine string `json:"engine,omitempty" yaml:"engine,omitempty" validate:"omitempty,oneof=memory redis kafka kinesis" env:"ENGINE"`
+	Engine string `json:"engine,omitempty" yaml:"engine,omitempty" validate:"omitempty,oneof=memory redis kafka kinesis nats custom durable-memory" env:"ENGINE"`
 
 	// MaxEventQueueSize is the maximum number of events to queue per topic.
 	// When this limit is reached, new events may be dropped or publishers
@@ -108,6 +108,13 @@ type EventBusConfig struct {
 
 	// PublishBlockTimeout is used when DeliveryMode == "timeout". Zero means no wait.
 	PublishBlockTimeout time.Duration `json:"publishBlockTimeout,omitempty" yaml:"publishBlockTimeout,omitempty" env:"PUBLISH_BLOCK_TIMEOUT"`
+
+	// MaxDurableQueueDepth is the per-subscriber queue depth for the "durable-memory" engine.
+	// When a subscriber's queue is full, publishers block (backpressure) until the subscriber
+	// consumes an event, ensuring zero event loss.
+	// When 0 (default), the value of MaxEventQueueSize is used.
+	// Set to a positive value to override independently of MaxEventQueueSize.
+	MaxDurableQueueDepth int `json:"maxDurableQueueDepth,omitempty" yaml:"maxDurableQueueDepth,omitempty" validate:"omitempty" env:"MAX_DURABLE_QUEUE_DEPTH"`
 
 	// RotateSubscriberOrder when true rotates the ordering of subscribers per publish
 	// to reduce starvation and provide fairer drop distribution.

@@ -106,15 +106,15 @@ func (rc *responseCache) Get(key string) (*CachedResponse, bool) {
 func (rc *responseCache) GenerateKey(r *http.Request) string {
 	// Create a hash of the method, URL, and relevant headers
 	h := sha256.New()
-	_, _ = io.WriteString(h, r.Method)
-	_, _ = io.WriteString(h, r.URL.String())
+	_, _ = io.WriteString(h, r.Method)       //nolint:gosec // G705: writing to a hash.Hash (sha256) never returns an error
+	_, _ = io.WriteString(h, r.URL.String()) //nolint:gosec // G705: writing to a hash.Hash (sha256) never returns an error
 
 	// Include relevant caching headers like Accept and Accept-Encoding
 	if accept := r.Header.Get("Accept"); accept != "" {
-		_, _ = io.WriteString(h, accept)
+		_, _ = io.WriteString(h, accept) //nolint:gosec // G705: writing to a hash.Hash (sha256) never returns an error
 	}
 	if acceptEncoding := r.Header.Get("Accept-Encoding"); acceptEncoding != "" {
-		_, _ = io.WriteString(h, acceptEncoding)
+		_, _ = io.WriteString(h, acceptEncoding) //nolint:gosec // G705: writing to a hash.Hash (sha256) never returns an error
 	}
 
 	return hex.EncodeToString(h.Sum(nil))

@@ -492,7 +492,7 @@ func (hc *HealthChecker) performHTTPCheck(ctx context.Context, backendID, baseUR
 
 	// Perform the request
 	start := time.Now()
-	resp, err := hc.httpClient.Do(req)
+	resp, err := hc.httpClient.Do(req) //nolint:gosec // G704: health checker intentionally makes requests to configured backend URLs
 	responseTime := time.Since(start)
 
 	if err != nil {

@@ -217,7 +217,7 @@ func (d *DryRunHandler) sendRequest(ctx context.Context, originalReq *http.Reque
 	}
 
 	// Send request
-	resp, err := d.httpClient.Do(req)
+	resp, err := d.httpClient.Do(req) //nolint:gosec // G704: dry run intentionally makes requests to configured backends
 	if err != nil {
 		response.Error = fmt.Sprintf("request failed: %v", err)
 		return response

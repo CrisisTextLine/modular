@@ -135,7 +135,7 @@ func (h *CompositeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			w.WriteHeader(cachedResp.StatusCode)
-			if _, err := w.Write(cachedResp.Body); err != nil {
+			if _, err := w.Write(cachedResp.Body); err != nil { //nolint:gosec // G705: reverse proxy transparently forwards upstream response body
 				http.Error(w, "Failed to write cached response", http.StatusInternalServerError)
 				return
 			}
@@ -396,7 +396,7 @@ func (h *CompositeHandler) executeBackendRequest(ctx context.Context, backend *B
 	}
 
 	// Execute the request.
-	resp, err := backend.Client.Do(req)
+	resp, err := backend.Client.Do(req) //nolint:gosec // G704: reverse proxy intentionally forwards requests to configured backends
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute backend request: %w", err)
 	}

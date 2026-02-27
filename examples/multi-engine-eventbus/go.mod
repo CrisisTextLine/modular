@@ -6,7 +6,7 @@ toolchain go1.25.0
 
 require (
 	github.com/CrisisTextLine/modular v1.11.11
-	github.com/CrisisTextLine/modular/modules/eventbus v0.0.0
+	github.com/CrisisTextLine/modular/modules/eventbus v1.7.0
 )
 
 require (

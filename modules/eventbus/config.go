@@ -76,7 +76,7 @@ type EventBusConfig struct {
 	// --- Single Engine Configuration (Legacy Support) ---
 
 	// Engine specifies the event bus engine to use for single-engine mode.
-	// Supported values: "memory", "redis", "kafka", "kinesis"
+	// Supported values: "memory", "redis", "kafka", "kinesis", "nats", "custom", "durable-memory"
 	// Default: "memory"
 	// Note: This field is used only when Engines is empty (legacy mode)
 	Engine string `json:"engine,omitempty" yaml:"engine,omitempty" validate:"omitempty,oneof=memory redis kafka kinesis nats custom durable-memory" env:"ENGINE"`
@@ -114,7 +114,7 @@ type EventBusConfig struct {
 	// consumes an event, ensuring zero event loss.
 	// When 0 (default), the value of MaxEventQueueSize is used.
 	// Set to a positive value to override independently of MaxEventQueueSize.
-	MaxDurableQueueDepth int `json:"maxDurableQueueDepth,omitempty" yaml:"maxDurableQueueDepth,omitempty" validate:"omitempty,min=1" env:"MAX_DURABLE_QUEUE_DEPTH"`
+	MaxDurableQueueDepth int `json:"maxDurableQueueDepth,omitempty" yaml:"maxDurableQueueDepth,omitempty" validate:"omitempty" env:"MAX_DURABLE_QUEUE_DEPTH"`
 
 	// RotateSubscriberOrder when true rotates the ordering of subscribers per publish
 	// to reduce starvation and provide fairer drop distribution.

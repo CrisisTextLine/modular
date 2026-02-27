@@ -84,7 +84,7 @@ func (q *durableQueue) TryPop() (Event, bool) {
 
 	// Only wake a blocked Push when we pop from a full queue to avoid spurious wakeups.
 	wasAtCapacity := q.maxDepth > 0 && q.items.Len() >= q.maxDepth
-	event := q.items.Remove(front).(Event) //nolint:forcetypeassert
+	event := q.items.Remove(front).(Event) //nolint:forcetypeassert // durableQueue only stores Event values; type assertion is guaranteed safe
 	if wasAtCapacity {
 		select {
 		case q.notFull <- struct{}{}:

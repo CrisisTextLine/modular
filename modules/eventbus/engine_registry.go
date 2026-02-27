@@ -107,6 +107,9 @@ func (r *EngineRouter) SetModuleReference(module *EventBusModule) {
 		if memoryEngine, ok := engine.(*MemoryEventBus); ok {
 			memoryEngine.SetModule(module)
 		}
+		if durableEngine, ok := engine.(*DurableMemoryEventBus); ok {
+			durableEngine.SetModule(module)
+		}
 	}
 }
 
@@ -343,4 +346,7 @@ func init() {
 
 	// Register custom memory engine
 	RegisterEngine("custom", NewCustomMemoryEventBus)
+
+	// Register durable memory engine (backpressure-based, zero event loss)
+	RegisterEngine("durable-memory", NewDurableMemoryEventBus)
 }

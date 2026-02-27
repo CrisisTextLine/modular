@@ -15,7 +15,8 @@ The EventBus Module provides a publish-subscribe messaging system for Modular ap
 - **Worker Pool Management**: Configurable worker pools for async event processing
 
 ### Supported Engines
-- **Memory**: In-process event bus using Go channels (default)
+- **Memory**: In-process event bus using Go channels (default). Configurable delivery modes: `drop`, `block`, `timeout`.
+- **Durable Memory**: In-process event bus that **never drops events**. Uses a per-subscriber FIFO queue and blocks publishers (backpressure) when the queue is full. Ideal when event loss is unacceptable within a single process.
 - **Redis**: Distributed messaging using Redis pub/sub
 - **Kafka**: Enterprise messaging using Apache Kafka
 - **Kinesis**: AWS-native streaming using Amazon Kinesis
@@ -169,6 +170,7 @@ Tuning Guidance:
 - Start with `drop` in high-throughput low-criticality paths where occasional loss is acceptable.
 - Use `timeout` with a modest `publishBlockTimeout` (e.g. 5-50ms) for balanced fairness and latency in mixed-speed subscriber sets.
 - Reserve `block` for critical fan-out where all subscribers must process every event and you are comfortable applying backpressure to publishers.
+- Use `durable-memory` when you need zero event loss within a process without the operational overhead of an external broker.
 
 Example (balanced):
 ```yaml
@@ -183,6 +185,56 @@ eventbus:
         publishBlockTimeout: 25ms
         rotateSubscriberOrder: true
 ```
+
+### Durable Memory Engine (Zero Event Loss)
+
+The `durable-memory` engine is an in-process alternative to `memory` that **never drops events**. Instead of dropping events when a subscriber is busy, publishers block (backpressure) until the subscriber's queue has space. Memory usage is bounded by `maxDurableQueueDepth × number-of-subscribers`.
+
+**When to use:**
+- Event loss is unacceptable and the application runs in a single process
+- You need the simplicity of in-process delivery with stronger guarantees than `memory`+`block` mode
+- You want bounded memory without the operational overhead of Redis or Kafka
+
+**Single-engine configuration:**
+```yaml
+eventbus:
+  engine: durable-memory
+  maxEventQueueSize: 1000      # fallback queue depth if maxDurableQueueDepth is 0
+  maxDurableQueueDepth: 500    # per-subscriber queue depth (0 = use maxEventQueueSize)
+```
+
+**Multi-engine configuration (mixed with a lossy fast path):**
+```yaml
+eventbus:
+  engines:
+    - name: "fast"
+      type: "memory"
+      config:
+        workerCount: 8
+        deliveryMode: drop
+    - name: "critical"
+      type: "durable-memory"
+      config:
+        maxDurableQueueDepth: 200
+  routing:
+    - topics: ["payment.*", "order.*"]
+      engine: "critical"
+    - topics: ["*"]
+      engine: "fast"
+```
+
+**Trade-offs vs `memory` + `block`:**
+
+| | `durable-memory` | `memory` + `block` |
+|---|---|---|
+| Event loss | None | None |
+| Backpressure unit | Per-subscriber queue | Per-subscriber channel slot |
+| Queue structure | Linked list (unbounded growth before cap) | Fixed-size Go channel |
+| Memory bound | `maxDurableQueueDepth` | `defaultEventBufferSize` |
+| Async handler parallelism | Sequential per subscriber | Shared worker pool |
+
+**Important note on cross-process durability:**  
+`durable-memory` only protects against in-process loss (e.g. a slow subscriber). It does **not** survive process restarts or crashes. For durable-across-restarts guarantees, use Redis, Kafka, or Kinesis.
 
 ### Metrics Export (Prometheus & Datadog)
 

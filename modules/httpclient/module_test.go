@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -382,4 +384,191 @@ func TestHTTPClientModule_IntegrationWithServer(t *testing.T) {
 	if closeErr := resp.Body.Close(); closeErr != nil {
 		t.Logf("Failed to close response body: %v", closeErr)
 	}
+}
+
+// TestLoggingTransport_GzipBodyNotLogged verifies that when an upstream response uses
+// Content-Encoding: gzip, the raw compressed bytes are never written to the logger.
+// Regression test for: garbled/unicode log output flooding Datadog when Facade proxies
+// large gzip-encoded responses.
+func TestLoggingTransport_GzipBodyNotLogged(t *testing.T) {
+	// Serve a response with Content-Encoding: gzip and a raw gzip magic-byte body.
+	// In a real proxy the body would be fully compressed; here we just need bytes that
+	// would appear garbled if logged directly.
+	gzipMagic := []byte{0x1f, 0x8b, 0x08, 0x00, 0xde, 0xad, 0xbe, 0xef}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(gzipMagic)
+	}))
+	defer server.Close()
+
+	var loggedDetails string
+	mockLogger := new(MockLogger)
+	mockLogger.On("Info", mock.Anything, mock.MatchedBy(func(keyvals []interface{}) bool {
+		for i := 0; i+1 < len(keyvals); i += 2 {
+			if keyvals[i] == "details" {
+				loggedDetails = fmt.Sprintf("%v", keyvals[i+1])
+			}
+		}
+		return true
+	})).Return()
+
+	// DisableCompression mirrors the Facade reverse-proxy transport, which must pass
+	// compressed responses through to callers without auto-decompressing them. Without
+	// this, Go strips Content-Encoding: gzip from the response before logResponse sees it.
+	transport := &loggingTransport{
+		Transport:  &http.Transport{DisableCompression: true},
+		Logger:     mockLogger,
+		LogHeaders: true,
+		LogBody:    true,
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	require.NoError(t, err)
+	resp, err := (&http.Client{Transport: transport}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// The details field must contain the omission notice, not raw binary bytes.
+	assert.Contains(t, loggedDetails, "[body omitted: Content-Encoding=gzip",
+		"gzip body bytes must not appear in log output")
+	assert.NotContains(t, loggedDetails, string(gzipMagic),
+		"raw gzip bytes must not appear in log output")
+}
+
+// TestLoggingTransport_GzipFileLogging verifies that the file-logging path
+// (handleFileLogging) also omits compressed response bodies, writing the
+// omission notice to the transaction log file instead of raw binary bytes.
+func TestLoggingTransport_GzipFileLogging(t *testing.T) {
+	gzipMagic := []byte{0x1f, 0x8b, 0x08, 0x00, 0xde, 0xad, 0xbe, 0xef}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(gzipMagic)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	mockLogger := new(MockLogger)
+	mockLogger.On("Info", mock.Anything, mock.Anything).Return()
+	mockLogger.On("Error", mock.Anything, mock.Anything).Return()
+
+	fileLogger, err := NewFileLogger(tmpDir, mockLogger)
+	require.NoError(t, err)
+
+	transport := &loggingTransport{
+		Transport:  &http.Transport{DisableCompression: true},
+		Logger:     mockLogger,
+		LogHeaders: true,
+		LogBody:    true,
+		LogToFile:  true,
+		FileLogger: fileLogger,
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	require.NoError(t, err)
+	resp, err := (&http.Client{Transport: transport}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Read the transaction log file and verify it contains the omission notice.
+	txnFiles, err := filepath.Glob(filepath.Join(tmpDir, "transactions", "*.log"))
+	require.NoError(t, err)
+	require.NotEmpty(t, txnFiles, "expected a transaction log file to be written")
+
+	contents, err := os.ReadFile(txnFiles[0])
+	require.NoError(t, err)
+
+	assert.Contains(t, string(contents), "[body omitted: Content-Encoding=gzip",
+		"transaction log must contain the omission notice")
+	assert.NotContains(t, string(contents), string(gzipMagic),
+		"transaction log must not contain raw gzip bytes")
+}
+
+// TestConfig_MaxBodyLogSizeDefaultCap verifies that when VerboseOptions are
+// explicitly provided with LogBody enabled but MaxBodyLogSize left at 0,
+// Validate() applies a safe 10KB default cap.
+func TestConfig_MaxBodyLogSizeDefaultCap(t *testing.T) {
+	t.Run("caps zero to 10000 when LogBody is true", func(t *testing.T) {
+		cfg := &Config{
+			Verbose: true,
+			VerboseOptions: &VerboseOptions{
+				LogBody:        true,
+				MaxBodyLogSize: 0,
+			},
+		}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, 10000, cfg.VerboseOptions.MaxBodyLogSize)
+	})
+
+	t.Run("preserves explicit non-zero value", func(t *testing.T) {
+		cfg := &Config{
+			Verbose: true,
+			VerboseOptions: &VerboseOptions{
+				LogBody:        true,
+				MaxBodyLogSize: 5000,
+			},
+		}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, 5000, cfg.VerboseOptions.MaxBodyLogSize)
+	})
+
+	t.Run("does not cap when LogBody is false", func(t *testing.T) {
+		cfg := &Config{
+			Verbose: true,
+			VerboseOptions: &VerboseOptions{
+				LogBody:        false,
+				MaxBodyLogSize: 0,
+			},
+		}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, 0, cfg.VerboseOptions.MaxBodyLogSize)
+	})
+}
+
+// TestLoggingTransport_UncompressedBodyStillLogged verifies that plain-text
+// (non-encoded) responses are still fully logged through both paths, ensuring
+// the gzip guard doesn't accidentally suppress normal body logging.
+func TestLoggingTransport_UncompressedBodyStillLogged(t *testing.T) {
+	const bodyText = `{"status":"ok"}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(bodyText))
+	}))
+	defer server.Close()
+
+	var loggedDetails string
+	mockLogger := new(MockLogger)
+	mockLogger.On("Info", mock.Anything, mock.MatchedBy(func(keyvals []interface{}) bool {
+		for i := 0; i+1 < len(keyvals); i += 2 {
+			if keyvals[i] == "details" {
+				loggedDetails = fmt.Sprintf("%v", keyvals[i+1])
+			}
+		}
+		return true
+	})).Return()
+
+	transport := &loggingTransport{
+		Transport:  &http.Transport{DisableCompression: true},
+		Logger:     mockLogger,
+		LogHeaders: true,
+		LogBody:    true,
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	require.NoError(t, err)
+	resp, err := (&http.Client{Transport: transport}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.True(t, strings.Contains(loggedDetails, bodyText),
+		"uncompressed response body must appear in log output")
+	assert.NotContains(t, loggedDetails, "[body omitted:",
+		"omission notice must not appear for uncompressed responses")
 }

@@ -680,29 +680,39 @@ func (t *loggingTransport) logResponse(id, url string, resp *http.Response, dura
 		var bodyBytes []byte
 
 		if t.LogBody && resp.Body != nil {
-			// Read body for logging
-			bodyBytes, err = io.ReadAll(resp.Body)
-			if err != nil {
-				t.Logger.Info("Received response (body read failed)",
-					"id", id,
-					"response", basicInfo,
-					"url", url,
-					"duration_ms", duration.Milliseconds(),
-					"error", err,
-				)
-				return
-			}
+			// Do not log body bytes for compressed/encoded responses - the raw bytes
+			// are binary and produce garbled output that floods structured log systems.
+			// Log headers only and note the encoding.
+			if enc := resp.Header.Get("Content-Encoding"); enc != "" && enc != "identity" {
+				respDump, err = httputil.DumpResponse(resp, false)
+				if err == nil {
+					respDump = append(respDump, []byte(fmt.Sprintf("\r\n[body omitted: Content-Encoding=%s, Content-Length=%d]", enc, resp.ContentLength))...)
+				}
+			} else {
+				// Read body for logging
+				bodyBytes, err = io.ReadAll(resp.Body)
+				if err != nil {
+					t.Logger.Info("Received response (body read failed)",
+						"id", id,
+						"response", basicInfo,
+						"url", url,
+						"duration_ms", duration.Milliseconds(),
+						"error", err,
+					)
+					return
+				}
 
-			// Restore the body for the caller
-			resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+				// Restore the body for the caller
+				resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-			// Create the response dump manually
-			respDump = append([]byte(fmt.Sprintf("HTTP %s\r\n", resp.Status)), []byte{}...)
-			for k, v := range resp.Header {
-				respDump = append(respDump, []byte(fmt.Sprintf("%s: %s\r\n", k, v[0]))...)
+				// Create the response dump manually
+				respDump = append([]byte(fmt.Sprintf("HTTP %s\r\n", resp.Status)), []byte{}...)
+				for k, v := range resp.Header {
+					respDump = append(respDump, []byte(fmt.Sprintf("%s: %s\r\n", k, v[0]))...)
+				}
+				respDump = append(respDump, []byte("\r\n")...)
+				respDump = append(respDump, bodyBytes...)
 			}
-			respDump = append(respDump, []byte("\r\n")...)
-			respDump = append(respDump, bodyBytes...)
 
 		} else {
 			// If we don't need to log the body or there is no body,
@@ -937,33 +947,49 @@ func (t *loggingTransport) handleFileLogging(requestID string, req *http.Request
 	// Get response dump
 	var respDump []byte
 	if t.LogBody && resp.Body != nil {
-		// We need to read the body for logging and then restore it
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			t.Logger.Error("Failed to read response body for transaction logging",
-				"id", requestID,
-				"error", err,
-			)
-			return
-		}
+		// Do not log body bytes for compressed/encoded responses.
+		enc := resp.Header.Get("Content-Encoding")
+		if enc != "" && enc != "identity" {
+			var dumpErr error
+			respDump, dumpErr = httputil.DumpResponse(resp, false)
+			if dumpErr != nil {
+				t.Logger.Error("Failed to dump response for transaction logging",
+					"id", requestID,
+					"error", dumpErr,
+				)
+				return
+			}
+			respDump = append(respDump, []byte(fmt.Sprintf("\r\n[body omitted: Content-Encoding=%s, Content-Length=%d]", enc, resp.ContentLength))...)
+		} else {
+			// We need to read the body for logging and then restore it
+			bodyBytes, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				t.Logger.Error("Failed to read response body for transaction logging",
+					"id", requestID,
+					"error", readErr,
+				)
+				return
+			}
 
-		// Restore the body for the caller
-		resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			// Restore the body for the caller
+			resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-		// Create the response dump manually
-		respDump = append([]byte(fmt.Sprintf("HTTP %s\r\n", resp.Status)), []byte{}...)
-		for k, v := range resp.Header {
-			respDump = append(respDump, []byte(fmt.Sprintf("%s: %s\r\n", k, v[0]))...)
+			// Create the response dump manually
+			respDump = append([]byte(fmt.Sprintf("HTTP %s\r\n", resp.Status)), []byte{}...)
+			for k, v := range resp.Header {
+				respDump = append(respDump, []byte(fmt.Sprintf("%s: %s\r\n", k, v[0]))...)
+			}
+			respDump = append(respDump, []byte("\r\n")...)
+			respDump = append(respDump, bodyBytes...)
 		}
-		respDump = append(respDump, []byte("\r\n")...)
-		respDump = append(respDump, bodyBytes...)
 	} else {
 		// If we don't need the body or there is no body
-		respDump, err = httputil.DumpResponse(resp, false)
-		if err != nil {
+		var dumpErr error
+		respDump, dumpErr = httputil.DumpResponse(resp, false)
+		if dumpErr != nil {
 			t.Logger.Error("Failed to dump response for transaction logging",
 				"id", requestID,
-				"error", err,
+				"error", dumpErr,
 			)
 			return
 		}

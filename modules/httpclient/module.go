@@ -660,10 +660,13 @@ func (t *loggingTransport) logRequest(id string, req *http.Request) {
 
 // logResponse logs detailed information about the response.
 func (t *loggingTransport) logResponse(id, url string, resp *http.Response, duration time.Duration) {
+	// Sanitize URL for logging to prevent log injection via control characters.
+	safeURL := strings.ReplaceAll(strings.ReplaceAll(url, "\n", ""), "\r", "")
+
 	if resp == nil {
 		t.Logger.Warn("Nil response received",
 			"id", id,
-			"url", url,
+			"url", safeURL,
 			"duration_ms", duration.Milliseconds(),
 		)
 		return
@@ -695,7 +698,7 @@ func (t *loggingTransport) logResponse(id, url string, resp *http.Response, dura
 					t.Logger.Info("Received response (body read failed)",
 						"id", id,
 						"response", basicInfo,
-						"url", url,
+						"url", safeURL,
 						"duration_ms", duration.Milliseconds(),
 						"error", err,
 					)

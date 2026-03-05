@@ -108,7 +108,7 @@ func (c *HTTPServerConfig) Validate() error {
 		c.ShutdownTimeout = 30 * time.Second
 	}
 
-	if c.MaxHeaderBytes == 0 {
+	if c.MaxHeaderBytes <= 0 {
 		c.MaxHeaderBytes = 32 * 1024 // 32KB
 	}
 

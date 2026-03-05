@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -603,7 +604,9 @@ func generateTestCertificate(certFile, keyFile string) error {
 // Regression test for: malicious clients sending large header payloads ("book of data")
 // to probe for buffer-overflow or resource-exhaustion vulnerabilities.
 func TestMaxHeaderBytes_OversizedHeaderRejected(t *testing.T) {
-	const smallLimit = 512 // deliberately tiny so the test header reliably exceeds it
+	// Go adds 4096 bytes of internal overhead to MaxHeaderBytes before enforcing the
+	// limit, so the total request (line + headers) must exceed limit+4096 to trigger 431.
+	const smallLimit = 1024
 
 	t.Run("config default is 32KB", func(t *testing.T) {
 		cfg := &HTTPServerConfig{}
@@ -617,6 +620,12 @@ func TestMaxHeaderBytes_OversizedHeaderRejected(t *testing.T) {
 		assert.Equal(t, smallLimit, cfg.MaxHeaderBytes)
 	})
 
+	t.Run("negative value gets default", func(t *testing.T) {
+		cfg := &HTTPServerConfig{MaxHeaderBytes: -1}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, 32*1024, cfg.MaxHeaderBytes, "negative MaxHeaderBytes should be replaced with 32KB default")
+	})
+
 	t.Run("oversized header rejected with 431", func(t *testing.T) {
 		// Use httptest.NewUnstartedServer so we can set MaxHeaderBytes before starting.
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -627,21 +636,27 @@ func TestMaxHeaderBytes_OversizedHeaderRejected(t *testing.T) {
 		srv.Start()
 		defer srv.Close()
 
-		// Build a request with a header value large enough to exceed the limit.
-		bigValue := string(make([]byte, smallLimit+100))
+		// Build a request with a header value large enough to exceed limit+4096 overhead.
+		bigValue := strings.Repeat("a", smallLimit+4096+100)
 		req, err := http.NewRequestWithContext(context.Background(), "GET", srv.URL+"/", nil)
 		require.NoError(t, err)
 		req.Header.Set("X-Oversized", bigValue)
 
 		client := &http.Client{Timeout: 3 * time.Second}
 		resp, err := client.Do(req)
-		if err == nil {
+		if err != nil {
+			// A connection-reset or EOF is acceptable — Go may close the
+			// connection before writing a response when headers are very large.
+			var netErr *net.OpError
+			isNetErr := errors.As(err, &netErr)
+			isEOF := errors.Is(err, io.EOF)
+			assert.True(t, isNetErr || isEOF,
+				"expected network error or EOF, got: %v", err)
+		} else {
 			defer resp.Body.Close()
 			// Go returns 431 Request Header Fields Too Large when MaxHeaderBytes is exceeded.
 			assert.Equal(t, http.StatusRequestHeaderFieldsTooLarge, resp.StatusCode,
 				"oversized headers must be rejected with 431")
 		}
-		// A connection-reset error is also acceptable — Go may close the connection
-		// before writing a response when headers are very large.
 	})
 }

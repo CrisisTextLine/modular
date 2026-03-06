@@ -491,9 +491,9 @@ func TestLoggingTransport_GzipFileLogging(t *testing.T) {
 
 // TestConfig_MaxBodyLogSizeDefaultCap verifies that when VerboseOptions are
 // explicitly provided with LogBody enabled but MaxBodyLogSize left at 0,
-// Validate() applies a safe 10KB default cap.
+// Validate() applies a safe 1KB default cap.
 func TestConfig_MaxBodyLogSizeDefaultCap(t *testing.T) {
-	t.Run("caps zero to 10000 when LogBody is true", func(t *testing.T) {
+	t.Run("caps zero to 1024 when LogBody is true", func(t *testing.T) {
 		cfg := &Config{
 			Verbose: true,
 			VerboseOptions: &VerboseOptions{
@@ -502,7 +502,7 @@ func TestConfig_MaxBodyLogSizeDefaultCap(t *testing.T) {
 			},
 		}
 		require.NoError(t, cfg.Validate())
-		assert.Equal(t, 10000, cfg.VerboseOptions.MaxBodyLogSize)
+		assert.Equal(t, 1024, cfg.VerboseOptions.MaxBodyLogSize)
 	})
 
 	t.Run("preserves explicit non-zero value", func(t *testing.T) {
@@ -571,4 +571,90 @@ func TestLoggingTransport_UncompressedBodyStillLogged(t *testing.T) {
 		"uncompressed response body must appear in log output")
 	assert.NotContains(t, loggedDetails, "[body omitted:",
 		"omission notice must not appear for uncompressed responses")
+}
+
+// TestLoggingTransport_BinaryContentTypeOmitted verifies that responses with
+// binary content types (e.g. image/png, application/octet-stream) have their
+// body omitted from logs even when Content-Encoding is not set.
+func TestLoggingTransport_BinaryContentTypeOmitted(t *testing.T) {
+	binaryPayload := []byte{0x89, 0x50, 0x4e, 0x47} // PNG magic bytes
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(binaryPayload)
+	}))
+	defer server.Close()
+
+	var loggedDetails string
+	mockLogger := new(MockLogger)
+	mockLogger.On("Info", mock.Anything, mock.MatchedBy(func(keyvals []interface{}) bool {
+		for i := 0; i+1 < len(keyvals); i += 2 {
+			if keyvals[i] == "details" {
+				loggedDetails = fmt.Sprintf("%v", keyvals[i+1])
+			}
+		}
+		return true
+	})).Return()
+
+	transport := &loggingTransport{
+		Transport:  &http.Transport{DisableCompression: true},
+		Logger:     mockLogger,
+		LogHeaders: true,
+		LogBody:    true,
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	require.NoError(t, err)
+	resp, err := (&http.Client{Transport: transport}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Contains(t, loggedDetails, "[body omitted: Content-Type=image/png",
+		"binary content type body must be omitted from logs")
+	assert.NotContains(t, loggedDetails, string(binaryPayload),
+		"raw binary bytes must not appear in log output")
+}
+
+// TestShouldOmitResponseBody verifies the helper correctly classifies content types.
+func TestShouldOmitResponseBody(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		encoding    string
+		wantOmit    bool
+	}{
+		{"plain JSON", "application/json", "", false},
+		{"JSON with charset", "application/json; charset=utf-8", "", false},
+		{"text/plain", "text/plain", "", false},
+		{"text/html", "text/html", "", false},
+		{"vendor+json", "application/vnd.api+json", "", false},
+		{"vendor+xml", "application/atom+xml", "", false},
+		{"form urlencoded", "application/x-www-form-urlencoded", "", false},
+		{"image/png", "image/png", "", true},
+		{"application/octet-stream", "application/octet-stream", "", true},
+		{"application/pdf", "application/pdf", "", true},
+		{"application/protobuf", "application/protobuf", "", true},
+		{"gzip encoding", "application/json", "gzip", true},
+		{"br encoding", "text/html", "br", true},
+		{"no content-type", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &http.Response{Header: http.Header{}}
+			if tt.contentType != "" {
+				resp.Header.Set("Content-Type", tt.contentType)
+			}
+			if tt.encoding != "" {
+				resp.Header.Set("Content-Encoding", tt.encoding)
+			}
+			reason := shouldOmitResponseBody(resp)
+			if tt.wantOmit {
+				assert.NotEmpty(t, reason, "expected body to be omitted")
+			} else {
+				assert.Empty(t, reason, "expected body to be logged")
+			}
+		})
+	}
 }

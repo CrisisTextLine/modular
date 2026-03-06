@@ -115,8 +115,8 @@ type VerboseOptions struct {
 	// Bodies larger than this size will be truncated in logs.
 	// Helps prevent log spam from large file uploads or downloads.
 	// When LogBody is enabled and this is left at 0, Validate() applies a
-	// safe default of 10000 (10KB) to prevent unbounded log output.
-	// Default: 10000 (10KB) when LogBody is enabled
+	// safe default of 1024 (1KB) to prevent unbounded log output.
+	// Default: 1024 (1KB) when LogBody is enabled
 	MaxBodyLogSize int `yaml:"max_body_log_size" json:"max_body_log_size" env:"MAX_BODY_LOG_SIZE"`
 
 	// LogToFile enables logging to files instead of just the application logger.
@@ -161,7 +161,7 @@ func (c *Config) Validate() error {
 		c.VerboseOptions = &VerboseOptions{
 			LogHeaders:     true,
 			LogBody:        true,
-			MaxBodyLogSize: 10000, // 10KB
+			MaxBodyLogSize: 1024, // 1KB
 			LogToFile:      false,
 		}
 	}
@@ -170,7 +170,7 @@ func (c *Config) Validate() error {
 	// but MaxBodyLogSize is left at 0 (unlimited). Unlimited body logging can flood
 	// structured log systems with large or binary payloads.
 	if c.Verbose && c.VerboseOptions != nil && c.VerboseOptions.LogBody && c.VerboseOptions.MaxBodyLogSize == 0 {
-		c.VerboseOptions.MaxBodyLogSize = 10000 // 10KB default cap
+		c.VerboseOptions.MaxBodyLogSize = 1024 // 1KB default cap
 	}
 
 	// Validate verbose log file path if logging to file is enabled

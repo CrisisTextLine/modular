@@ -542,6 +542,44 @@ func (m *HTTPClientModule) emitEventSync(ctx context.Context, eventType string, 
 	}
 }
 
+// shouldOmitResponseBody returns a non-empty reason string when the response body
+// should not be logged (compressed encoding or binary content type). Returns ""
+// when the body is safe to log as text.
+func shouldOmitResponseBody(resp *http.Response) string {
+	// Check Content-Encoding — compressed bytes are garbled in logs.
+	if enc := resp.Header.Get("Content-Encoding"); enc != "" && enc != "identity" {
+		return fmt.Sprintf("Content-Encoding=%s, Content-Length=%d", enc, resp.ContentLength)
+	}
+
+	// Check Content-Type — binary types produce unreadable output even without encoding.
+	ct := resp.Header.Get("Content-Type")
+	if ct != "" {
+		// Extract the media type before any parameters (e.g. "text/html; charset=utf-8" → "text/html")
+		mediaType := strings.TrimSpace(strings.SplitN(ct, ";", 2)[0])
+		mediaType = strings.ToLower(mediaType)
+
+		// Allow text-based types that are useful in logs.
+		switch {
+		case strings.HasPrefix(mediaType, "text/"):
+			// text/plain, text/html, text/xml, etc.
+		case mediaType == "application/json",
+			mediaType == "application/xml",
+			mediaType == "application/javascript",
+			mediaType == "application/x-www-form-urlencoded",
+			mediaType == "application/graphql",
+			mediaType == "application/soap+xml":
+			// common text-based API content types
+		case strings.HasSuffix(mediaType, "+json"),
+			strings.HasSuffix(mediaType, "+xml"):
+			// vendor types like application/vnd.api+json
+		default:
+			return fmt.Sprintf("Content-Type=%s, Content-Length=%d", mediaType, resp.ContentLength)
+		}
+	}
+
+	return ""
+}
+
 // loggingTransport provides verbose logging of HTTP requests and responses.
 type loggingTransport struct {
 	Transport      http.RoundTripper
@@ -683,13 +721,12 @@ func (t *loggingTransport) logResponse(id, url string, resp *http.Response, dura
 		var bodyBytes []byte
 
 		if t.LogBody && resp.Body != nil {
-			// Do not log body bytes for compressed/encoded responses - the raw bytes
-			// are binary and produce garbled output that floods structured log systems.
-			// Log headers only and note the encoding.
-			if enc := resp.Header.Get("Content-Encoding"); enc != "" && enc != "identity" {
+			// Skip body logging for compressed or binary responses — raw bytes
+			// produce garbled output that floods structured log systems.
+			if reason := shouldOmitResponseBody(resp); reason != "" {
 				respDump, err = httputil.DumpResponse(resp, false)
 				if err == nil {
-					respDump = append(respDump, []byte(fmt.Sprintf("\r\n[body omitted: Content-Encoding=%s, Content-Length=%d]", enc, resp.ContentLength))...)
+					respDump = append(respDump, []byte(fmt.Sprintf("\r\n[body omitted: %s]", reason))...)
 				}
 			} else {
 				// Read body for logging
@@ -950,9 +987,8 @@ func (t *loggingTransport) handleFileLogging(requestID string, req *http.Request
 	// Get response dump
 	var respDump []byte
 	if t.LogBody && resp.Body != nil {
-		// Do not log body bytes for compressed/encoded responses.
-		enc := resp.Header.Get("Content-Encoding")
-		if enc != "" && enc != "identity" {
+		// Skip body logging for compressed or binary responses.
+		if reason := shouldOmitResponseBody(resp); reason != "" {
 			var dumpErr error
 			respDump, dumpErr = httputil.DumpResponse(resp, false)
 			if dumpErr != nil {
@@ -962,7 +998,7 @@ func (t *loggingTransport) handleFileLogging(requestID string, req *http.Request
 				)
 				return
 			}
-			respDump = append(respDump, []byte(fmt.Sprintf("\r\n[body omitted: Content-Encoding=%s, Content-Length=%d]", enc, resp.ContentLength))...)
+			respDump = append(respDump, []byte(fmt.Sprintf("\r\n[body omitted: %s]", reason))...)
 		} else {
 			// We need to read the body for logging and then restore it
 			bodyBytes, readErr := io.ReadAll(resp.Body)

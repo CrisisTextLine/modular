@@ -387,7 +387,9 @@ func TestPublishEvent_RoutesPreBuiltCloudEvent(t *testing.T) {
 	ctx := context.Background()
 	err = module.Start(ctx)
 	require.NoError(t, err)
-	defer module.Stop(ctx)
+	defer func() {
+		require.NoError(t, module.Stop(ctx))
+	}()
 
 	// Create a pre-built CloudEvent with custom extensions
 	event := cevent.New()
@@ -395,7 +397,8 @@ func TestPublishEvent_RoutesPreBuiltCloudEvent(t *testing.T) {
 	event.SetSource("/test/source")
 	event.SetID("test-id-123")
 	event.SetTime(time.Now())
-	event.SetData("application/json", map[string]string{"key": "value"})
+	err = event.SetData("application/json", map[string]string{"key": "value"})
+	require.NoError(t, err)
 	event.SetExtension("encryption", "aes-256-gcm")
 	event.SetExtension("encryptedfields", `["key"]`)
 
@@ -406,7 +409,9 @@ func TestPublishEvent_RoutesPreBuiltCloudEvent(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	defer subscription.Cancel()
+	defer func() {
+		require.NoError(t, subscription.Cancel())
+	}()
 
 	// Act
 	err = module.PublishEvent(ctx, event)

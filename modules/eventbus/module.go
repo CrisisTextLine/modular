@@ -423,29 +423,16 @@ func (m *EventBusModule) Constructor() modular.ModuleConstructor {
 	}
 }
 
-// PublishEvent publishes a pre-built CloudEvents event to the event bus.
+// PublishCloudEvent publishes a pre-built CloudEvents event to the event bus.
 // Unlike Publish, this method does not wrap the payload in a new CloudEvent —
 // it routes the provided event directly. This allows callers to set custom
 // CloudEvent extensions (e.g., encryption metadata) before publishing.
-func (m *EventBusModule) PublishEvent(ctx context.Context, event Event) error {
-	startTime := time.Now()
-	topic := event.Type()
-	err := m.router.Publish(ctx, event)
-	duration := time.Since(startTime)
-	if err != nil {
-		go m.emitEvent(ctx, EventTypeMessageFailed, map[string]interface{}{
-			"topic":       topic,
-			"error":       err.Error(),
-			"duration_ms": duration.Milliseconds(),
-		})
-		return fmt.Errorf("publishing event to topic %s: %w", topic, err)
-	}
-
-	go m.emitEvent(ctx, EventTypeMessagePublished, map[string]interface{}{
-		"topic":       topic,
-		"duration_ms": duration.Milliseconds(),
-	})
-	return nil
+func (m *EventBusModule) PublishCloudEvent(ctx context.Context, event Event) error {
+	// Clone the event so the module owns an immutable snapshot for delivery.
+	// This prevents the caller from mutating the event (or its Extensions map /
+	// data slice) after PublishCloudEvent returns, which could otherwise cause
+	// data races with async subscribers that process the event concurrently.
+	return m.publishEvent(ctx, event.Clone())
 }
 
 // Publish publishes an event to the event bus.
@@ -470,26 +457,31 @@ func (m *EventBusModule) Publish(ctx context.Context, topic string, payload inte
 	if err := event.SetData("application/json", payload); err != nil {
 		return fmt.Errorf("failed to set event data: %w", err)
 	}
+	return m.publishEvent(ctx, event)
+}
+
+// publishEvent routes a fully-constructed event through the engine router and
+// emits the appropriate telemetry event on success or failure. Both Publish and
+// PublishCloudEvent delegate here so the timing, error-formatting, and emitted
+// fields stay in one place.
+func (m *EventBusModule) publishEvent(ctx context.Context, event Event) error {
+	topic := event.Type()
 	startTime := time.Now()
 	err := m.router.Publish(ctx, event)
 	duration := time.Since(startTime)
 	if err != nil {
-		// Emit message failed event
 		go m.emitEvent(ctx, EventTypeMessageFailed, map[string]interface{}{
 			"topic":       topic,
 			"error":       err.Error(),
 			"duration_ms": duration.Milliseconds(),
 		})
-
 		return fmt.Errorf("publishing event to topic %s: %w", topic, err)
 	}
 
-	// Emit message published event
 	go m.emitEvent(ctx, EventTypeMessagePublished, map[string]interface{}{
 		"topic":       topic,
 		"duration_ms": duration.Milliseconds(),
 	})
-
 	return nil
 }
 

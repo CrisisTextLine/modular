@@ -376,7 +376,7 @@ func TestEventBusServiceProvider(t *testing.T) {
 	assert.Empty(t, required)
 }
 
-func TestPublishEvent_RoutesPreBuiltCloudEvent(t *testing.T) {
+func TestPublishCloudEvent_RoutesPreBuiltCloudEvent(t *testing.T) {
 	// Setup: create and start the module (same pattern as TestEventBusOperations)
 	module := NewModule().(*EventBusModule)
 	app := newMockApp()
@@ -414,7 +414,7 @@ func TestPublishEvent_RoutesPreBuiltCloudEvent(t *testing.T) {
 	}()
 
 	// Act
-	err = module.PublishEvent(ctx, event)
+	err = module.PublishCloudEvent(ctx, event)
 	require.NoError(t, err)
 
 	// Assert
@@ -429,4 +429,26 @@ func TestPublishEvent_RoutesPreBuiltCloudEvent(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Event not received within timeout")
 	}
+}
+
+func TestPublishCloudEvent_ReturnsErrorWhenBusStopped(t *testing.T) {
+	module := NewModule().(*EventBusModule)
+	app := newMockApp()
+	err := module.RegisterConfig(app)
+	require.NoError(t, err)
+	err = module.Init(app)
+	require.NoError(t, err)
+	ctx := context.Background()
+	err = module.Start(ctx)
+	require.NoError(t, err)
+	require.NoError(t, module.Stop(ctx))
+
+	event := cevent.New()
+	event.SetType("test.event")
+	event.SetSource("/test/source")
+	event.SetID("test-id-456")
+
+	err = module.PublishCloudEvent(ctx, event)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "test.event")
 }

@@ -73,6 +73,15 @@ type ReverseProxyModule struct {
 	// Response transformers for composite routes (keyed by route pattern)
 	responseTransformers map[string]ResponseTransformer
 
+	// Pipeline configurations for composite routes (keyed by route pattern)
+	pipelineConfigs map[string]*PipelineConfig
+
+	// Fan-out merger functions for composite routes (keyed by route pattern)
+	fanOutMergers map[string]FanOutMerger
+
+	// Empty response policies for composite routes (keyed by route pattern)
+	emptyResponsePolicies map[string]EmptyResponsePolicy
+
 	// Metrics collection
 	metrics       *MetricsCollector
 	enableMetrics bool
@@ -170,17 +179,20 @@ func NewModule() *ReverseProxyModule {
 	// either in Constructor (if httpclient service is available)
 	// or in Init (with default settings)
 	module := &ReverseProxyModule{
-		httpClient:           nil,
-		backendProxies:       make(map[string]*httputil.ReverseProxy),
-		backendRoutes:        make(map[string]map[string]http.HandlerFunc),
-		compositeRoutes:      make(map[string]http.HandlerFunc),
-		tenants:              make(map[modular.TenantID]*ReverseProxyConfig),
-		tenantBackendProxies: make(map[modular.TenantID]map[string]*httputil.ReverseProxy),
-		preProxyTransforms:   make(map[string]func(*http.Request)),
-		circuitBreakers:      make(map[string]*CircuitBreaker),
-		enableMetrics:        true,
-		loadBalanceCounters:  make(map[string]int),
-		responseTransformers: make(map[string]ResponseTransformer),
+		httpClient:            nil,
+		backendProxies:        make(map[string]*httputil.ReverseProxy),
+		backendRoutes:         make(map[string]map[string]http.HandlerFunc),
+		compositeRoutes:       make(map[string]http.HandlerFunc),
+		tenants:               make(map[modular.TenantID]*ReverseProxyConfig),
+		tenantBackendProxies:  make(map[modular.TenantID]map[string]*httputil.ReverseProxy),
+		preProxyTransforms:    make(map[string]func(*http.Request)),
+		circuitBreakers:       make(map[string]*CircuitBreaker),
+		enableMetrics:         true,
+		loadBalanceCounters:   make(map[string]int),
+		responseTransformers:  make(map[string]ResponseTransformer),
+		pipelineConfigs:       make(map[string]*PipelineConfig),
+		fanOutMergers:         make(map[string]FanOutMerger),
+		emptyResponsePolicies: make(map[string]EmptyResponsePolicy),
 	}
 
 	return module
@@ -1563,6 +1575,27 @@ func (m *ReverseProxyModule) SetResponseHeaderModifier(modifier func(*http.Respo
 // The transformer receives responses from all backends and can create a custom merged response.
 func (m *ReverseProxyModule) SetResponseTransformer(pattern string, transformer ResponseTransformer) {
 	m.responseTransformers[pattern] = transformer
+}
+
+// SetPipelineConfig sets the pipeline configuration for a specific composite route pattern.
+// This is required for routes using the "pipeline" strategy.
+// The PipelineConfig includes a RequestBuilder (to construct each subsequent request
+// from previous responses) and an optional ResponseMerger (to assemble the final response).
+func (m *ReverseProxyModule) SetPipelineConfig(pattern string, config PipelineConfig) {
+	m.pipelineConfigs[pattern] = &config
+}
+
+// SetFanOutMerger sets the fan-out merger function for a specific composite route pattern.
+// This is required for routes using the "fan-out-merge" strategy.
+// The merger receives all parallel backend response bodies and produces a unified response.
+func (m *ReverseProxyModule) SetFanOutMerger(pattern string, merger FanOutMerger) {
+	m.fanOutMergers[pattern] = merger
+}
+
+// SetEmptyResponsePolicy sets the empty response policy for a specific composite route pattern.
+// This controls how empty backend responses are handled in pipeline and fan-out-merge strategies.
+func (m *ReverseProxyModule) SetEmptyResponsePolicy(pattern string, policy EmptyResponsePolicy) {
+	m.emptyResponsePolicies[pattern] = policy
 }
 
 // createReverseProxyForBackend creates a reverse proxy for a specific backend with per-backend configuration.

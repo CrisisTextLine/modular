@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/CrisisTextLine/modular/modules/cache.svg)](https://pkg.go.dev/github.com/CrisisTextLine/modular/modules/cache)
 
-The Cache Module provides caching functionality for Modular applications. It offers different cache backend options including in-memory and Redis (placeholder implementation).
+The Cache Module provides caching functionality for Modular applications. It offers different cache backend options including in-memory and Redis.
 
 ## Features
 
@@ -137,8 +137,9 @@ if err != nil {
 ## Implementation Notes
 
 - The in-memory cache uses Go's built-in concurrency primitives for thread safety
-- Redis implementation is provided as a placeholder and would require a Redis client implementation
+- Redis implementation uses the official `github.com/redis/go-redis/v9` client
 - The cache automatically cleans up expired items at configurable intervals
+- Both memory and Redis engines support all cache operations (get, set, delete, bulk operations)
 
 ## Testing
 
